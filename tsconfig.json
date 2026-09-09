@@ -5,6 +5,7 @@
     { "path": "./packages/agent-webmcp" },
     { "path": "./packages/agent-mcp" },
     { "path": "./packages/agent-a2a" },
+    { "path": "./packages/agent-native" },
     { "path": "./examples/todo" }
   ]
 }

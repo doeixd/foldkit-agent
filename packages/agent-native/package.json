@@ -1,0 +1,46 @@
+{
+  "name": "@foldkit/agent-native",
+  "version": "0.0.0",
+  "description": "Prototype: compiles a Foldkit agent contract into Agent Native actions.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Patrick Glenn <doeixd@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doeixd/foldkit-agent.git",
+    "directory": "packages/agent-native"
+  },
+  "homepage": "https://github.com/doeixd/foldkit-agent/tree/main/packages/agent-native#readme",
+  "bugs": {
+    "url": "https://github.com/doeixd/foldkit-agent/issues"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -b"
+  },
+  "peerDependencies": {
+    "@foldkit/agent": "workspace:^",
+    "effect": "^4.0.0-rc.112",
+    "foldkit": "^0.158.2"
+  },
+  "devDependencies": {
+    "@foldkit/agent": "workspace:*",
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.7.2"
+  },
+  "private": true
+}
