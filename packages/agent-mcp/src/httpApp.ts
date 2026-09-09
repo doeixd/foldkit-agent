@@ -24,13 +24,21 @@ const toStream = (sse: SseStream): Stream.Stream<Uint8Array> =>
         yield* Queue.offer(queue, frame(event))
       }
 
-      const unsubscribe = sse.subscribe(event => {
-        Queue.offerUnsafe(queue, frame(event))
-      })
+      const unsubscribe = sse.subscribe(
+        event => {
+          Queue.offerUnsafe(queue, frame(event))
+        },
+        // Ending the queue completes the HTTP response, which is what a
+        // terminated session owes an open GET. Safe to call twice, and after
+        // the client has already gone: both are a no-op on a done queue.
+        () => {
+          Queue.endUnsafe(queue)
+        },
+      )
 
+      // The queue outlives this effect: the stream stays open until the session
+      // ends it or the client disconnects, and the finalizer runs either way.
       yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
-      // Held open until the client disconnects, which closes the scope.
-      yield* Effect.never
     }),
   )
 

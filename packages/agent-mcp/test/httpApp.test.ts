@@ -290,6 +290,38 @@ describe('the SSE stream, over the wire', () => {
   })
 })
 
+describe('a terminated session', () => {
+  it('completes the open SSE response instead of leaving it hanging', async () => {
+    const handler = makeWebHandler()
+    const session = (await send(handler, initialize)).headers.get('mcp-session-id')!
+
+    const response = await handler(
+      new Request(url, {
+        method: 'GET',
+        headers: { authorization: 'Bearer alice', 'mcp-session-id': session },
+      }),
+    )
+
+    const reader = response.body!.getReader()
+    const pending = reader.read()
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    await handler(
+      new Request(url, {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer alice', 'mcp-session-id': session },
+      }),
+    )
+
+    const closed = await Promise.race([
+      pending.then(result => result.done),
+      new Promise(resolve => setTimeout(() => resolve('hung'), 500)),
+    ])
+
+    expect(closed).toBe(true)
+  })
+})
+
 describe('a disconnected stream', () => {
   it('is released, so the next event reaches a live one', async () => {
     const handler = makeWebHandler()
