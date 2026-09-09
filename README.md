@@ -1114,6 +1114,160 @@ Foldkit AgentRuntime
 
 The existing DevTools MCP demonstrates a related topology during development, but production agent access should not simply expose DevTools.
 
+# Optional Agent Native adapter: best of both worlds
+
+`@foldkit/agent` should remain independent of Agent Native, but it can optionally use Agent Native as a **runtime/protocol interpreter** for infrastructure that Agent Native already implements well.
+
+The dependency direction matters:
+
+```text
+              Foldkit application
+                     │
+             Model + Message
+                     │
+              @foldkit/agent
+                     │
+              Agent.Definition
+                     │
+        ┌────────────┼──────────────┐
+        ▼            ▼              ▼
+     WebMCP     Agent Native      other
+     adapter       adapter        adapters
+                     │
+             mature remote-agent
+              infrastructure
+```
+
+Foldkit remains the source of truth. Agent Native does **not** become a second application model.
+
+A proposed optional package could be:
+
+```text
+@foldkit/agent-agent-native
+```
+
+with an API such as:
+
+```ts
+import { AgentNative } from "@foldkit/agent-agent-native"
+
+AgentNative.bind({
+  application: Application,
+})
+```
+
+The adapter would compile exposed Foldkit Messages into generated Agent Native Actions:
+
+```text
+Agent.expose(Message.RequestedDeleteTodo)
+        ↓
+generated Agent Native Action
+        ↓
+Agent Native protocol/runtime infrastructure
+        ↓
+Foldkit AgentRuntime.dispatch("delete_todo", input)
+        ↓
+Message.RequestedDeleteTodo(input)
+        ↓
+update
+```
+
+Conceptually, the generated Action is only an adapter artifact:
+
+```ts
+defineAction({
+  schema: /* derived from the Foldkit Message Schema */,
+
+  run: input =>
+    foldkitAgentRuntime.messages.dispatch(
+      "delete_todo",
+      input,
+      invocation,
+    ),
+})
+```
+
+Application behavior still lives in `update` and Commands, not in `run`.
+
+## What Foldkit could reuse
+
+Where Agent Native remains modular enough, the adapter could reuse its mature infrastructure for things such as:
+
+- remote MCP;
+- OAuth and authenticated external agents;
+- A2A;
+- CLI exposure;
+- public-agent capability policies;
+- deep links back into the application;
+- MCP Apps / embedded UI;
+- agent runtime and chat infrastructure;
+- jobs and durable work;
+- observability and handoffs.
+
+This is particularly attractive for remote/headless access, where Foldkit otherwise has to build transport, identity, authentication, and Runtime/session routing itself.
+
+## What should stay Foldkit-native
+
+The core application contract should not depend on Agent Native:
+
+```text
+Model
+Message
+update
+Command
+Agent.context
+Agent.expose
+Agent.define
+AgentRuntime
+```
+
+WebMCP should also remain a direct Foldkit adapter because it maps almost perfectly onto the live browser Runtime:
+
+```text
+Browser agent
+      ↓
+WebMCP
+      ↓
+Foldkit AgentRuntime
+      ↓
+Message
+```
+
+Routing that through Agent Native would add indirection without solving a problem.
+
+## Why not make `@foldkit/agent` just an Agent Native wrapper?
+
+Agent Native is intentionally action-first: an Action is the canonical application capability. Foldkit already has a stronger native abstraction for interactive applications: the state machine itself.
+
+Making Agent Native foundational would risk turning this:
+
+```text
+Model + Message + update
+```
+
+into:
+
+```text
+Model + Message + update
+         plus
+Agent Native Actions + handlers
+```
+
+That recreates the duplicate action layer this proposal is trying to avoid.
+
+The intended relationship is therefore:
+
+> **Foldkit defines the agent capability contract. Agent Native may optionally host or transport that contract.**
+
+This gives Foldkit the benefits of Agent Native's existing ecosystem without giving up the TEA-native property that humans and agents operate the same state machine.
+
+A sensible implementation order would be:
+
+1. keep `@foldkit/agent` tiny and independent;
+2. implement WebMCP directly as the first adapter;
+3. prototype `@foldkit/agent-agent-native` for remote MCP/A2A/auth/CLI infrastructure;
+4. only build native replacements where Agent Native is too tightly coupled to its own application architecture.
+
 # In-app agents
 
 An in-app chat agent can bind directly to the active Runtime:
@@ -1478,3 +1632,7 @@ WebMCP:
 - https://developer.chrome.com/docs/ai/agents
 - https://developer.chrome.com/docs/ai/webmcp/imperative-api
 - https://github.com/webmachinelearning/webmcp
+
+Agent Native:
+
+- https://github.com/BuilderIO/agent-native
