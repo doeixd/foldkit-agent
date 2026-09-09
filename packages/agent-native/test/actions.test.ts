@@ -1,6 +1,6 @@
 import { Agent } from 'foldkit-agent'
 import { AgentNative } from 'foldkit-agent-native'
-import { Duration, Option, Schema } from 'effect'
+import { Duration, Option, Schema, SchemaGetter } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -10,7 +10,22 @@ const Message = defineMessageUnion({
   DeletedTodo: { id: Schema.String },
   FailedDeleteTodo: { id: Schema.String },
   ReceivedTodos: { count: Schema.Number },
+  SetLimit: { value: Schema.Number },
+  Shouted: { text: Schema.String },
 })
+
+/**
+ * Decoding is not idempotent: `"hi"` decodes to `"hi!"`, and decoding that
+ * again gives `"hi!!"`. A double decode is invisible with an identity schema
+ * and merely fails with `NumberFromString`; here it produces a wrong value that
+ * still passes every check.
+ */
+const Exclaimed = Schema.String.pipe(
+  Schema.decodeTo(Schema.String, {
+    decode: SchemaGetter.transform((text: string) => `${text}!`),
+    encode: SchemaGetter.transform((text: string) => text.replace(/!$/, '')),
+  }),
+)
 
 type Message = typeof Message.Type
 
@@ -40,6 +55,18 @@ const definition = TodoAgent.define({
         failure: Message.FailedDeleteTodo,
         timeout: Duration.millis(50),
       },
+    },
+    SetLimit: {
+      name: 'set_limit',
+      description: 'Set the todo limit',
+      input: Schema.Struct({ value: Schema.NumberFromString }),
+      toMessage: ({ value }) => ({ value }),
+    },
+    Shouted: {
+      name: 'shout',
+      description: 'Shout something',
+      input: Schema.Struct({ text: Exclaimed }),
+      toMessage: ({ text }) => ({ text }),
     },
   }),
 })
@@ -73,6 +100,13 @@ const named = (name: string) => {
   return action
 }
 
+/** What the framework hands `run`: the Standard Schema's own parsed output. */
+const validatedInput = async (name: string, input: unknown) => {
+  const result = await named(name).schema['~standard'].validate(input)
+  if (result.issues !== undefined) throw new Error(`Rejected: ${JSON.stringify(result.issues)}`)
+  return result.value
+}
+
 beforeEach(() => {
   model = emptyModel
   dispatched = []
@@ -81,7 +115,7 @@ beforeEach(() => {
 
 describe('compiling a contract into actions', () => {
   it('produces one action per exposed capability', () => {
-    expect(Object.keys(actionsFor())).toEqual(['create_todo', 'delete_todo'])
+    expect(Object.keys(actionsFor())).toEqual(['create_todo', 'delete_todo', 'set_limit', 'shout'])
   })
 
   it('carries the description from the contract', () => {
@@ -219,11 +253,65 @@ describe('run', () => {
   })
 })
 
+describe('a transforming capability', () => {
+  it('validates and dispatches on the encoded side, decoding exactly once', async () => {
+    const validated = await validatedInput('set_limit', { value: '42' })
+
+    // What the framework hands `run` is the encoded value, unchanged.
+    expect(validated).toEqual({ value: '42' })
+
+    const result = await named('set_limit').run(validated)
+
+    expect(result).toMatchObject({ ok: true, tag: 'SetLimit' })
+    expect(dispatched).toEqual([{ _tag: 'SetLimit', value: 42 }])
+  })
+
+  it('does not decode a non-idempotent input twice', async () => {
+    const validated = await validatedInput('shout', { text: 'hi' })
+
+    expect(validated).toEqual({ text: 'hi' })
+
+    const result = await named('shout').run(validated)
+
+    expect(result.ok).toBe(true)
+    // 'hi!!' would be a double decode that no validation could catch.
+    expect(dispatched).toEqual([{ _tag: 'Shouted', text: 'hi!' }])
+  })
+
+  it('advertises the encoded side, which is what a caller sends', () => {
+    const action = named('set_limit')
+    const standard = action.schema['~standard'] as unknown as {
+      jsonSchema: { input: (options: { readonly target: string }) => Record<string, unknown> }
+    }
+
+    const advertised = { type: 'object', properties: { value: { type: 'string' } } }
+    expect(action.tool.parameters).toMatchObject(advertised)
+    // The validator has to accept what the advertisement promises.
+    expect(standard.jsonSchema.input({ target: 'draft-2020-12' })).toMatchObject(advertised)
+    expect(typeof action.schema['~standard'].validate).toBe('function')
+  })
+
+  it('still rejects input the contract rejects', async () => {
+    const action = named('set_limit')
+
+    expect(
+      (await action.schema['~standard'].validate({ value: 42 })).issues?.length,
+    ).toBeGreaterThan(0)
+    expect(await action.run({ value: 42 })).toMatchObject({ ok: false })
+    expect(dispatched).toEqual([])
+  })
+})
+
 describe('the registry', () => {
   it('is keyed by capability name, as registerPackageActions expects', () => {
     const registry = actionsFor()
 
-    expect(Object.keys(registry).sort()).toEqual(['create_todo', 'delete_todo'])
+    expect(Object.keys(registry).sort()).toEqual([
+      'create_todo',
+      'delete_todo',
+      'set_limit',
+      'shout',
+    ])
     for (const entry of Object.values(registry)) {
       expect(typeof entry.run).toBe('function')
       expect(entry.tool.parameters).toBeDefined()

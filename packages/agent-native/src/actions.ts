@@ -116,7 +116,11 @@ export const actions = (options: ActionsOptions): Record<string, ActionEntry> =>
   for (const variant of options.definition.messages.variants) {
     entries[variant.name] = {
       tool: { description: variant.description, parameters: variant.inputJsonSchema },
-      schema: describedSchema(variant.inputSchema),
+      // Validated on the *encoded* side. The framework hands `run` whatever
+      // this schema parsed, and `run` hands that to `dispatchUnknown`, which
+      // decodes. A decoding schema here would decode a transforming input
+      // twice, so the contract would then reject its own validated value.
+      schema: describedSchema(Schema.toEncoded(variant.inputSchema)),
       http: { method: 'POST' },
       requiresAuth: true,
       readOnly: false,
