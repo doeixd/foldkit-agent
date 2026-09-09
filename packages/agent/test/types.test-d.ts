@@ -464,3 +464,31 @@ Agent.expose(Deletion, {
     },
   }),
 })
+
+// The README claims inline callbacks need no annotation, and that Agent.variant
+// is what narrows a completion's `correlate`. Both, asserted.
+Agent.expose(Message, {
+  RequestedRenameTodo: {
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String }),
+    toMessage: input => ({ id: input.id, title: 'x' }),
+    completion: {
+      success: Message.ReceivedTodos,
+      // Inline, `result` is any Message of the union, so this is not an error.
+      correlate: (_request, result) => result._tag === 'ReceivedTodos',
+    },
+  },
+})
+
+Agent.expose(Message, {
+  RequestedRenameTodo: Agent.variant({
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String }),
+    toMessage: input => ({ id: input.id, title: 'x' }),
+    completion: {
+      success: Message.ReceivedTodos,
+      // @ts-expect-error narrowed to ReceivedTodos, which has no `message`.
+      correlate: (_request, result) => result.message === 'x',
+    },
+  }),
+})

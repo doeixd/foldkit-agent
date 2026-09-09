@@ -129,22 +129,31 @@ RequestedDeleteTodo: {
 `input` and `toMessage` must be supplied together; supplying `input` alone is a
 type error and a runtime error.
 
-Written inline, a mapped variant's `toMessage` and `authorize` receive `any`:
-their input comes from the `input` codec beside them, which TypeScript has not
-finished inferring while it types the object. `Agent.variant` infers it first,
-so those callbacks are checked:
+Written inline, `toMessage` and `authorize` are both checked against the
+variant's own input -- the payload for a direct variant, the `input` codec's
+decoded type for a mapped one -- alongside `principal`, `model` and `transport`.
+No annotation is needed.
+
+The one thing `expose` cannot infer inline is `completion`. `success` and
+`failure` are inference sites, so written inline `correlate` receives any
+Message of the union; `Agent.variant` narrows it to the Messages the contract
+actually names:
 
 ```ts
 RequestedDeleteTodo: Agent.variant({
   description: 'Delete a todo',
   input: Schema.Struct({ id: Schema.String }),
   toMessage: ({ id }, { invocation }) => ({ id, requestId: invocation.id }),
+  completion: {
+    success: Message.DeletedTodo,
+    // `result` is DeletedTodo here, not any Message.
+    correlate: (request, result) => request.id === result.id,
+  },
 }),
 ```
 
-`authorize` on a direct variant also receives `any` for `input`, which is the
-price of `principal`, `model` and `transport` being inferable. Annotate the
-parameter where the input matters.
+Reach for it when a completion contract's `correlate` should be checked against
+the Messages it names. Otherwise write the variant inline.
 
 Without an explicit `name`, the tag is normalized: `RequestedDeleteTodo` becomes
 `requested_delete_todo`. Every capital starts a word, with no special case for
