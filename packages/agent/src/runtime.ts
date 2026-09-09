@@ -114,8 +114,15 @@ export interface AgentRuntime<
 > {
   readonly definition: Definition<Model, Context_, Principal, ByName, ByTag>
 
-  /** The projected agent context, or `undefined` when the definition declares none. */
-  readonly context: Effect.Effect<Context_ | undefined>
+  /**
+   * The projected agent context, encoded through its declared schema, or
+   * `undefined` when the definition declares none.
+   *
+   * The value is the schema's *encoded* side, which is what adapters serialize
+   * onto the wire, so it is typed as `unknown` rather than as the decoded
+   * `Context_` the application's `select` returns.
+   */
+  readonly context: Effect.Effect<unknown>
 
   readonly resources: {
     readonly read: (name: string) => Effect.Effect<unknown, ResourceError>
@@ -416,9 +423,11 @@ export const bind = <
   return {
     definition,
 
-    context: Effect.sync(() =>
-      definition.context === undefined ? undefined : definition.context.select(host.model()),
-    ),
+    context: Effect.suspend(() => {
+      const declared = definition.context
+      if (declared === undefined) return Effect.succeed(undefined)
+      return project(declared.schema, declared.select(host.model()), 'context')
+    }),
 
     resources: {
       read: (name: string) =>
@@ -426,7 +435,7 @@ export const bind = <
           const resource = resourcesByName.get(name)
           return resource === undefined
             ? ResourceError.of(name, 'no such resource')
-            : Effect.sync(() => resource.read(host.model()))
+            : project(resource.schema, resource.read(host.model()), `resource "${name}"`)
         }),
     },
 
@@ -445,6 +454,41 @@ export const bind = <
     subscribe: (listener: () => void) => host.subscribe?.(listener) ?? (() => {}),
   }
 }
+
+/**
+ * A projection returned a value its declared schema rejects.
+ *
+ * The contract advertises that schema to agents, so serving a value that
+ * violates it is an application bug, not something the caller did. It is a
+ * defect: `read`'s failure channel stays reserved for what a caller can act on,
+ * and a defect cannot be mistaken for a caller error. The message names the
+ * projection only; the schema issue, which describes application data, is kept
+ * on `cause` for the application's own reporting.
+ */
+class ProjectionError extends Error {
+  override readonly name = 'AgentProjectionError'
+  constructor(projection: string, cause: unknown) {
+    super(`The ${projection} projection does not match its declared schema`, { cause })
+  }
+}
+
+/**
+ * Validates a projection and produces its wire representation.
+ *
+ * Encoding, not decoding: `select`/`read` return the schema's decoded side, and
+ * adapters serialize the encoded side (MCP `resources/read` writes it as JSON).
+ * `encodeUnknown` checks the value against the decoded side first, so this both
+ * enforces the advertised contract and yields what actually leaves the process.
+ * Properties the schema does not declare are dropped rather than served.
+ */
+const project = (
+  schema: Schema.Codec<any, any, never, never>,
+  value: unknown,
+  projection: string,
+): Effect.Effect<unknown> =>
+  Effect.catchCause(Schema.encodeUnknownEffect(schema)(value), cause =>
+    Effect.die(new ProjectionError(projection, cause)),
+  )
 
 /**
  * Names whatever the caller passed, for the "no such capability" message.

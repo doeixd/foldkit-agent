@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from 'effect'
+import { Cause, Effect, Option, Schema } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
 import { type Message, type Model, Message as MessageUnion, Todo, emptyModel } from './todoApp.js'
@@ -86,6 +86,60 @@ const failureOf = <A, E>(effect: Effect.Effect<A, E>): { readonly _tag: string }
   }
   return result.failure as { readonly _tag: string }
 }
+
+/** Runs an Effect and returns the `Error` defect it died with. */
+const defectOf = (effect: Effect.Effect<unknown, unknown>): Error => {
+  const exit = Effect.runSyncExit(effect)
+  if (exit._tag !== 'Failure') {
+    throw new Error(`Expected a defect, got success: ${JSON.stringify(exit)}`)
+  }
+  const defect = Cause.squash(exit.cause)
+  if (!(defect instanceof Error)) {
+    throw new Error(`Expected an Error defect, got: ${String(defect)}`)
+  }
+  return defect
+}
+
+/** A contract whose projections return values their declared schemas reject. */
+const lyingRuntime = Agent.bind({
+  definition: Agent.define({
+    context: Agent.context({
+      schema: Schema.Struct({ userId: Schema.String }),
+      select: (): { userId: string } => ({ userId: 4242 }) as unknown as { userId: string },
+    }),
+    messages: Agent.expose(MessageUnion, {}),
+    resources: [
+      Agent.resource('profile', {
+        description: 'The signed-in profile',
+        schema: Schema.Struct({ userId: Schema.String }),
+        read: (): { userId: string } => ({ userId: 4242 }) as unknown as { userId: string },
+      }),
+    ],
+  }),
+  host: { model: () => ({}), dispatch: () => {} },
+})
+
+/**
+ * A contract whose schemas transform, so the value served can only be the
+ * encoded side that adapters put on the wire.
+ */
+const encodedRuntime = Agent.bind({
+  definition: Agent.define({
+    context: Agent.context({
+      schema: Schema.Struct({ count: Schema.FiniteFromString }),
+      select: () => ({ count: 2, secret: 'do not serve me' }),
+    }),
+    messages: Agent.expose(MessageUnion, {}),
+    resources: [
+      Agent.resource('count', {
+        description: 'A count',
+        schema: Schema.Struct({ count: Schema.FiniteFromString }),
+        read: () => ({ count: 2 }),
+      }),
+    ],
+  }),
+  host: { model: () => ({}), dispatch: () => {} },
+})
 
 describe('AgentRuntime.messages.dispatch', () => {
   it('dispatches a Message into the Runtime', () => {
@@ -205,6 +259,46 @@ describe('AgentRuntime projections', () => {
   it('fails for an unknown resource', () => {
     const failure = failureOf(runtime.resources.read('secrets'))
     expect(failure._tag).toBe('AgentResourceError')
+  })
+
+  it('serves the context and a resource as their encoded wire representation', () => {
+    expect(Effect.runSync(encodedRuntime.context)).toEqual({ count: '2' })
+    expect(Effect.runSync(encodedRuntime.resources.read('count'))).toEqual({ count: '2' })
+  })
+
+  it('drops properties the context schema does not declare', () => {
+    expect(Effect.runSync(encodedRuntime.context)).not.toHaveProperty('secret')
+  })
+
+  it('refuses to serve a context projection that violates its schema', () => {
+    const defect = defectOf(lyingRuntime.context)
+
+    expect(defect.name).toBe('AgentProjectionError')
+    expect(defect.message).toBe('The context projection does not match its declared schema')
+  })
+
+  it('refuses to serve a resource whose read violates its schema', () => {
+    const defect = defectOf(lyingRuntime.resources.read('profile'))
+
+    expect(defect.name).toBe('AgentProjectionError')
+    expect(defect.message).toBe(
+      'The resource "profile" projection does not match its declared schema',
+    )
+  })
+
+  it('reports a violating projection as a defect, not as a caller-facing failure', () => {
+    const exit = Effect.runSyncExit(lyingRuntime.resources.read('profile'))
+
+    expect(exit._tag).toBe('Failure')
+    if (exit._tag !== 'Failure') return
+    expect(Option.isNone(Cause.findErrorOption(exit.cause))).toBe(true)
+  })
+
+  it('does not leak the offending value or the schema issue in the defect message', () => {
+    const defect = defectOf(lyingRuntime.resources.read('profile'))
+
+    expect(defect.message).not.toContain('4242')
+    expect(defect.message).not.toContain('Expected')
   })
 
   it('lists every capability, and only available ones on demand', () => {
