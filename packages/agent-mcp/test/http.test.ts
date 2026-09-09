@@ -75,7 +75,12 @@ const makeServer = (
 
 const post = (body: unknown, headers: Record<string, string | undefined> = {}): HttpRequest => ({
   method: 'POST',
-  headers: { authorization: 'Bearer alice', ...headers },
+  headers: {
+    authorization: 'Bearer alice',
+    'content-type': 'application/json',
+    accept: 'application/json, text/event-stream',
+    ...headers,
+  },
   body,
 })
 
@@ -310,6 +315,83 @@ describe('protocol version', () => {
     const response = await server.handle(post(initialize, { 'mcp-protocol-version': '1999-01-01' }))
 
     expect(response.status).toBe(400)
+  })
+})
+
+describe('media types', () => {
+  const get = (accept: string | undefined, id: string): HttpRequest => ({
+    method: 'GET',
+    headers: { authorization: 'Bearer alice', 'mcp-session-id': id, accept },
+  })
+
+  it.each([
+    ['text/plain', 'neither type'],
+    ['application/json', 'no text/event-stream'],
+    ['text/event-stream', 'no application/json'],
+  ])('refuses a POST that accepts %s (%s)', async accept => {
+    const server = makeServer()
+    const response = await server.handle(post(initialize, { accept }))
+
+    expect(response.status).toBe(406)
+    expect(server.sessions()).toEqual([])
+  })
+
+  it.each([
+    ['application/json, text/event-stream'],
+    ['application/json;q=0.9, text/event-stream;q=0.8'],
+    ['*/*'],
+    [undefined],
+  ])('answers a POST that accepts %s', async accept => {
+    const server = makeServer()
+    expect((await server.handle(post(initialize, { accept }))).status).toBe(200)
+  })
+
+  it.each([['text/plain'], ['application/x-www-form-urlencoded'], [undefined]])(
+    'refuses a POST body typed %s',
+    async contentType => {
+      const server = makeServer()
+      const response = await server.handle(post(initialize, { 'content-type': contentType }))
+
+      expect(response.status).toBe(415)
+      expect(server.sessions()).toEqual([])
+    },
+  )
+
+  it('tolerates parameters on the content type', async () => {
+    const server = makeServer()
+    const response = await server.handle(
+      post(initialize, { 'content-type': 'application/json; charset=utf-8' }),
+    )
+
+    expect(response.status).toBe(200)
+  })
+
+  it('refuses a GET that cannot take an event stream', async () => {
+    const server = makeServer()
+    const id = sessionOf(await server.handle(post(initialize)))
+
+    const response = await server.handle(get('application/json', id))
+
+    expect(response.status).toBe(406)
+    expect(response.stream).toBeUndefined()
+  })
+
+  it.each([['text/event-stream'], ['text/*'], [undefined]])(
+    'opens a GET that accepts %s',
+    async accept => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+
+      const response = await server.handle(get(accept, id))
+
+      expect(response.status).toBe(200)
+      expect(response.stream).toBeDefined()
+    },
+  )
+
+  it('checks the media types before the session, so a bad GET never opens a stream', async () => {
+    const server = makeServer()
+    expect((await server.handle(get('text/plain', 'made-up'))).status).toBe(406)
   })
 })
 

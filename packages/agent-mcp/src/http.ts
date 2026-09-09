@@ -108,6 +108,27 @@ const newSessionId = (): string => {
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
+/** The media type alone, with any parameters (`; charset=utf-8`, `; q=0.9`) dropped. */
+const mediaType = (value: string): string => (value.split(';')[0] ?? '').trim().toLowerCase()
+
+/**
+ * Whether the client said it can take every one of `required`.
+ *
+ * An absent `Accept` is not a refusal: RFC 9110 reads it as "any media type is
+ * acceptable", so only a header that is present and excludes what this endpoint
+ * answers with earns a 406.
+ */
+const accepts = (header: string | undefined, required: ReadonlyArray<string>): boolean => {
+  if (header === undefined) return true
+  const offered = header.split(',').map(mediaType)
+  return required.every(
+    type =>
+      offered.includes(type) ||
+      offered.includes('*/*') ||
+      offered.includes(`${type.split('/')[0]}/*`),
+  )
+}
+
 interface Session {
   readonly id: string
   readonly handler: Handler
@@ -200,6 +221,11 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     }
 
     if (request.method === 'GET') {
+      // GET is only ever answered with a stream.
+      if (!accepts(request.headers['accept'], ['text/event-stream'])) {
+        return json(406, { error: 'Accept must include text/event-stream' })
+      }
+
       const session = lookup(request)
       if (session === undefined) return json(404, { error: 'Unknown session' })
 
@@ -224,6 +250,15 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
 
     if (request.method !== 'POST') {
       return json(405, { error: 'Method not allowed' })
+    }
+
+    // A POST may be answered with either a JSON body or a stream, so the client
+    // has to be able to take both; the body itself is always JSON.
+    if (!accepts(request.headers['accept'], ['application/json', 'text/event-stream'])) {
+      return json(406, { error: 'Accept must include application/json and text/event-stream' })
+    }
+    if (mediaType(request.headers['content-type'] ?? '') !== 'application/json') {
+      return json(415, { error: 'Content-Type must be application/json' })
     }
 
     const message = request.body
