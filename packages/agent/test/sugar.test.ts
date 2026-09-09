@@ -2,7 +2,13 @@ import { Effect, Option, Schema } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
 import { type SnakeCase, defaultName } from '../src/naming.js'
-import { type Message, type Model, Message as MessageUnion, Model as ModelSchema, emptyModel } from './todoApp.js'
+import {
+  type Message,
+  type Model,
+  Message as MessageUnion,
+  Model as ModelSchema,
+  emptyModel,
+} from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model>()
 
@@ -53,7 +59,10 @@ describe('description shorthand', () => {
       definition: TodoAgent.define({
         messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
       }),
-      host: { model: () => emptyModel, dispatch: (message: Message) => void dispatched.push(message) },
+      host: {
+        model: () => emptyModel,
+        dispatch: (message: Message) => void dispatched.push(message),
+      },
     })
 
     Effect.runSync(runtime.messages.dispatch('requested_create_todo', { title: 'x' }))
@@ -68,7 +77,10 @@ describe('optional invocation', () => {
     definition: TodoAgent.define({
       messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
     }),
-    host: { model: () => emptyModel, dispatch: (message: Message) => void dispatched.push(message) },
+    host: {
+      model: () => emptyModel,
+      dispatch: (message: Message) => void dispatched.push(message),
+    },
   })
 
   const dispatch = (invocation?: Partial<Agent.Invocation>) =>
@@ -195,7 +207,10 @@ describe('dispatch by Message reference', () => {
 
   const runtime = TodoAgent.bind({
     definition,
-    host: { model: () => emptyModel, dispatch: (message: Message) => void dispatched.push(message) },
+    host: {
+      model: () => emptyModel,
+      dispatch: (message: Message) => void dispatched.push(message),
+    },
   })
 
   beforeEach(() => {

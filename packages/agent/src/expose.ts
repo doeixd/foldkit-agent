@@ -84,13 +84,16 @@ type ExposedTags<C extends Cases, V> = Extract<keyof V, keyof C & string>
  * `update` as a number; typing the call site with the decoded type would reject
  * the input that actually works.
  */
-type ExternalInputFor<C extends Cases, V, Tag extends keyof C & string> = V[Tag &
-  keyof V] extends { readonly input: Schema.Codec<any, infer Encoded, any, any> }
+type ExternalInputFor<C extends Cases, V, Tag extends keyof C & string> = V[Tag & keyof V] extends {
+  readonly input: Schema.Codec<any, infer Encoded, any, any>
+}
   ? Encoded
   : Schema.Struct.Encoded<C[Tag]>
 
 /** The protocol-facing name of a variant: its override, or the normalized tag. */
-type NameFor<Config, Tag extends string> = Config extends { readonly name: infer Name extends string }
+type NameFor<Config, Tag extends string> = Config extends {
+  readonly name: infer Name extends string
+}
   ? Name
   : SnakeCase<Tag>
 
@@ -113,12 +116,8 @@ export type CapabilitiesByTag<C extends Cases, V> = {
 }
 
 /** The Message a capability constructs. */
-type MessageFor<C extends Cases, Tag extends keyof C & string> = ConstructorFor<
-  C,
-  Tag
-> extends (value: any) => infer Message
-  ? Message
-  : AnyMessage
+type MessageFor<C extends Cases, Tag extends keyof C & string> =
+  ConstructorFor<C, Tag> extends (value: any) => infer Message ? Message : AnyMessage
 
 /** The default name map: any name, unknown input. Adapters work against this. */
 export type AnyCapabilitiesByName = Record<string, unknown>
@@ -262,9 +261,9 @@ export const expose = <
   const union = message as unknown as Record<string, unknown>
 
   const compiled = Object.keys(variants).map((tag): ExposedVariant<Model, Principal> => {
-    const declared = (variants as Record<string, string | VariantConfig<any, any, Model, Principal>>)[
-      tag
-    ]!
+    const declared = (
+      variants as Record<string, string | VariantConfig<any, any, Model, Principal>>
+    )[tag]!
     // A bare string is the description; every other field takes its default.
     const config: VariantConfig<any, any, Model, Principal> =
       typeof declared === 'string' ? { description: declared } : declared

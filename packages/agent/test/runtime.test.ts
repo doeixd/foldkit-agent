@@ -120,7 +120,9 @@ describe('AgentRuntime.messages.dispatch', () => {
   it('allows the same capability once the Model makes it available', () => {
     host.setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
 
-    const result = Effect.runSync(runtime.messages.dispatch('delete_todo', { id: 'a' }, invocation()))
+    const result = Effect.runSync(
+      runtime.messages.dispatch('delete_todo', { id: 'a' }, invocation()),
+    )
     expect(result.tag).toBe('RequestedDeleteTodo')
     expect(host.dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'a' }])
   })
@@ -228,7 +230,10 @@ describe('cancellation', () => {
           RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo', authorize },
         }),
       }),
-      host: { model: () => emptyModel, dispatch: (message: Message) => void dispatched.push(message) },
+      host: {
+        model: () => emptyModel,
+        dispatch: (message: Message) => void dispatched.push(message),
+      },
     })
     return { runtime, dispatched }
   }
@@ -237,11 +242,15 @@ describe('cancellation', () => {
     const { runtime, dispatched } = cancellingAgent(() => Effect.succeed(true))
 
     const failure = failureOf(
-      runtime.messages.dispatch('create_todo', { title: 'x' }, {
-        id: 'i',
-        transport: 'webmcp',
-        signal: AbortSignal.abort(),
-      }),
+      runtime.messages.dispatch(
+        'create_todo',
+        { title: 'x' },
+        {
+          id: 'i',
+          transport: 'webmcp',
+          signal: AbortSignal.abort(),
+        },
+      ),
     )
 
     expect(failure._tag).toBe('AgentCancelledError')
@@ -258,11 +267,15 @@ describe('cancellation', () => {
     const controller = new AbortController()
     const running = Effect.runPromise(
       Effect.result(
-        runtime.messages.dispatch('create_todo', { title: 'x' }, {
-          id: 'i',
-          transport: 'webmcp',
-          signal: controller.signal,
-        }),
+        runtime.messages.dispatch(
+          'create_todo',
+          { title: 'x' },
+          {
+            id: 'i',
+            transport: 'webmcp',
+            signal: controller.signal,
+          },
+        ),
       ),
     )
 
@@ -280,11 +293,15 @@ describe('cancellation', () => {
     const { runtime, dispatched } = cancellingAgent(() => Effect.succeed(true))
 
     await Effect.runPromise(
-      runtime.messages.dispatch('create_todo', { title: 'x' }, {
-        id: 'i',
-        transport: 'webmcp',
-        signal: new AbortController().signal,
-      }),
+      runtime.messages.dispatch(
+        'create_todo',
+        { title: 'x' },
+        {
+          id: 'i',
+          transport: 'webmcp',
+          signal: new AbortController().signal,
+        },
+      ),
     )
 
     expect(dispatched).toEqual([{ _tag: 'RequestedCreateTodo', title: 'x' }])
@@ -319,11 +336,15 @@ describe('an already-cancelled invocation', () => {
     })
 
     const failure = failureOf(
-      runtime.messages.dispatch('create_todo', { title: 'x' }, {
-        id: 'i',
-        transport: 'webmcp',
-        signal: AbortSignal.abort(),
-      }),
+      runtime.messages.dispatch(
+        'create_todo',
+        { title: 'x' },
+        {
+          id: 'i',
+          transport: 'webmcp',
+          signal: AbortSignal.abort(),
+        },
+      ),
     )
 
     expect(failure._tag).toBe('AgentCancelledError')

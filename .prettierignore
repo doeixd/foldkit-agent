@@ -1,0 +1,8 @@
+dist/
+.tsbuild/
+node_modules/
+pnpm-lock.yaml
+
+# Markdown is authored by hand. Prettier pads table columns and reformats code
+# inside fenced blocks, which rewrites the documents' illustrative snippets.
+*.md

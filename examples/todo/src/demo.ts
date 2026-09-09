@@ -63,13 +63,20 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
     agent.messages.dispatch(Message.RequestedCreateTodo, { title: 'Ship the adapter' }),
   )
   say(`dispatched ${created.tag} as "${created.name}" over ${created.invocation.transport}`)
-  say(`todos: ${store.model().todos.map(todo => todo.title).join(', ')}`)
+  say(
+    `todos: ${store
+      .model()
+      .todos.map(todo => todo.title)
+      .join(', ')}`,
+  )
 
   // 4. Availability follows the Model.
   say('')
   say('# availability follows the Model')
   const names = async () =>
-    (await Effect.runPromise(agent.messages.available)).map(capability => capability.name).join(', ')
+    (await Effect.runPromise(agent.messages.available))
+      .map(capability => capability.name)
+      .join(', ')
   say(`no selection: ${await names()}`)
   await Effect.runPromise(agent.messages.dispatch(Message.SelectedTodo, { id: 'todo-1' }))
   say(`selected todo-1: ${await names()}`)
@@ -98,7 +105,14 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
 
   const result = await deleteTodo.execute({ id: 'todo-1' }, {})
   say(`tool result: ${result.content[0]?.text}`)
-  say(`todos now: ${store.model().todos.map(todo => todo.title).join(', ') || '(none)'}`)
+  say(
+    `todos now: ${
+      store
+        .model()
+        .todos.map(todo => todo.title)
+        .join(', ') || '(none)'
+    }`,
+  )
 
   // 7. Deleting the selected todo clears the selection, so the tool goes away.
   await registration.refresh()

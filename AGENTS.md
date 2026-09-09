@@ -133,13 +133,23 @@ by someone else. Check for them by name.
 
 **Tooling**
 
-- **There is no formatter config.** Running `prettier` rewrites the whole file
-  to its defaults. Match the surrounding style by hand.
+- **Format with `pnpm format`, never bare `prettier`.** The config matches the
+  style already in the tree; without it prettier rewrites files to its own
+  defaults. Markdown is deliberately ignored, because prettier pads table
+  columns and reformats code inside fenced blocks, rewriting the documents'
+  illustrative snippets.
+- **`@ts-expect-error` is anchored to the next line.** Reformatting wrapped a
+  long call and left two directives pointing at a line that no longer errors, so
+  the assertions silently stopped asserting. Put the directive immediately above
+  the offending expression, not above a call that contains it, and re-run
+  `pnpm typecheck` after formatting.
 - **Bulk edits replace every occurrence.** A scripted insert landed in two
   functions and broke an unrelated one. Re-read the diff, not just the check.
 
 ## Repository
 
-- Workspace: pnpm, `packages/*`.
-- Build: `tsdown`. Tests: `vitest`. Types: `tsc -b`.
+- Workspace: pnpm, `packages/*` and `examples/*`.
+- Build: `tsdown`. Tests: `vitest`. Types: `tsc -b`. Format: `prettier`.
+- CI runs `format:check`, `typecheck`, `test`, and `demo` on push and PR. Run
+  the same four locally before committing.
 - `PLAN.md` is git-ignored and tracks in-progress work.

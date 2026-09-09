@@ -18,7 +18,10 @@ Agent.expose(Message, {
 // `input` without `toMessage` is rejected.
 Agent.expose(Message, {
   // @ts-expect-error toMessage is required whenever input is provided.
-  RequestedDeleteTodo: { description: 'Delete a todo', input: Schema.Struct({ id: Schema.String }) },
+  RequestedDeleteTodo: {
+    description: 'Delete a todo',
+    input: Schema.Struct({ id: Schema.String }),
+  },
 })
 
 // `toMessage` must produce the internal Message payload.
@@ -191,8 +194,15 @@ const guarded = Guarded.define({
     RequestedCreateTodo: { description: 'Create', authorize: ({ principal }) => principal.allowed },
   }),
 })
-// @ts-expect-error the principal provider returns the wrong shape.
-Guarded.bind({ definition: guarded, host: { model: () => ({ ok: true }), principal: () => ({ wrong: true }), dispatch: () => {} } })
+Guarded.bind({
+  definition: guarded,
+  host: {
+    model: () => ({ ok: true }),
+    // @ts-expect-error the principal provider returns the wrong shape.
+    principal: () => ({ wrong: true }),
+    dispatch: () => {},
+  },
+})
 // @ts-expect-error the principal provider is missing entirely.
 Guarded.bind({ definition: guarded, host: { model: () => ({ ok: true }), dispatch: () => {} } })
 Guarded.bind({

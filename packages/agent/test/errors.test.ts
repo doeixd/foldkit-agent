@@ -76,12 +76,14 @@ describe('agent failures', () => {
 
   it('can be caught by tag', () => {
     const recovered = Effect.runSync(
-      runtime().messages.dispatchUnknown('nope', {}).pipe(
-        Effect.catchTag('AgentUnknownCapabilityError', error =>
-          Effect.succeed(`handled ${error.capability}`),
+      runtime()
+        .messages.dispatchUnknown('nope', {})
+        .pipe(
+          Effect.catchTag('AgentUnknownCapabilityError', error =>
+            Effect.succeed(`handled ${error.capability}`),
+          ),
+          Effect.orElseSucceed(() => 'wrong branch'),
         ),
-        Effect.orElseSucceed(() => 'wrong branch'),
-      ),
     )
 
     expect(recovered).toBe('handled nope')
@@ -90,7 +92,9 @@ describe('agent failures', () => {
 
 describe('tracing', () => {
   /** Collects the spans an effect opens, as documented on Tracer.SpanOptions. */
-  const spansOf = async <A, E>(effect: Effect.Effect<A, E>): Promise<ReadonlyArray<Tracer.NativeSpan>> => {
+  const spansOf = async <A, E>(
+    effect: Effect.Effect<A, E>,
+  ): Promise<ReadonlyArray<Tracer.NativeSpan>> => {
     const spans: Array<Tracer.NativeSpan> = []
     const tracer = Tracer.make({
       span(options) {
@@ -100,9 +104,7 @@ describe('tracing', () => {
       },
     })
 
-    await Effect.runPromise(
-      Effect.provideService(Effect.ignore(effect), Tracer.Tracer, tracer),
-    )
+    await Effect.runPromise(Effect.provideService(Effect.ignore(effect), Tracer.Tracer, tracer))
     return spans
   }
 

@@ -404,9 +404,7 @@ describe('AgentWebMcp end to end', () => {
     expect(tool.inputSchema).toMatchObject({ required: ['title'] })
 
     await tool.execute({ title: 'Write docs' }, {})
-    expect(dispatched).toEqual([
-      { _tag: 'RequestedCreateTodo', title: 'Write docs (fixed-id)' },
-    ])
+    expect(dispatched).toEqual([{ _tag: 'RequestedCreateTodo', title: 'Write docs (fixed-id)' }])
   })
 
   it('rejects a field the registered schema does not advertise', async () => {

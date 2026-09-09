@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      # tsdown needs Promise.withResolvers, so Node 22 is the floor. The version
+      # is pinned in pnpm-workspace.yaml for local runs.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm format:check
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      # Also proves the example runs against the packages' published entry
+      # points, which is how it imports them.
+      - run: pnpm demo

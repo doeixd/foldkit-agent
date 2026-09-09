@@ -18,12 +18,15 @@
     "test": "vitest run",
     "demo": "pnpm build && pnpm --filter @foldkit/agent-example-todo demo",
     "test:watch": "vitest",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc -b",
+    "format": "prettier --write \"**/*.{ts,json,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,json,yaml}\""
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
+    "prettier": "^3.9.6",
     "tsdown": "^0.23.0",
     "tsx": "^4.23.13",
     "typescript": "^5.7.2",
