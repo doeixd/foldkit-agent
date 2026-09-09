@@ -52,9 +52,11 @@ validator.
 
 - **Never run against the framework.** Everything here is verified against a
   stub.
-- **`register` is the wrong shape.** Actions are discovered from files —
-  `actions/<name>.ts` with a default export — so production is code generation,
-  not an imperative loop. `actions()` is still the right half.
+- **`register` is close, but not the real extension point.** Beside file-based
+  discovery, `@agent-native/core/server` exports `registerPackageActions`, which
+  is how a published package contributes actions: they merge into the same
+  registry every surface reads, and app-local actions win a name collision. That
+  is what this should build on, so there is no generated file to go stale.
 - Agent Native assumes Postgres, Nitro and React. None of that is exercised.
 - No HTTP method configuration, no `useActionQuery`, no UI, no deep links.
 - The private package flag is deliberate: this should not be published until it
