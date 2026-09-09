@@ -1,0 +1,8 @@
+# Git stores LF; without this, core.autocrlf=true writes CRLF into the working
+# tree on Windows and `pnpm format:check` fails locally while CI passes.
+* text=auto eol=lf
+
+# Never touched by line-ending normalisation.
+*.png binary
+*.jpg binary
+*.ico binary
