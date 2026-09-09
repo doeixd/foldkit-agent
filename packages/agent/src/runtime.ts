@@ -234,13 +234,19 @@ export const bind = <
     input: unknown,
     invocation: Invocation,
   ): Effect.Effect<DispatchResult, DispatchError> => {
-    const effect = dispatchResolved(target, input, invocation)
+    if (options.audit === undefined) return dispatchResolved(target, input, invocation)
 
-    if (options.audit === undefined) return effect
+    // The resolver is application code: it may be expensive, and a stateful one
+    // can answer differently the second time. It runs once, during dispatch,
+    // and leaves what it returned here. A dispatch refused before it ran leaves
+    // the cell empty, which the record reports as no principal rather than
+    // inventing one after the fact.
+    const resolved: { principal?: unknown } = {}
+    const effect = dispatchResolved(target, input, invocation, resolved)
 
     return Effect.onExit(effect, exit =>
       Effect.sync(() => {
-        const principal = host.principal?.(invocation)
+        const principal = resolved.principal
 
         if (exit._tag === 'Success') {
           const result = exit.value
@@ -300,6 +306,7 @@ export const bind = <
     target: unknown,
     input: unknown,
     invocation: Invocation,
+    resolved?: { principal?: unknown },
   ) {
     {
       // Read through a function so control flow analysis cannot narrow it away:
@@ -340,6 +347,7 @@ export const bind = <
       )
 
       const principal = host.principal?.(invocation) as Principal
+      if (resolved !== undefined) resolved.principal = principal
 
       if (variant.authorize !== undefined) {
         const decision = variant.authorize({

@@ -167,6 +167,80 @@ describe('what is never recorded', () => {
   })
 })
 
+describe('the principal is resolved once per dispatch', () => {
+  const runtimeResolving = (
+    audit: Agent.AuditSink,
+    resolvePrincipal: () => { readonly user: string; readonly token: string },
+  ) =>
+    TodoAgent.bind({
+      definition,
+      audit,
+      host: {
+        model: () => model,
+        dispatch: (message: Message) => void dispatched.push(message),
+        principal: resolvePrincipal,
+      },
+    })
+
+  it('calls the resolver exactly once', async () => {
+    let calls = 0
+    const audit = Agent.auditLog({ principal: caller => (caller as { user: string }).user })
+    const runtime = runtimeResolving(audit, () => {
+      calls += 1
+      return principal
+    })
+
+    await run(runtime.messages.dispatch('create_todo', { title: 'x' }))
+    expect(calls).toBe(1)
+
+    await run(runtime.messages.dispatch('create_todo', { title: 'y' }))
+    expect(calls).toBe(2)
+  })
+
+  it('records the principal that authorized the dispatch, not a later answer', async () => {
+    const audit = Agent.auditLog({ principal: caller => (caller as { user: string }).user })
+    let calls = 0
+    const runtime = runtimeResolving(audit, () => {
+      calls += 1
+      return calls === 1 ? principal : { user: 'mallory', token: 'other' }
+    })
+
+    await run(runtime.messages.dispatch('create_todo', { title: 'x' }))
+
+    expect(audit.entries()[0]?.principal).toBe('alice')
+  })
+
+  it('does not fail a dispatch whose resolver is one-shot', async () => {
+    const audit = Agent.auditLog({ principal: caller => (caller as { user: string }).user })
+    let calls = 0
+    const runtime = runtimeResolving(audit, () => {
+      calls += 1
+      if (calls > 1) throw new Error('resolver called twice')
+      return principal
+    })
+
+    const result = await run(runtime.messages.dispatch('create_todo', { title: 'x' }))
+
+    expect(result._tag).toBe('Success')
+    expect(dispatched).toHaveLength(1)
+    expect(audit.entries()[0]?.principal).toBe('alice')
+  })
+
+  it('records no principal when the dispatch is refused before one is resolved', async () => {
+    let calls = 0
+    const audit = Agent.auditLog({ principal: caller => caller })
+    const runtime = runtimeResolving(audit, () => {
+      calls += 1
+      return principal
+    })
+
+    await run(runtime.messages.dispatchUnknown('no_such_capability', {}))
+
+    expect(calls).toBe(0)
+    expect(audit.entries()).toMatchObject([{ decision: 'refused', principal: undefined }])
+  })
+})
+
 describe('recorded input is a snapshot', () => {
   const nestedDefinition = TodoAgent.define({
     messages: TodoAgent.expose(MessageUnion, {
