@@ -18,6 +18,14 @@ export {
   type MessageInputOf,
 } from './expose.js'
 export { forModel, type BoundAgent } from './forModel.js'
+export {
+  auditLog,
+  type AuditEntry,
+  type AuditLog,
+  type AuditLogOptions,
+  type AuditRecord,
+  type AuditSink,
+} from './audit.js'
 export type { CompletionOutcome } from './completion.js'
 export { toManifest, toMarkdown, type Manifest } from './docs.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'

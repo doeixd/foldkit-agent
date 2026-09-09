@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Cause, Effect, Option, Schema } from 'effect'
 import type { Definition } from './define.js'
 import {
   AuthorizationError,
@@ -11,6 +11,7 @@ import {
 } from './errors.js'
 import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedVariant } from './expose.js'
 import { resolveInvocation } from './invocation.js'
+import type { AuditSink } from './audit.js'
 import { awaitCompletion } from './completion.js'
 import { messageTag } from './tag.js'
 import type {
@@ -171,6 +172,13 @@ export type BindOptions<
   ByTag = AnyCapabilitiesByTag,
 > = {
   readonly definition: Definition<Model, Context_, Principal, ByName, ByTag>
+  /**
+   * Records every decision, refusals included.
+   *
+   * A sink that throws never fails the dispatch: accountability must not be a
+   * new way for a capability to break.
+   */
+  readonly audit?: AuditSink | undefined
   /** The host must accept every Message the contract can construct. */
   readonly host: AgentHost<Model, Message, Principal> & {
     readonly dispatch: (message: MessagesOf<ByTag>) => void | Promise<void> | Effect.Effect<void>
@@ -202,6 +210,58 @@ export const bind = <
   const resolve = (target: unknown): ExposedVariant<Model, Principal> | undefined =>
     typeof target === 'function' ? byConstructor.get(target) : byName.get(String(target))
 
+  /** Recording is best-effort by design; a broken sink must not break dispatch. */
+  const record = (entry: Parameters<AuditSink['record']>[0]): void => {
+    try {
+      options.audit?.record(entry)
+    } catch {
+      // Deliberately swallowed.
+    }
+  }
+
+  const dispatch = (
+    target: unknown,
+    input: unknown,
+    requested?: Partial<Invocation>,
+  ): Effect.Effect<DispatchResult, DispatchError> => {
+    const invocation = resolveInvocation(requested)
+    const effect = dispatchResolved(target, input, invocation)
+
+    if (options.audit === undefined) return effect
+
+    return Effect.onExit(effect, exit =>
+      Effect.sync(() => {
+        const principal = host.principal?.(invocation)
+
+        if (exit._tag === 'Success') {
+          const result = exit.value
+          record({
+            invocation,
+            capability: result.name,
+            tag: result.tag,
+            principal,
+            decision: 'dispatched',
+            outcome: result.completion?.status ?? 'dispatched',
+            input,
+          })
+          return
+        }
+
+        const error = Option.getOrUndefined(Cause.findErrorOption(exit.cause)) as
+          { _tag?: string; capability?: string; tag?: string } | undefined
+        record({
+          invocation,
+          capability: error?.capability ?? describeTarget(target),
+          tag: error?.tag,
+          principal,
+          decision: 'refused',
+          outcome: error?._tag ?? 'AgentDefect',
+          input,
+        })
+      }),
+    )
+  }
+
   const resourcesByName = new Map(
     definition.resources.map(resource => [resource.name, resource] as const),
   )
@@ -227,10 +287,10 @@ export const bind = <
   const isAvailable = (variant: ExposedVariant<Model, Principal>, model: Model): boolean =>
     variant.available === undefined || variant.available(model)
 
-  const dispatch = Effect.fn('Agent.dispatch')(function* (
+  const dispatchResolved = Effect.fn('Agent.dispatch')(function* (
     target: unknown,
     input: unknown,
-    requested?: Partial<Invocation>,
+    invocation: Invocation,
   ) {
     {
       // Read through a function so control flow analysis cannot narrow it away:
@@ -241,7 +301,6 @@ export const bind = <
       // A resolved capability reports its own protocol name, whichever way it
       // was named; an unresolved one reports what the caller asked for.
       const name = found?.name ?? describeTarget(target)
-      const invocation = resolveInvocation(requested)
       yield* Effect.annotateCurrentSpan('agent.capability', name)
       yield* Effect.annotateCurrentSpan('agent.transport', invocation.transport)
       yield* Effect.annotateCurrentSpan('agent.invocation', invocation.id)

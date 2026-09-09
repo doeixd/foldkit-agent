@@ -111,6 +111,7 @@ principal must be given a `principal` provider of the matching type.
 | `Agent.schema/messages/resources/contextSchema` | Introspection, as plain data. |
 | `Agent.toManifest(definition)` | The contract as `agent.json`, for committing and diffing. |
 | `Agent.toMarkdown(definition)` | The contract as documentation. |
+| `Agent.auditLog(options)` | A bounded record of decisions, refusals included. |
 
 ### Variant configuration
 
@@ -218,6 +219,39 @@ agentRuntime.messages.dispatchUnknown(nameFromTheWire, payloadFromTheWire, invoc
 Input is typed as the **encoded** side of the capability's schema, because that
 is what dispatch decodes. A payload of `Schema.NumberFromString` is sent as a
 string and reaches `update` as a number.
+
+### Audit
+
+Every decision the contract makes can be recorded, refusals included:
+
+```ts
+const audit = Agent.auditLog({
+  capacity: 500,
+  principal: caller => caller.id, // an id, not the whole identity
+})
+
+const agentRuntime = TodoAgent.bind({ definition: AppAgent, host, audit })
+
+audit.entries()
+// [{ at, invocation, transport, capability, tag, principal,
+//    decision: 'refused', outcome: 'AgentAuthorizationError' }]
+```
+
+What it will not keep:
+
+- **The input, unless you ask.** It is caller-supplied and may carry anything.
+  `includeInput: true` turns it on, and `redact: ['token']` replaces named
+  fields.
+- **The principal, without a projection.** No projection, no principal --
+  identities carry secrets.
+- **The Model.** Never, by any setting.
+
+The log is a bounded ring buffer, and a sink that throws never fails a dispatch:
+accountability must not become a new way for a capability to break. Pass any
+`AuditSink` to forward entries somewhere durable instead.
+
+This is not Model replay. Re-dispatching a recorded invocation stays an explicit
+human action.
 
 ### Completion
 
