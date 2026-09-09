@@ -61,6 +61,8 @@ export const code = {
   INVALID_PARAMS: -32602,
   /** A2A: the task id is not one this agent issued. */
   TASK_NOT_FOUND: -32001,
+  /** A2A: the task has already settled, so there is nothing left to cancel. */
+  TASK_NOT_CANCELABLE: -32002,
 } as const
 
 export const success = (id: Id, result: unknown): Success => ({ jsonrpc: '2.0', id, result })
@@ -78,6 +80,14 @@ export const failure = (id: Id | null, errorCode: number, message: string): Fail
  * here can reach, so they are left out rather than declared and never used.
  */
 export type TaskState = 'submitted' | 'working' | 'completed' | 'failed' | 'canceled' | 'rejected'
+
+/** States a task cannot leave. A later settle must not overwrite one. */
+export const terminal: ReadonlySet<TaskState> = new Set<TaskState>([
+  'completed',
+  'failed',
+  'canceled',
+  'rejected',
+])
 
 export interface TaskStatus {
   readonly state: TaskState

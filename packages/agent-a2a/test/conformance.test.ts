@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { Agent } from '@foldkit/agent'
 import { AgentA2a } from '@foldkit/agent-a2a'
 import type { Response } from '@foldkit/agent-a2a'
-import { Option, Schema } from 'effect'
+import { Duration, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -152,6 +152,45 @@ const makeHandler = () =>
         model: () => ({ selectedTodoId: Option.none() }),
         dispatch: () => {},
         principal: () => ({ canDelete: true }),
+        observe: () => () => {},
+      },
+    }),
+    newId: () => `id-${ids++}`,
+    clock: () => new Date('2026-01-01T00:00:00.000Z'),
+  })
+
+/**
+ * A second agent whose one skill waits for a completing Message, so a task can
+ * be observed and canceled while it is genuinely running.
+ */
+const SlowMessage = defineMessageUnion({
+  RequestedSlowTodo: { title: Schema.String },
+  FinishedSlowTodo: { title: Schema.String },
+})
+
+const SlowAgent = Agent.forModel<Model, undefined>()
+
+const slowDefinition = SlowAgent.define({
+  messages: SlowAgent.expose(SlowMessage, {
+    RequestedSlowTodo: {
+      name: 'slow_todo',
+      description: 'A todo that finishes later',
+      completion: {
+        success: SlowMessage.FinishedSlowTodo,
+        timeout: Duration.seconds(30),
+      },
+    },
+  }),
+})
+
+const makeSlowHandler = () =>
+  AgentA2a.handler({
+    agent: SlowAgent.bind({
+      definition: slowDefinition,
+      host: {
+        model: () => ({ selectedTodoId: Option.none() }),
+        dispatch: () => {},
+        principal: () => undefined,
         observe: () => () => {},
       },
     }),
@@ -326,7 +365,24 @@ describe('wire responses', () => {
     expect((resultOf(response) as { id: string }).id).toBe(id)
   })
 
-  it('answers tasks/cancel with a spec-shaped task', async () => {
+  it('answers tasks/cancel on a running task with a spec-shaped task', async () => {
+    const served = makeSlowHandler()
+    const pending = served.handle(sendRequest('slow_todo', { title: 'x' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const response = await served.handle({
+      jsonrpc: '2.0',
+      id: 3,
+      method: methodOf('CancelTaskRequest'),
+      params: { id: 'id-0' },
+    })
+
+    conformsTo(response, 'CancelTaskSuccessResponse')
+    expect((resultOf(response) as { status: { state: string } }).status.state).toBe('canceled')
+    await pending
+  })
+
+  it('uses the spec’s code for a task that can no longer be canceled', async () => {
     const served = makeHandler()
     const sent = resultOf(await served.handle(sendRequest('create_todo', { title: 'x' })))
 
@@ -337,7 +393,10 @@ describe('wire responses', () => {
       params: { id: (sent as { id: string }).id },
     })
 
-    conformsTo(response, 'CancelTaskSuccessResponse')
+    conformsTo(response, 'JSONRPCErrorResponse')
+    expect((response as { error: { code: number } }).error.code).toBe(
+      errorCodeOf('TaskNotCancelableError'),
+    )
   })
 
   it('uses the spec’s code for an unknown task', async () => {

@@ -11,6 +11,7 @@ import {
   code,
   failure,
   success,
+  terminal,
   text,
 } from './types.js'
 
@@ -90,6 +91,18 @@ export const handler = (options: HandlerOptions): Handler => {
     return task
   }
 
+  /**
+   * Records how a task finished, unless it already finished.
+   *
+   * A cancel lands while the dispatch is still unwinding, so the settling write
+   * arrives second and must not undo it. The task that stands is returned, so
+   * the pending `message/send` answers with the same outcome `tasks/get` shows.
+   */
+  const settle = (task: Task): Task => {
+    const current = tasks.get(task.id)
+    return current !== undefined && terminal.has(current.status.state) ? current : remember(task)
+  }
+
   const agentMessage = (body: string, taskId: string, contextId: string): Message => ({
     kind: 'message',
     role: 'agent',
@@ -127,7 +140,21 @@ export const handler = (options: HandlerOptions): Handler => {
     const controller = new AbortController()
     running.set(taskId, controller)
 
+    // Recorded before the work starts: a task a client cannot address while it
+    // runs is a task it cannot get or cancel.
+    remember({
+      kind: 'task',
+      id: taskId,
+      contextId,
+      status: { state: 'working', timestamp: clock().toISOString() },
+      history,
+    })
+
     try {
+      // The signal reaches the run, not just the invocation: the runtime checks
+      // it before dispatch but does not observe it while awaiting completion,
+      // so interrupting the fiber is what actually settles the wait and
+      // releases its listener.
       const outcome = await Effect.runPromise(
         Effect.result(
           agent.messages.dispatchUnknown(asked.skill, asked.input, {
@@ -136,13 +163,14 @@ export const handler = (options: HandlerOptions): Handler => {
             signal: controller.signal,
           }),
         ),
+        { signal: controller.signal },
       )
 
       if (outcome._tag === 'Failure') {
         const error = outcome.failure
         return success(
           id,
-          remember({
+          settle({
             kind: 'task',
             id: taskId,
             contextId,
@@ -162,7 +190,7 @@ export const handler = (options: HandlerOptions): Handler => {
 
       return success(
         id,
-        remember({
+        settle({
           kind: 'task',
           id: taskId,
           contextId,
@@ -183,7 +211,7 @@ export const handler = (options: HandlerOptions): Handler => {
     } catch {
       return success(
         id,
-        remember({
+        settle({
           kind: 'task',
           id: taskId,
           contextId,
@@ -220,29 +248,27 @@ export const handler = (options: HandlerOptions): Handler => {
 
       case 'tasks/cancel': {
         const taskId = params['id']
-        if (typeof taskId !== 'string' || !tasks.has(taskId)) {
-          const inFlight = typeof taskId === 'string' ? running.get(taskId) : undefined
-          if (inFlight === undefined) return failure(id, code.TASK_NOT_FOUND, 'No such task')
+        const task = typeof taskId === 'string' ? tasks.get(taskId) : undefined
+        if (task === undefined) return failure(id, code.TASK_NOT_FOUND, 'No such task')
+
+        if (terminal.has(task.status.state)) {
+          return failure(id, code.TASK_NOT_CANCELABLE, 'Task cannot be canceled')
         }
 
-        running.get(taskId as string)?.abort()
-        const task = tasks.get(taskId as string)
+        // The canceled state is recorded before the abort, so the dispatch it
+        // interrupts cannot settle over it on its way out. Cancelling stops the
+        // waiting, not the Messages already dispatched.
+        const canceled = remember({
+          ...task,
+          status: {
+            state: 'canceled',
+            timestamp: clock().toISOString(),
+            message: agentMessage('Canceled by the client', task.id, task.contextId),
+          },
+        })
+        running.get(task.id)?.abort()
 
-        // A task that already reached a terminal state stays there.
-        if (task !== undefined && task.status.state !== 'working') {
-          return success(id, task)
-        }
-
-        return success(
-          id,
-          remember({
-            kind: 'task',
-            id: taskId as string,
-            contextId: task?.contextId ?? newId(),
-            status: { state: 'canceled', timestamp: clock().toISOString() },
-            history: task?.history ?? [],
-          }),
-        )
+        return success(id, canceled)
       }
 
       // Streaming is declared unsupported on the card, so it is refused here

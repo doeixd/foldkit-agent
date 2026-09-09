@@ -69,6 +69,59 @@ const makeHandler = () => {
   })
 }
 
+/**
+ * A second agent whose one skill waits for a completing Message that never
+ * arrives on its own.
+ *
+ * Its timeout is far longer than the suite's, so a task of it settles only
+ * because something settled it -- a test that merely waited the wait out would
+ * time out instead of passing.
+ */
+const SlowMessage = defineMessageUnion({
+  RequestedSlowTodo: { title: Schema.String },
+  FinishedSlowTodo: { title: Schema.String },
+})
+
+const SlowAgent = Agent.forModel<Model, undefined>()
+
+const slowDefinition = SlowAgent.define({
+  messages: SlowAgent.expose(SlowMessage, {
+    RequestedSlowTodo: {
+      name: 'slow_todo',
+      description: 'A todo that finishes much later',
+      completion: { success: SlowMessage.FinishedSlowTodo, timeout: Duration.seconds(30) },
+    },
+  }),
+})
+
+let slowListeners: Set<(message: typeof SlowMessage.Type) => void>
+
+const makeSlowHandler = () => {
+  slowListeners = new Set()
+  return AgentA2a.handler({
+    agent: SlowAgent.bind({
+      definition: slowDefinition,
+      host: {
+        model: () => model,
+        dispatch: () => {},
+        principal: () => undefined,
+        observe: listener => {
+          slowListeners.add(listener)
+          return () => slowListeners.delete(listener)
+        },
+      },
+    }),
+    newId: () => `id-${ids++}`,
+    clock: () => new Date('2026-01-01T00:00:00.000Z'),
+  })
+}
+
+const emitSlow = (message: typeof SlowMessage.Type) => {
+  for (const listener of [...slowListeners]) listener(message)
+}
+
+const settled = () => new Promise(resolve => setTimeout(resolve, 0))
+
 const request = (method: string, params?: Record<string, unknown>) => ({
   jsonrpc: '2.0' as const,
   id: 1,
@@ -386,13 +439,61 @@ describe('tasks', () => {
     expect(err(await served.handle(request('tasks/get', { id: 'made-up' }))).code).toBe(-32001)
   })
 
-  it('leave a finished task in the state it reached', async () => {
+  it('refuse to cancel a task that already settled', async () => {
     const served = makeHandler()
     const created = task(await served.handle(sendSkill('create_todo', { title: 'x' })))
 
-    const cancelled = task(await served.handle(request('tasks/cancel', { id: created.id })))
+    // The spec has a code for this; answering `completed` to a cancel does not.
+    expect(err(await served.handle(request('tasks/cancel', { id: created.id }))).code).toBe(-32002)
+    expect(task(await served.handle(request('tasks/get', { id: created.id }))).status.state).toBe(
+      'completed',
+    )
+  })
 
-    expect(cancelled.status.state).toBe('completed')
+  it('are addressable while they are still running', async () => {
+    const served = makeSlowHandler()
+    const pending = served.handle(sendSkill('slow_todo', { title: 'x' }))
+    await settled()
+
+    const inFlight = task(await served.handle(request('tasks/get', { id: 'id-0' })))
+
+    expect(inFlight.status.state).toBe('working')
+    expect(inFlight.history).toMatchObject([{ messageId: 'client-1' }])
+
+    emitSlow(SlowMessage.FinishedSlowTodo({ title: 'x' }))
+    expect(task(await pending).status.state).toBe('completed')
+  })
+
+  it('stay canceled once canceled, and a later completion does not undo it', async () => {
+    const served = makeSlowHandler()
+    const pending = served.handle(
+      request('message/send', {
+        message: {
+          kind: 'message',
+          role: 'user',
+          messageId: 'client-1',
+          contextId: 'original',
+          parts: [{ kind: 'data', data: { skill: 'slow_todo', input: { title: 'x' } } }],
+        },
+      }),
+    )
+    await settled()
+
+    const cancelled = task(await served.handle(request('tasks/cancel', { id: 'id-0' })))
+
+    expect(cancelled.status.state).toBe('canceled')
+    // The identity the task was started with, not a freshly invented one.
+    expect(cancelled.contextId).toBe('original')
+    expect(cancelled.history).toMatchObject([{ messageId: 'client-1' }])
+
+    // Resolving at all means the wait was settled rather than waited out.
+    expect(await pending).toMatchObject({ result: { status: { state: 'canceled' } } })
+    expect(slowListeners.size).toBe(0)
+
+    emitSlow(SlowMessage.FinishedSlowTodo({ title: 'x' }))
+    expect(task(await served.handle(request('tasks/get', { id: 'id-0' }))).status.state).toBe(
+      'canceled',
+    )
   })
 
   it('are bounded, dropping the oldest', async () => {
