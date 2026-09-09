@@ -169,7 +169,12 @@ export const register = <Model, Context_, Principal>(
     })
   }
 
-  options.signal?.addEventListener('abort', unregister, { once: true })
+  if (options.signal?.aborted === true) {
+    // An already-aborted signal never fires its listener.
+    unregister()
+  } else {
+    options.signal?.addEventListener('abort', unregister, { once: true })
+  }
 
   return {
     refresh: reconcile,

@@ -232,6 +232,18 @@ describe('AgentWebMcp.register', () => {
     expect(registration.registered()).toEqual([])
   })
 
+  it('registers nothing when the signal is already aborted', async () => {
+    const registration = AgentWebMcp.register({
+      agent: makeRuntime(),
+      modelContext,
+      signal: AbortSignal.abort(),
+    })
+    await registration.refresh()
+
+    expect(registration.registered()).toEqual([])
+    expect(modelContext.live()).toEqual([])
+  })
+
   it('never exposes an unexposed Message', async () => {
     const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
     await registration.refresh()
