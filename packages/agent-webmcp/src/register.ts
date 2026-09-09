@@ -32,6 +32,11 @@ export interface RegisterOptions<Model, Context_, Principal> {
   readonly followModel?: boolean | undefined
   /** Supplies an invocation id. Defaults to `crypto.randomUUID()`. */
   readonly invocationId?: (() => string) | undefined
+  /**
+   * Reports a failure from a reconcile that no caller is awaiting -- the
+   * initial registration, or one triggered by a Model change.
+   */
+  readonly onError?: ((error: unknown) => void) | undefined
 }
 
 const textResult = (text: string, isError = false): ToolResult => ({
@@ -106,19 +111,26 @@ export const register = <Model, Context_, Principal>(
       input: unknown,
       context: { readonly signal?: AbortSignal | undefined },
     ): Promise<ToolResult> => {
-      const result = await Effect.runPromise(
-        Effect.result(
-          agent.messages.dispatch(name, input, {
-            id: nextInvocationId(),
-            transport: 'webmcp',
-            signal: context.signal,
-          }),
-        ),
-      )
+      try {
+        const result = await Effect.runPromise(
+          Effect.result(
+            agent.messages.dispatch(name, input, {
+              id: nextInvocationId(),
+              transport: 'webmcp',
+              signal: context.signal,
+            }),
+          ),
+        )
 
-      return result._tag === 'Failure'
-        ? textResult(describeFailure(result.failure as never), true)
-        : textResult(`Dispatched ${result.success.tag}`)
+        return result._tag === 'Failure'
+          ? textResult(describeFailure(result.failure as never), true)
+          : textResult(`Dispatched ${result.success.tag}`)
+      } catch {
+        // `Effect.result` captures expected failures but not defects, and a
+        // rejected tool promise is not something a calling agent can act on.
+        // Report it as a tool error without leaking the application's internals.
+        return textResult(`Capability "${name}" failed unexpectedly`, true)
+      }
     }
 
     return {
@@ -159,14 +171,21 @@ export const register = <Model, Context_, Principal>(
     unsubscribe()
   }
 
-  // The first reconcile is fire-and-forget; callers who need to await it can
-  // use the returned `refresh`.
-  void reconcile()
+  /**
+   * Reconciles without a caller to await the result. A rejection here would
+   * otherwise become an unhandled rejection, so it is reported through
+   * `onError` and the registration is left as it was.
+   */
+  const reconcileInBackground = (): void => {
+    reconcile().catch(error => {
+      options.onError?.(error)
+    })
+  }
+
+  reconcileInBackground()
 
   if (options.followModel !== false) {
-    unsubscribe = agent.subscribe(() => {
-      void reconcile()
-    })
+    unsubscribe = agent.subscribe(reconcileInBackground)
   }
 
   if (options.signal?.aborted === true) {

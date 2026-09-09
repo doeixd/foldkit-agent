@@ -48,6 +48,7 @@ No schema or handler is repeated in this package.
 | `signal` | — | Unregisters everything when aborted. |
 | `followModel` | `true` | Reconcile registrations as the Model changes. |
 | `invocationId` | `crypto.randomUUID()` | Supplies the invocation id. |
+| `onError` | — | Reports a failure from a reconcile no caller is awaiting. |
 
 ### Returned registration
 
@@ -90,7 +91,12 @@ No such capability: delete_todo
 Capability "delete_todo" is not available right now
 Not authorized to invoke "delete_todo"
 Invalid input for "create_todo"
+Capability "create_todo" failed unexpectedly
 ```
+
+The last covers an unexpected defect, such as the host's `dispatch` throwing.
+`execute` never rejects and never echoes the underlying error back to the
+caller.
 
 ## Why this stays an adapter
 

@@ -9,6 +9,31 @@
   `pnpm build`), and fix what the check surfaces in a follow-up commit rather
   than letting it accumulate.
 
+## Reviewing a commit
+
+When re-reading a commit, check each of these deliberately:
+
+- **Logic and correctness.** Does it do what the message claims? Trace the real
+  control flow, not the intended one.
+- **Edge cases.** Empty, missing, duplicate, already-aborted, out-of-order,
+  called-twice, called-after-dispose.
+- **Synergy with existing features.** Does it compose with what is already here,
+  or does it bolt on a second way to do the same thing?
+- **Types and TypeScript DX.** No accidental `any` (especially from
+  `Parameters<>` on intersections or circular conditionals). Errors should land
+  at the mistake and read clearly. Inference should work at the call site
+  without annotation ceremony.
+- **Comments.** Explain why, not what. Delete any comment that restates the code.
+  Doc comments on public API, none on the obvious.
+- **Tests.** See below -- they must be able to fail.
+- **Security hardening.** Untrusted input crosses a validation boundary before
+  anything else; capability and authorization checks cannot be skipped; failures
+  do not leak internals.
+- **Performance.** Work done once at definition time rather than per call;
+  no accidental O(n) lookups or repeated derivation in a hot path.
+
+Fix what the review finds in a follow-up commit rather than letting it sit.
+
 ## Tests
 
 - **Verify every test can actually fail.** After writing tests, mutate the code

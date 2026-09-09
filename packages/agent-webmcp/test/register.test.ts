@@ -266,6 +266,52 @@ describe('AgentWebMcp.register', () => {
     expect(modelContext.live()).toEqual([])
   })
 
+  it('reports a defect as a tool error instead of rejecting', async () => {
+    const runtime = TodoAgent.bind({
+      definition: AppAgent,
+      host: {
+        model: () => model,
+        dispatch: () => {
+          throw new Error('the Runtime exploded')
+        },
+      },
+    })
+
+    const registration = AgentWebMcp.register({ agent: runtime, modelContext })
+    await registration.refresh()
+
+    const result = await modelContext.find('create_todo').execute({ title: 'x' }, {})
+
+    expect(result.isError).toBe(true)
+    // The failure is reported without leaking the underlying error.
+    expect(result.content[0]?.text).toBe('Capability "create_todo" failed unexpectedly')
+    expect(result.content[0]?.text).not.toMatch(/exploded/)
+  })
+
+  it('reports a background reconcile failure through onError', async () => {
+    const errors: Array<unknown> = []
+    const runtime = TodoAgent.bind({
+      definition: AppAgent,
+      host: {
+        model: () => {
+          throw new Error('Model unavailable')
+        },
+        dispatch: () => {},
+      },
+    })
+
+    AgentWebMcp.register({
+      agent: runtime,
+      modelContext,
+      onError: error => errors.push(error),
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0])).toMatch(/Model unavailable/)
+  })
+
   it('never exposes an unexposed Message', async () => {
     const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
     await registration.refresh()

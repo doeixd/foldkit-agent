@@ -70,8 +70,7 @@ export interface AgentRuntime<Model = unknown, Context_ = unknown, Principal = u
   readonly subscribe: (listener: () => void) => () => void
 }
 
-const isEffect = (value: unknown): value is Effect.Effect<any, any, any> =>
-  typeof value === 'object' && value !== null && Effect.isEffect(value)
+const isEffect = (value: unknown): value is Effect.Effect<any, any, any> => Effect.isEffect(value)
 
 /**
  * Binds an agent contract to a live Foldkit Runtime.
@@ -90,10 +89,21 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
 }): AgentRuntime<Model, Context_, Principal> => {
   const { definition, host } = options
 
+  // The contract is immutable, so every lookup table and descriptor is built
+  // once here rather than on each invocation.
   const byName = new Map<string, ExposedVariant<Model, Principal>>()
   for (const variant of definition.messages.variants) {
     byName.set(variant.name, variant)
   }
+
+  const resourcesByName = new Map(
+    definition.resources.map(resource => [resource.name, resource] as const),
+  )
+
+  const descriptors = describeMessages(definition)
+  const descriptorByName = new Map(
+    descriptors.map(descriptor => [descriptor.name, descriptor] as const),
+  )
 
   const isAvailable = (variant: ExposedVariant<Model, Principal>, model: Model): boolean =>
     variant.available === undefined || variant.available(model)
@@ -124,7 +134,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
         cause => new InvalidInputError({ capability: name, tag: variant.tag, cause }),
       )
 
-      const principal = (host.principal?.(invocation) ?? undefined) as Principal
+      const principal = host.principal?.(invocation) as Principal
 
       if (variant.authorize !== undefined) {
         const decision = variant.authorize({
@@ -165,7 +175,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
     resources: {
       read: (name: string) =>
         Effect.suspend(() => {
-          const resource = definition.resources.find(candidate => candidate.name === name)
+          const resource = resourcesByName.get(name)
           return resource === undefined
             ? Effect.fail(new ResourceError({ resource: name, reason: 'no such resource' }))
             : Effect.sync(() => resource.read(host.model()))
@@ -173,15 +183,12 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
     },
 
     messages: {
-      list: Effect.sync(() => describeMessages(definition)),
+      list: Effect.succeed(descriptors),
       available: Effect.sync(() => {
         const model = host.model()
-        const names = new Set(
-          definition.messages.variants
-            .filter(variant => isAvailable(variant, model))
-            .map(variant => variant.name),
-        )
-        return describeMessages(definition).filter(descriptor => names.has(descriptor.name))
+        return definition.messages.variants
+          .filter(variant => isAvailable(variant, model))
+          .map(variant => descriptorByName.get(variant.name)!)
       }),
       dispatch,
     },
