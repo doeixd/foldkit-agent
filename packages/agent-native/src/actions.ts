@@ -122,11 +122,21 @@ export const actions = (options: ActionsOptions): Record<string, ActionEntry> =>
       readOnly: false,
 
       run: async (args: unknown, context?: ActionRunContext): Promise<ActionResult> => {
+        // Resolution is the application's code, and its throw is deliberate --
+        // a principal mapper refusing an unauthenticated caller, say. Let it
+        // through rather than reporting it as this capability failing.
         const agent = await options.resolveRuntime(context ?? {})
 
-        const outcome = await Effect.runPromise(
-          Effect.result(agent.messages.dispatchUnknown(variant.name, args, { transport })),
-        )
+        let outcome
+        try {
+          outcome = await Effect.runPromise(
+            Effect.result(agent.messages.dispatchUnknown(variant.name, args, { transport })),
+          )
+        } catch {
+          // `Effect.result` captures expected failures but not defects, and a
+          // defect's text may carry application internals.
+          return { ok: false, message: `Capability "${variant.name}" failed unexpectedly` }
+        }
 
         if (outcome._tag === 'Failure') {
           return { ok: false, message: outcome.failure.message }

@@ -263,3 +263,45 @@ describe('the registry', () => {
     expect(seen).toEqual([{ userEmail: 'alice@example.com' }])
   })
 })
+
+describe('when something throws', () => {
+  const registryWith = (dispatch: () => void) =>
+    AgentNative.actions({
+      definition,
+      resolveRuntime: () =>
+        TodoAgent.bind({
+          definition,
+          host: {
+            model: () => model,
+            dispatch,
+            principal: () => principal,
+            observe: () => () => {},
+          },
+        }),
+    })
+
+  it('contains a host defect instead of leaking its text', async () => {
+    const registry = registryWith(() => {
+      throw new Error('connection to db-prod-1 failed: password=hunter2')
+    })
+
+    const result = await registry['create_todo']!.run({ title: 'x' })
+
+    expect(result.ok).toBe(false)
+    expect(result.message).toBe('Capability "create_todo" failed unexpectedly')
+    expect(result.message).not.toMatch(/hunter2|db-prod/)
+  })
+
+  it('lets a refusal from the resolver through, since the application chose it', async () => {
+    const registry = AgentNative.actions({
+      definition,
+      resolveRuntime: () => {
+        throw new Error('Unauthorized')
+      },
+    })
+
+    // The framework surfaces this; reporting it as the capability failing would
+    // hide an authentication problem behind a generic message.
+    await expect(registry['create_todo']!.run({ title: 'x' })).rejects.toThrow('Unauthorized')
+  })
+})
