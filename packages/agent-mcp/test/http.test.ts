@@ -242,6 +242,84 @@ describe('security', () => {
     expect(boundTo).toEqual([{ user: 'alice' }, { user: 'bob' }])
   })
 
+  describe('a session belongs to the principal that created it', () => {
+    const createTodo = {
+      jsonrpc: '2.0' as const,
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'create_todo', arguments: { title: 'x' } },
+    }
+
+    const aliceSession = async (server: ReturnType<typeof makeServer>): Promise<string> =>
+      sessionOf(await server.handle(post(initialize, { authorization: 'Bearer alice' })))
+
+    it('refuses a POST from another principal, and dispatches nothing', async () => {
+      const server = makeServer()
+      const id = await aliceSession(server)
+
+      const response = await server.handle(
+        post(createTodo, { authorization: 'Bearer bob', 'mcp-session-id': id }),
+      )
+
+      // Indistinguishable from an unknown session, so the id's existence does
+      // not leak and Bob's client re-initializes into a session of his own.
+      expect(response.status).toBe(404)
+      expect(dispatched).toEqual([])
+    })
+
+    it('refuses a GET and a DELETE from another principal', async () => {
+      const server = makeServer()
+      const id = await aliceSession(server)
+      const headers = { authorization: 'Bearer bob', 'mcp-session-id': id }
+
+      const stream = await server.handle({
+        method: 'GET',
+        headers: { ...headers, accept: 'text/event-stream' },
+      })
+      const removal = await server.handle({ method: 'DELETE', headers })
+
+      expect(stream.status).toBe(404)
+      expect(stream.stream).toBeUndefined()
+      expect(removal.status).toBe(404)
+      expect(server.sessions()).toEqual([id])
+    })
+
+    it('still answers its owner afterwards', async () => {
+      const server = makeServer()
+      const id = await aliceSession(server)
+      await server.handle(post(createTodo, { authorization: 'Bearer bob', 'mcp-session-id': id }))
+
+      const response = await server.handle(post(createTodo, { 'mcp-session-id': id }))
+
+      expect(response.status).toBe(200)
+      expect(dispatched).toEqual([
+        { principal: 'alice', message: { _tag: 'RequestedCreateTodo', title: 'x' } },
+      ])
+    })
+
+    it('uses principalId when the principal carries per-request fields', async () => {
+      let issued = 0
+      const server = makeServer({
+        authenticate: (request: HttpRequest) => {
+          const token = request.headers['authorization']
+          return token === undefined
+            ? undefined
+            : { user: token.replace('Bearer ', ''), issuedAt: issued++ }
+        },
+        principalId: principal => principal.user,
+      })
+      const id = await aliceSession(server)
+
+      const mine = await server.handle(post(createTodo, { 'mcp-session-id': id }))
+      const theirs = await server.handle(
+        post(createTodo, { authorization: 'Bearer bob', 'mcp-session-id': id }),
+      )
+
+      expect(mine.status).toBe(200)
+      expect(theirs.status).toBe(404)
+    })
+  })
+
   it('ignores a principal a caller tries to supply in params', async () => {
     // Taking a principal from request params would let anyone claim any identity.
     const server = makeServer()
@@ -275,7 +353,7 @@ describe('security', () => {
     )
     const bob = sessionOf(await server.handle(post(initialize, { authorization: 'Bearer bob' })))
 
-    const call = (session: string, title: string) =>
+    const call = (session: string, user: string, title: string) =>
       server.handle(
         post(
           {
@@ -284,12 +362,12 @@ describe('security', () => {
             method: 'tools/call',
             params: { name: 'create_todo', arguments: { title } },
           },
-          { 'mcp-session-id': session },
+          { authorization: `Bearer ${user}`, 'mcp-session-id': session },
         ),
       )
 
-    await call(alice, 'from alice')
-    await call(bob, 'from bob')
+    await call(alice, 'alice', 'from alice')
+    await call(bob, 'bob', 'from bob')
 
     expect(dispatched.map(entry => entry.principal)).toEqual(['alice', 'bob'])
   })

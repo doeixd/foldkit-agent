@@ -60,6 +60,16 @@ export interface HttpHandlerOptions<Model, Context_, Principal, ByName, ByTag> {
   readonly authenticate?: ((request: HttpRequest) => Principal | undefined) | undefined
 
   /**
+   * A stable identity for a principal, used to bind a session to its creator.
+   *
+   * Defaults to a structural key, so an `authenticate` that returns a fresh
+   * object per request still matches its own session. Supply this when a
+   * principal carries fields that differ between requests of the same caller,
+   * such as an issued-at or a token id.
+   */
+  readonly principalId?: ((principal: Principal) => string) | undefined
+
+  /**
    * Origins a browser may call from. A request carrying an `Origin` that is not
    * listed is refused, which is what stops a page on another site from driving
    * a local server through DNS rebinding.
@@ -129,8 +139,20 @@ const accepts = (header: string | undefined, required: ReadonlyArray<string>): b
   )
 }
 
+/** Key ordering is normalised, so two structurally equal principals agree. */
+const structuralId = (value: unknown): string =>
+  JSON.stringify(value, (_key, member: unknown) =>
+    typeof member === 'object' && member !== null && !Array.isArray(member)
+      ? Object.fromEntries(
+          Object.entries(member as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)),
+        )
+      : member,
+  ) ?? 'undefined'
+
 interface Session {
   readonly id: string
+  /** The principal that initialized it. Only that principal may use it. */
+  readonly owner: string
   readonly handler: Handler
   readonly log: Array<SseEvent>
   readonly send: Set<(event: SseEvent) => void>
@@ -189,14 +211,23 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     return SUPPORTED_VERSIONS.has(version)
   }
 
-  const lookup = (request: HttpRequest): Session | undefined => {
+  const ownerOf = (principal: Principal): string =>
+    options.principalId?.(principal) ?? structuralId(principal)
+
+  const lookup = (request: HttpRequest, owner: string): Session | undefined => {
     // Expiry runs even without a session header, so the initialize that creates
     // a new session also clears the idle ones it would otherwise accumulate.
     expire()
     const id = request.headers['mcp-session-id']
     if (id === undefined) return undefined
     const session = sessions.get(id)
-    if (session !== undefined) session.lastSeen = Date.now()
+    if (session === undefined) return undefined
+    // A session id is not a bearer token. Another principal presenting it is
+    // answered exactly as an unknown session -- so the id's existence does not
+    // leak, and the caller re-initializes into a session of its own -- and its
+    // last-seen is left alone, so an outsider cannot keep the session alive.
+    if (session.owner !== owner) return undefined
+    session.lastSeen = Date.now()
     return session
   }
 
@@ -212,9 +243,10 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     if (options.authenticate !== undefined && principal === undefined) {
       return json(401, { error: 'Unauthenticated' })
     }
+    const owner = ownerOf(principal as Principal)
 
     if (request.method === 'DELETE') {
-      const session = lookup(request)
+      const session = lookup(request, owner)
       if (session === undefined) return json(404, { error: 'Unknown session' })
       drop(session)
       return empty(204)
@@ -226,7 +258,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
         return json(406, { error: 'Accept must include text/event-stream' })
       }
 
-      const session = lookup(request)
+      const session = lookup(request, owner)
       if (session === undefined) return json(404, { error: 'Unknown session' })
 
       const lastEventId = request.headers['last-event-id']
@@ -269,7 +301,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
       return json(400, failure(null, code.INVALID_REQUEST, 'Not a JSON-RPC 2.0 message'))
     }
 
-    const existing = lookup(request)
+    const existing = lookup(request, owner)
 
     // A session is created by initialize, and required by everything else.
     if (existing === undefined) {
@@ -283,6 +315,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
       const id = newSessionId()
       const session: Session = {
         id,
+        owner,
         handler: handler({
           agent: options.createAgent({ principal: principal as Principal, sessionId: id }),
           ...(options.serverInfo === undefined ? {} : { serverInfo: options.serverInfo }),
