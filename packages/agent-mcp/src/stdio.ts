@@ -26,9 +26,13 @@ export const stdio = <Model, Context_, Principal, ByName, ByTag>(
 
   const served = handler({ ...options, onNotification: write })
 
+  // A multi-byte character can straddle two chunks; the streaming decoder holds
+  // the incomplete bytes back instead of emitting replacement characters.
+  const decoder = new TextDecoder('utf-8')
+
   let buffer = ''
   input.on('data', (chunk: Buffer | string) => {
-    buffer += String(chunk)
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true })
 
     let newline = buffer.indexOf('\n')
     while (newline !== -1) {
