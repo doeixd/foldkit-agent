@@ -567,6 +567,105 @@ describe('the SSE stream', () => {
 
     expect((await open(server, id)).stream?.backlog).toEqual([])
   })
+
+  describe('ending when the session is terminated', () => {
+    /** Subscribes and reports whether the stream has been closed. */
+    const attach = (response: HttpResponse) => {
+      const state = { ended: 0 }
+      const unsubscribe = response.stream?.subscribe(
+        () => {},
+        () => void state.ended++,
+      )
+      return { state, unsubscribe }
+    }
+
+    it('ends an open stream when the session is deleted', async () => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+      const { state } = attach(await open(server, id))
+
+      expect(state.ended).toBe(0)
+      await server.handle({
+        method: 'DELETE',
+        headers: { authorization: 'Bearer alice', 'mcp-session-id': id },
+      })
+
+      expect(state.ended).toBe(1)
+    })
+
+    it('ends an open stream when the session expires', async () => {
+      const server = makeServer({ sessionTtlMs: 0 })
+      const id = sessionOf(await server.handle(post(initialize)))
+      const { state } = attach(await open(server, id))
+
+      // The clock has millisecond resolution, so wait for it to actually move.
+      const opened = Date.now()
+      while (Date.now() <= opened) await new Promise(resolve => setTimeout(resolve, 1))
+      // Any later request runs expiry, which drops the now-idle session.
+      await server.handle(post(initialize))
+
+      expect(server.sessions()).not.toContain(id)
+      expect(state.ended).toBe(1)
+    })
+
+    it('ends an open stream when the server closes', async () => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+      const { state } = attach(await open(server, id))
+
+      server.close()
+
+      expect(state.ended).toBe(1)
+    })
+
+    it('ends both streams of a session that has two open', async () => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+      const first = attach(await open(server, id))
+      const second = attach(await open(server, id))
+
+      server.close()
+
+      expect([first.state.ended, second.state.ended]).toEqual([1, 1])
+    })
+
+    it('leaves a stream that already ended alone', async () => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+      const { state, unsubscribe } = attach(await open(server, id))
+
+      unsubscribe?.()
+      server.close()
+
+      expect(state.ended).toBe(0)
+    })
+
+    it('ends a stream subscribed after the session was already terminated', async () => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+      // Opened while the session was alive, attached to only after it went away.
+      const response = await open(server, id)
+      server.close()
+
+      expect(attach(response).state.ended).toBe(1)
+    })
+
+    it('ends the remaining streams even when one transport throws', async () => {
+      const server = makeServer()
+      const id = sessionOf(await server.handle(post(initialize)))
+      ;(await open(server, id)).stream?.subscribe(
+        () => {},
+        () => {
+          throw new Error('transport is already gone')
+        },
+      )
+      const { state } = attach(await open(server, id))
+
+      expect(() => server.close()).not.toThrow()
+      expect(state.ended).toBe(1)
+      expect(server.sessions()).toEqual([])
+    })
+  })
 })
 
 describe('other methods', () => {

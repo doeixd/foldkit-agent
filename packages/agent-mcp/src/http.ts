@@ -25,11 +25,23 @@ export interface SseEvent {
   readonly data: string
 }
 
-/** An open SSE stream. Sending `undefined` closes it. */
+/** An open SSE stream. */
 export interface SseStream {
   /** Replayed immediately on subscribe, when the client resumed. */
   readonly backlog: ReadonlyArray<SseEvent>
-  readonly subscribe: (send: (event: SseEvent) => void) => () => void
+  /**
+   * Attaches the transport to the session, returning an unsubscribe.
+   *
+   * `end` is called at most once, when the session is terminated -- by DELETE,
+   * by idle expiry, or by server close -- and the transport must close the
+   * response body when it is. A session already terminated by the time the
+   * transport subscribes calls `end` immediately, so the window between opening
+   * the response and reading it cannot leave a stream open forever. It is
+   * optional only because a transport that has no way to close its response can
+   * do nothing with it; one that omits it keeps the response open until the
+   * client itself disconnects.
+   */
+  readonly subscribe: (send: (event: SseEvent) => void, end?: () => void) => () => void
 }
 
 export interface HttpResponse {
@@ -149,15 +161,23 @@ const structuralId = (value: unknown): string =>
       : member,
   ) ?? 'undefined'
 
+/** One transport attached to a session's stream. */
+interface Subscriber {
+  readonly send: (event: SseEvent) => void
+  readonly end: (() => void) | undefined
+}
+
 interface Session {
   readonly id: string
   /** The principal that initialized it. Only that principal may use it. */
   readonly owner: string
   readonly handler: Handler
   readonly log: Array<SseEvent>
-  readonly send: Set<(event: SseEvent) => void>
+  /** Every open stream. The spec allows more than one at a time. */
+  readonly streams: Set<Subscriber>
   nextEventId: number
   lastSeen: number
+  terminated: boolean
 }
 
 /**
@@ -175,8 +195,20 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
   const sessions = new Map<string, Session>()
 
   const drop = (session: Session): void => {
-    session.handler.close()
+    // Removed from the map first, so nothing can reach it again, and marked so a
+    // transport that subscribes to an already-answered GET is ended at once.
     sessions.delete(session.id)
+    session.terminated = true
+    session.handler.close()
+
+    // Copied, because a transport is free to unsubscribe from inside its own `end`.
+    for (const subscriber of [...session.streams]) {
+      try {
+        subscriber.end?.()
+      } catch {
+        // Terminating a session must not fail because one client's transport did.
+      }
+    }
   }
 
   const expire = (): void => {
@@ -195,8 +227,8 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     session.log.push(event)
     if (session.log.length > replayBuffer) session.log.shift()
 
-    const newest = [...session.send].at(-1)
-    newest?.(event)
+    const newest = [...session.streams].at(-1)
+    newest?.send(event)
   }
 
   const originAllowed = (request: HttpRequest): boolean => {
@@ -272,9 +304,16 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
         headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
         stream: {
           backlog,
-          subscribe: send => {
-            session.send.add(send)
-            return () => session.send.delete(send)
+          subscribe: (send, end) => {
+            // The session can be terminated between answering the GET and the
+            // transport attaching to it, and that stream must close too.
+            if (session.terminated) {
+              end?.()
+              return () => {}
+            }
+            const subscriber: Subscriber = { send, end }
+            session.streams.add(subscriber)
+            return () => session.streams.delete(subscriber)
           },
         },
       }
@@ -322,9 +361,10 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
           onNotification: notification => emit(session, notification),
         }),
         log: [],
-        send: new Set(),
+        streams: new Set(),
         nextEventId: 1,
         lastSeen: Date.now(),
+        terminated: false,
       }
       sessions.set(id, session)
 
