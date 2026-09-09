@@ -129,6 +129,49 @@ describe('completion tracking', () => {
     expect(listeners.size).toBe(0)
   })
 
+  type HostDispatch = () => void | Promise<void> | Effect.Effect<void>
+
+  const failingDispatches: ReadonlyArray<readonly [string, HostDispatch]> = [
+    [
+      'throws synchronously',
+      () => {
+        throw new Error('nope')
+      },
+    ],
+    ['rejects its Promise', () => Promise.reject(new Error('nope'))],
+    ['returns a dying Effect', () => Effect.die('nope')],
+  ]
+
+  it.each(failingDispatches)(
+    'releases its listener when the host dispatch %s',
+    async (_label, dispatch) => {
+      const listeners = new Set<(message: Message) => void>()
+      const runtime = Agent.bind({
+        definition: contractOf({
+          success: MessageUnion.ReceivedTodos,
+          timeout: Duration.seconds(30),
+        }),
+        host: {
+          model: () => emptyModel,
+          dispatch: (_: Message) => dispatch(),
+          observe: (listener: (message: Message) => void) => {
+            listeners.add(listener)
+            return () => listeners.delete(listener)
+          },
+        },
+      })
+
+      const exit = await Effect.runPromiseExit(
+        runtime.messages.dispatch('delete_todo', { id: 'a' }),
+      )
+
+      expect(exit._tag).toBe('Failure')
+      // The timeout is far longer than this test: a listener still here is
+      // leaked, not merely waiting.
+      expect(listeners.size).toBe(0)
+    },
+  )
+
   it('ignores a completing Message that arrives after the timeout', async () => {
     const { host, emit } = makeHost()
     const runtime = Agent.bind({

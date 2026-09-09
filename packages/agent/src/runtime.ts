@@ -385,24 +385,30 @@ export const bind = <
               observe: host.observe,
             })
 
-      try {
+      // Inside `suspend` so a host that throws synchronously fails the Effect
+      // rather than the generator: a JS `try` around `yield*` would not see a
+      // rejected Promise or a defecting Effect, which is how the subscription
+      // used to leak.
+      const send = Effect.suspend(() => {
         // `construct` always produces a member of this application's Message union.
         const sent = host.dispatch(message as Message)
-        if (Effect.isEffect(sent)) {
-          yield* Effect.orDie(sent)
-        } else if (sent instanceof Promise) {
-          yield* Effect.orDie(Effect.promise(() => sent))
-        }
-      } catch (error) {
-        waiter?.release()
-        throw error
-      }
+        if (Effect.isEffect(sent)) return Effect.orDie(sent)
+        if (sent instanceof Promise) return Effect.orDie(Effect.promise(() => sent))
+        return Effect.void
+      })
 
       if (waiter === undefined) {
+        yield* send
         return { name, tag: variant.tag, message, invocation } satisfies DispatchResult
       }
 
-      const completion = yield* waiter.outcome
+      // One finalizer covers both windows: the subscription is taken before
+      // dispatch, so a failing dispatch and a failing, timed-out or interrupted
+      // wait all release it.
+      const completion = yield* Effect.ensuring(
+        Effect.flatMap(send, () => waiter.outcome),
+        Effect.sync(waiter.release),
+      )
       return { name, tag: variant.tag, message, invocation, completion } satisfies DispatchResult
     }
   })

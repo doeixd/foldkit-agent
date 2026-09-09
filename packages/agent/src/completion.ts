@@ -58,7 +58,12 @@ export const compileCompletion = (
 /** Subscribes to the host's Messages and resolves on the first that this invocation owns. */
 export interface CompletionWaiter {
   readonly outcome: Effect.Effect<CompletionOutcome, CompletionTimeoutError>
-  /** Releases the subscription. Safe to call more than once. */
+  /**
+   * Releases the subscription. Safe to call more than once.
+   *
+   * The subscription is taken before dispatch, so the caller owns it from that
+   * moment and must release it from a finalizer that also covers the dispatch.
+   */
   readonly release: () => void
 }
 
@@ -106,7 +111,7 @@ export const awaitCompletion = (options: {
     if (status === undefined || !owns(message)) return
 
     // `settled` is the guard against a second Message; the subscription itself
-    // is released by `ensuring`, on every exit path including timeout.
+    // is released by the caller's finalizer, on every exit path.
     settled = { status, message }
     settle?.(settled)
   })
@@ -124,8 +129,6 @@ export const awaitCompletion = (options: {
       orElse: () =>
         Effect.fail(CompletionTimeoutError.of(capability, invocation.id, completion.timeout)),
     }),
-    // Whether it completed, timed out, or was interrupted, the listener goes.
-    Effect.ensuring(Effect.sync(release)),
   )
 
   return { outcome, release }
