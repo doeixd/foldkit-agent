@@ -72,8 +72,9 @@ understands on one pass wins.
 
 ## Traps already hit here
 
-Every item below is a bug that shipped in this repository and was caught later
-by someone else. Check for them by name.
+Every item below cost real time here. Check for them by name, and **add to this
+list whenever you learn a durable lesson** -- one that would have saved the work
+you just redid. Keep each to a couple of lines, with the concrete failure.
 
 **External APIs**
 
@@ -98,6 +99,14 @@ by someone else. Check for them by name.
   its input type is the schema's *encoded* side. Typing it from the decoded side
   accepted `{value: 42}` and rejected the `{value: '42'}` that works.
 
+**Effect 4, not 3**
+
+foldkit pins `effect@4.0.0-rc.112`. Names that moved, each found the slow way:
+`Effect.either` -> `Effect.result`, `Effect.async` -> `Effect.callback`,
+`Effect.timeoutFail` -> `Effect.timeoutOrElse`, `Duration.decodeUnknown` ->
+`Duration.fromInputUnsafe`, `Schema.OptionFromSelf` -> `Schema.Option`. Check the
+installed `.d.ts` before reaching for a remembered API.
+
 **Types**
 
 - **An `any` inside a generic silently disables checking.** `Parameters<>` of an
@@ -117,6 +126,9 @@ by someone else. Check for them by name.
 - **Ask what else can run while you are suspended.** Moving bookkeeping after
   an await fixed a false-success bug and introduced double registration;
   overlapping passes had to be serialized.
+- **Subscribe before the action that can produce the event.** `update` can emit a
+  completing Message synchronously, so a listener attached after the dispatch
+  misses it and then waits for its timeout.
 - **Guard fire-and-forget work.** An un-awaited reconcile turned a failure into
   an unhandled rejection.
 - **`Effect.result` captures failures, not defects.** At an edge that must not
@@ -124,10 +136,11 @@ by someone else. Check for them by name.
 
 **Tests**
 
-- **A surviving mutation may mean redundancy, not coverage.** Three overlapping
-  disposal guards made each one individually unnecessary, so every mutation
-  survived and the race looked tested when it was not. Keep one guard per
-  distinct window, with a test per window.
+- **A surviving mutation usually means redundancy, not missing coverage.** This
+  has now happened three times: overlapping disposal guards, then a `release()`
+  duplicating an `Effect.ensuring`. The fix is to delete the redundant guard, not
+  to write a test for a window that does not exist. One guard per window, one
+  test per guard.
 - **Verifying by hand is not coverage.** `Agent.pick`'s snapshot bug was
   confirmed in a scratch script and shipped without a test.
 
@@ -143,8 +156,13 @@ by someone else. Check for them by name.
   the assertions silently stopped asserting. Put the directive immediately above
   the offending expression, not above a call that contains it, and re-run
   `pnpm typecheck` after formatting.
-- **Bulk edits replace every occurrence.** A scripted insert landed in two
-  functions and broke an unrelated one. Re-read the diff, not just the check.
+- **Bulk edits replace every occurrence, and a missing anchor fails silently.** A
+  scripted insert landed in two functions and broke an unrelated one; a later one
+  matched nothing and quietly did not apply, so a field was simply absent. Assert
+  the anchor, then re-read the diff -- not just the check.
+- **Run the CI sequence before committing, not after.** `format:check`,
+  `typecheck`, `test`, `demo`. A commit shipped that would have failed
+  `format:check` because only the last three were run.
 
 ## Repository
 
