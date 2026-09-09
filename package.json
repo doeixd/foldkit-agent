@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "vitest run",
-    "demo": "pnpm --filter @foldkit/agent-example-todo demo",
+    "demo": "pnpm build && pnpm --filter @foldkit/agent-example-todo demo",
     "test:watch": "vitest",
     "typecheck": "tsc -b"
   },
