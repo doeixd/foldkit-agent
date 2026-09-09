@@ -7,10 +7,11 @@ import type { Schema } from 'effect'
  * it is deliberately not the whole Model.
  */
 export interface Context<Model, Value> {
-  readonly _tag: 'AgentContext'
   readonly schema: Schema.Codec<Value, any, never, never>
   readonly select: (model: Model) => Value
 }
+
+export type ContextOptions<Model, Value> = Context<Model, Value>
 
 /**
  * Defines what an agent may see.
@@ -26,11 +27,9 @@ export interface Context<Model, Value> {
  * })
  * ```
  */
-export const context = <Model, Value>(options: {
-  readonly schema: Schema.Codec<Value, any, never, never>
-  readonly select: (model: Model) => Value
-}): Context<Model, Value> => ({
-  _tag: 'AgentContext',
+export const context = <Model, Value>(
+  options: ContextOptions<Model, Value>,
+): Context<Model, Value> => ({
   schema: options.schema,
   select: options.select,
 })

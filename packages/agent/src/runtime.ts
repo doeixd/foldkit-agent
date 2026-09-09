@@ -70,8 +70,6 @@ export interface AgentRuntime<Model = unknown, Context_ = unknown, Principal = u
   readonly subscribe: (listener: () => void) => () => void
 }
 
-const isEffect = (value: unknown): value is Effect.Effect<any, any, any> => Effect.isEffect(value)
-
 /**
  * Binds an agent contract to a live Foldkit Runtime.
  *
@@ -83,10 +81,14 @@ const isEffect = (value: unknown): value is Effect.Effect<any, any, any> => Effe
  * })
  * ```
  */
-export const bind = <Model, Context_, Principal, Message extends AnyMessage = AnyMessage>(options: {
+export interface BindOptions<Model, Context_, Principal, Message extends AnyMessage> {
   readonly definition: Definition<Model, Context_, Principal>
   readonly host: AgentHost<Model, Message>
-}): AgentRuntime<Model, Context_, Principal> => {
+}
+
+export const bind = <Model, Context_, Principal, Message extends AnyMessage = AnyMessage>(
+  options: BindOptions<Model, Context_, Principal, Message>,
+): AgentRuntime<Model, Context_, Principal> => {
   const { definition, host } = options
 
   // The contract is immutable, so every lookup table and descriptor is built
@@ -143,7 +145,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
           model,
           transport: invocation.transport,
         })
-        const allowed = isEffect(decision) ? yield* decision : decision
+        const allowed = Effect.isEffect(decision) ? yield* decision : decision
         if (!allowed) {
           return yield* Effect.fail(
             new AuthorizationError({ capability: name, tag: variant.tag }),
@@ -156,7 +158,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
 
       // `construct` always produces a member of this application's Message union.
       const sent = host.dispatch(message as Message)
-      if (isEffect(sent)) {
+      if (Effect.isEffect(sent)) {
         yield* Effect.orDie(sent)
       } else if (sent instanceof Promise) {
         yield* Effect.orDie(Effect.promise(() => sent))

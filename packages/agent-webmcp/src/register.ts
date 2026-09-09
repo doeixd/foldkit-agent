@@ -44,19 +44,23 @@ const textResult = (text: string, isError = false): ToolResult => ({
   isError,
 })
 
-/** Renders a dispatch failure as a tool error the calling agent can act on. */
-const describeFailure = (error: { readonly _tag: string } & Record<string, unknown>): string => {
+/**
+ * Renders a dispatch failure as a tool error the calling agent can act on.
+ *
+ * The switch is exhaustive with no default, so a new failure type in
+ * `@foldkit/agent` surfaces here as a compile error rather than as an opaque
+ * message.
+ */
+const describeFailure = (error: Agent.DispatchError): string => {
   switch (error._tag) {
     case 'AgentUnknownCapabilityError':
-      return `No such capability: ${String(error['capability'])}`
+      return `No such capability: ${error.capability}`
     case 'AgentCapabilityUnavailableError':
-      return `Capability "${String(error['capability'])}" is not available right now`
+      return `Capability "${error.capability}" is not available right now`
     case 'AgentAuthorizationError':
-      return `Not authorized to invoke "${String(error['capability'])}"`
+      return `Not authorized to invoke "${error.capability}"`
     case 'AgentInvalidInputError':
-      return `Invalid input for "${String(error['capability'])}"`
-    default:
-      return `Dispatch failed: ${error._tag}`
+      return `Invalid input for "${error.capability}"`
   }
 }
 
@@ -123,7 +127,7 @@ export const register = <Model, Context_, Principal>(
         )
 
         return result._tag === 'Failure'
-          ? textResult(describeFailure(result.failure as never), true)
+          ? textResult(describeFailure(result.failure), true)
           : textResult(`Dispatched ${result.success.tag}`)
       } catch {
         // `Effect.result` captures expected failures but not defects, and a

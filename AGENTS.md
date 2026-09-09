@@ -34,6 +34,30 @@ When re-reading a commit, check each of these deliberately:
 
 Fix what the review finds in a follow-up commit rather than letting it sit.
 
+## De-slop
+
+Review for AI slop and remove it. Concretely:
+
+- **Dead abstraction.** Wrappers that only forward to something else, indirection
+  files that re-export one module, options nobody passes, type parameters that
+  appear once, `_tag` discriminants never discriminated on.
+- **Unused exports.** If nothing imports it and it is not deliberate public API,
+  delete it. Do not export "just in case".
+- **Comments that restate the code.** `// build the map` above a map build.
+  Keep the ones that explain a non-obvious why -- a workaround, a subtle
+  ordering, a rejected alternative.
+- **Doc-comment padding.** A one-line summary beats three sentences of throat
+  clearing. No `@param` that restates the parameter name.
+- **Ceremonial defensiveness.** Guards for conditions the types already rule
+  out, `?? undefined` on an optional call, try/catch that rethrows unchanged.
+- **Copy-paste tests.** Near-identical cases that differ by one literal belong
+  in a table, and repeated setup belongs in a helper.
+- **Inflated prose.** In docs and commit messages, say the thing once. Cut
+  "powerful", "seamless", "robust", "simply", and restated section headers.
+
+Prefer deleting code to adding it. The smallest version that a reader
+understands on one pass wins.
+
 ## Tests
 
 - **Verify every test can actually fail.** After writing tests, mutate the code

@@ -1,21 +1,6 @@
 import { Schema } from 'effect'
 
 /**
- * A JSON Schema for a payload with no fields.
- *
- * `Schema.toJsonSchemaDocument(Schema.Struct({}))` widens to
- * `{ anyOf: [{ type: 'object' }, { type: 'array' }] }`, which most tool
- * protocols reject. Agent capabilities with empty payloads are common
- * (`ClickedReset`), so normalize them to a closed empty object instead.
- */
-const emptyObjectSchema = (): Record<string, unknown> => ({
-  type: 'object',
-  properties: {},
-  required: [],
-  additionalProperties: false,
-})
-
-/**
  * Derives a JSON Schema document from an Effect Schema.
  *
  * Definitions produced during derivation are inlined under `$defs` so the
@@ -28,8 +13,10 @@ export const toJsonSchema = (
   const document = Schema.toJsonSchemaDocument(schema as never)
   const derived = document.schema as Record<string, unknown>
 
+  // Schema.Struct({}) widens to { anyOf: [{object}, {array}] }, which tool
+  // protocols reject. Payload-free Messages are common, so close it up.
   if (options?.emptyStructIsObject === true && derived['type'] === undefined) {
-    return emptyObjectSchema()
+    return { type: 'object', properties: {}, required: [], additionalProperties: false }
   }
 
   const definitions = document.definitions as Record<string, unknown> | undefined

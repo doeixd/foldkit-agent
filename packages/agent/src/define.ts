@@ -10,7 +10,6 @@ import type { Resource } from './resource.js'
  * an adapter over this value.
  */
 export interface Definition<Model = unknown, Context_ = unknown, Principal = unknown> {
-  readonly _tag: 'AgentDefinition'
   readonly context?: Context<Model, Context_> | undefined
   readonly messages: ExposedMessages<Model, Principal>
   readonly resources: ReadonlyArray<Resource<Model, unknown>>
@@ -25,11 +24,15 @@ export interface Definition<Model = unknown, Context_ = unknown, Principal = unk
  * const AppAgent = Agent.define({ context, messages })
  * ```
  */
-export const define = <Model = unknown, Context_ = unknown, Principal = unknown>(options: {
+export interface DefineOptions<Model, Context_, Principal> {
   readonly context?: Context<Model, Context_> | undefined
   readonly messages: ExposedMessages<Model, Principal>
   readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
-}): Definition<Model, Context_, Principal> => {
+}
+
+export const define = <Model = unknown, Context_ = unknown, Principal = unknown>(
+  options: DefineOptions<Model, Context_, Principal>,
+): Definition<Model, Context_, Principal> => {
   // Copied so a later mutation of the caller's array cannot change the contract.
   const resources = [...(options.resources ?? [])]
 
@@ -42,7 +45,6 @@ export const define = <Model = unknown, Context_ = unknown, Principal = unknown>
   }
 
   return {
-    _tag: 'AgentDefinition',
     context: options.context,
     messages: options.messages,
     resources: resources as ReadonlyArray<Resource<Model, unknown>>,

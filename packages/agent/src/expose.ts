@@ -5,7 +5,9 @@ import { assertValidName, defaultName } from './naming.js'
 import type { AnyMessage, Completion, InvocationContext, VariantConfig } from './types.js'
 
 type Fields = Schema.Struct.Fields
-type Cases = Record<string, Fields>
+
+/** The variant-name-to-fields map a `defineMessageUnion` was declared with. */
+export type Cases = Record<string, Fields>
 
 /**
  * The callable constructor for one variant of a Message union.
@@ -19,10 +21,6 @@ type ConstructorFor<C extends Cases, Tag extends keyof C & string> = MessageUnio
 /** The payload an internal Message constructor accepts, e.g. `{ id: string }`. */
 export type MessageInputOf<C extends Cases, Tag extends keyof C & string> =
   ConstructorFor<C, Tag> extends (value: infer Input) => any ? Input : never
-
-/** The Message value a constructor produces, e.g. `{ _tag: 'RequestedDeleteTodo', id: string }`. */
-export type MessageOf<C extends Cases, Tag extends keyof C & string> =
-  ConstructorFor<C, Tag> extends (value: any) => infer Message ? Message : never
 
 /** A variant that exposes its internal Message payload directly. */
 type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
@@ -60,7 +58,7 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
  * would be circular inside a reverse mapped type and would silently collapse to
  * the direct branch.
  */
-type ValidateVariants<C extends Cases, V, Model, Principal> = {
+export type ValidateVariants<C extends Cases, V, Model, Principal> = {
   readonly [Tag in keyof V]: Tag extends keyof C & string
     ?
         | DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
@@ -86,7 +84,6 @@ export interface ExposedVariant<Model = unknown, Principal = unknown> {
 
 /** An agent-safe projection of a Foldkit Message union. */
 export interface ExposedMessages<Model = unknown, Principal = unknown> {
-  readonly _tag: 'AgentExposedMessages'
   readonly variants: ReadonlyArray<ExposedVariant<Model, Principal>>
 }
 
@@ -181,5 +178,5 @@ export const expose = <
     names.add(variant.name)
   }
 
-  return { _tag: 'AgentExposedMessages', variants: compiled }
+  return { variants: compiled }
 }
