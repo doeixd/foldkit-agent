@@ -535,6 +535,30 @@ describe('a dispatch that was accepted but did not complete', () => {
     expect(audit.entries()).toMatchObject([{ decision: 'dispatched', outcome: 'interrupted' }])
   })
 
+  it('records an aborted wait as dispatched, not as a refusal', async () => {
+    const audit = Agent.auditLog()
+    const host = completingHost({})
+    const runtime = completingRuntime(audit, host, {
+      success: MessageUnion.ReceivedTodos,
+      timeout: Duration.seconds(30),
+    })
+    const controller = new AbortController()
+
+    const pending = run(
+      runtime.messages.dispatch('delete_todo', { id: 'a' }, { signal: controller.signal }),
+    )
+    await Promise.resolve()
+    controller.abort()
+    await pending
+
+    // The abort arrived after the Message did. Filing that as a refusal would
+    // say the Model was never touched.
+    expect(dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'a' }])
+    expect(audit.entries()).toMatchObject([
+      { decision: 'dispatched', outcome: 'AgentCancelledError' },
+    ])
+  })
+
   it('claims neither delivery nor refusal when the host itself raised', async () => {
     const audit = Agent.auditLog()
     const host = completingHost({ throwOnDispatch: true })

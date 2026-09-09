@@ -305,20 +305,126 @@ describe('cancelling while waiting for completion', () => {
     host = makeHost()
   })
 
-  it('stops waiting and says the Message was still dispatched', async () => {
-    const runtime = Agent.bind({
-      definition: contractOf({ success: MessageUnion.ReceivedTodos, timeout: Duration.millis(20) }),
+  /** Long enough that a test finishing quickly cannot be a timeout in disguise. */
+  const NEVER = Duration.seconds(30)
+
+  const waiting = (timeout: Duration.Duration = NEVER) =>
+    Agent.bind({
+      definition: contractOf({ success: MessageUnion.ReceivedTodos, timeout }),
       host: host.host,
     })
 
+  it('stops waiting and says the Message was still dispatched', async () => {
+    const controller = new AbortController()
+    const started = Date.now()
+
+    const pending = run(
+      waiting().messages.dispatch('delete_todo', { id: 'a' }, { signal: controller.signal }),
+    )
+    // Aborted after dispatch: the Message is already in the Runtime, and the
+    // two synchronous pre-dispatch checks are long past.
+    await Promise.resolve()
+    controller.abort()
+    const result = await pending
+
+    expect(Date.now() - started).toBeLessThan(1000)
+    const failure = (result as { failure: { _tag: string; dispatched: boolean; message: string } })
+      .failure
+    expect(failure._tag).toBe('AgentCancelledError')
+    expect(failure.dispatched).toBe(true)
+    expect(failure.message).toMatch(/still reached update/)
+    // Nothing was undone, and the listener is released by the one finalizer.
+    expect(host.dispatched).toHaveLength(1)
+    expect(host.listeners.size).toBe(0)
+  })
+
+  it('keeps the completion that already arrived rather than settling twice', async () => {
+    const controller = new AbortController()
+    host = makeHost((_, emit) => emit(deletedTodos([])))
+
     const result = await run(
-      runtime.messages.dispatch('delete_todo', { id: 'a' }, { transport: 'mcp' }),
+      waiting().messages.dispatch('delete_todo', { id: 'a' }, { signal: controller.signal }),
+    )
+    controller.abort()
+
+    expect(result._tag).toBe('Success')
+    expect(
+      (result as { success: { completion: { status: string } } }).success.completion.status,
+    ).toBe('completed')
+    expect(host.listeners.size).toBe(0)
+  })
+
+  it('settles a wait whose signal aborted while the host was still dispatching', async () => {
+    // The abort lands after the last pre-dispatch check and before the wait
+    // begins, so nothing is listening for it when it fires.
+    const controller = new AbortController()
+    host = makeHost()
+    const slow = {
+      ...host.host,
+      dispatch: async (message: Message) => {
+        host.dispatched.push(message)
+        controller.abort()
+        await new Promise(resolve => setTimeout(resolve, 5))
+      },
+    }
+    const runtime = Agent.bind({
+      definition: contractOf({ success: MessageUnion.ReceivedTodos, timeout: NEVER }),
+      host: slow,
+    })
+
+    const result = await run(
+      runtime.messages.dispatch('delete_todo', { id: 'a' }, { signal: controller.signal }),
+    )
+
+    const failure = (result as { failure: { _tag: string; dispatched: boolean } }).failure
+    expect(failure._tag).toBe('AgentCancelledError')
+    expect(failure.dispatched).toBe(true)
+    expect(host.dispatched).toHaveLength(1)
+    expect(host.listeners.size).toBe(0)
+  })
+
+  it('removes its abort listener when the completion arrives instead', async () => {
+    // Emitted a tick later, so the abort listener is certainly registered by
+    // the time the completion resolves the race.
+    host = makeHost((_, emit) => void setTimeout(() => emit(deletedTodos([])), 5))
+    const signal = new AbortController().signal
+    let listening = 0
+    const { addEventListener, removeEventListener } = AbortSignal.prototype
+    signal.addEventListener = (...args: Parameters<AbortSignal['addEventListener']>) => {
+      listening += 1
+      addEventListener.apply(signal, args)
+    }
+    signal.removeEventListener = (...args: Parameters<AbortSignal['removeEventListener']>) => {
+      listening -= 1
+      removeEventListener.apply(signal, args)
+    }
+
+    await run(waiting().messages.dispatch('delete_todo', { id: 'a' }, { signal }))
+
+    // A long-lived signal would otherwise accumulate one listener per dispatch.
+    expect(listening).toBe(0)
+  })
+
+  it('refuses before dispatch when the signal is already aborted', async () => {
+    const result = await run(
+      waiting().messages.dispatch('delete_todo', { id: 'a' }, { signal: AbortSignal.abort() }),
+    )
+
+    const failure = (result as { failure: { _tag: string; dispatched: boolean } }).failure
+    expect(failure._tag).toBe('AgentCancelledError')
+    expect(failure.dispatched).toBe(false)
+    expect(host.dispatched).toEqual([])
+    expect(host.listeners.size).toBe(0)
+  })
+
+  it('still times out when no signal was supplied', async () => {
+    const result = await run(
+      waiting(Duration.millis(20)).messages.dispatch('delete_todo', { id: 'a' }),
     )
 
     expect((result as { failure: { _tag: string } }).failure._tag).toBe(
       'AgentCompletionTimeoutError',
     )
-    expect(host.dispatched).toHaveLength(1)
     expect(host.listeners.size).toBe(0)
   })
 })

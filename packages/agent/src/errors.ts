@@ -84,15 +84,37 @@ export class AuthorizationError extends Schema.TaggedError<AuthorizationError>()
   }
 }
 
-/** The invocation was cancelled before its Message was dispatched. */
+/**
+ * The caller aborted the invocation.
+ *
+ * Cancellation stops waiting, never the dispatched effect, so `dispatched` is
+ * the fact a caller has to act on: `false` means the Message never reached
+ * `update`, `true` means it did and only the waiting stopped. Nothing is undone
+ * either way.
+ */
 export class CancelledError extends Schema.TaggedError<CancelledError>()('AgentCancelledError', {
   capability: Schema.String,
+  /** Whether the Message had already reached the Runtime when the abort arrived. */
+  dispatched: Schema.Boolean,
   message: Schema.String,
 }) {
+  /** Aborted before anything was constructed or sent. */
   static of(capability: string): CancelledError {
     return new CancelledError({
       capability,
-      message: `Invocation of "${capability}" was cancelled`,
+      dispatched: false,
+      message: `Invocation of "${capability}" was cancelled before it was dispatched`,
+    })
+  }
+
+  /** Aborted while waiting for the completion contract to resolve. */
+  static whileWaiting(capability: string): CancelledError {
+    return new CancelledError({
+      capability,
+      dispatched: true,
+      message:
+        `"${capability}" was dispatched, and waiting for it to complete was ` +
+        `cancelled. The Message still reached update.`,
     })
   }
 }

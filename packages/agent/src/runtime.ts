@@ -424,11 +424,19 @@ export const bind = <
         return { name, tag: variant.tag, message, invocation } satisfies DispatchResult
       }
 
+      // The two synchronous checks above cannot help once the wait has begun,
+      // so the signal has to settle it. Only the waiting stops: the Message is
+      // already in the Runtime, and nothing is rolled back.
+      const wait =
+        invocation.signal === undefined
+          ? waiter.outcome
+          : Effect.raceFirst(waiter.outcome, abortedWhile(invocation.signal, name))
+
       // One finalizer covers both windows: the subscription is taken before
-      // dispatch, so a failing dispatch and a failing, timed-out or interrupted
-      // wait all release it.
+      // dispatch, so a failing dispatch and a failing, timed-out, aborted or
+      // interrupted wait all release it.
       const completion = yield* Effect.ensuring(
-        Effect.flatMap(send, () => waiter.outcome),
+        Effect.flatMap(send, () => wait),
         Effect.sync(waiter.release),
       )
       return { name, tag: variant.tag, message, invocation, completion } satisfies DispatchResult
@@ -504,6 +512,27 @@ const project = (
   Effect.catchCause(Schema.encodeUnknownEffect(schema)(value), cause =>
     Effect.die(new ProjectionError(projection, cause)),
   )
+
+/**
+ * Fails as soon as the signal aborts, so racing it settles a wait that has no
+ * other reason to stop before its timeout.
+ *
+ * The listener is removed when the race interrupts the loser, which is the only
+ * way this effect ends without the abort firing.
+ */
+const abortedWhile = (
+  signal: AbortSignal,
+  capability: string,
+): Effect.Effect<never, DispatchError> =>
+  Effect.callback<never, DispatchError>(resume => {
+    const stop = (): void => resume(Effect.fail(CancelledError.whileWaiting(capability)))
+    if (signal.aborted) {
+      stop()
+      return
+    }
+    signal.addEventListener('abort', stop, { once: true })
+    return Effect.sync(() => signal.removeEventListener('abort', stop))
+  })
 
 /**
  * What dispatch had managed to do when it exited, so the record can say what
