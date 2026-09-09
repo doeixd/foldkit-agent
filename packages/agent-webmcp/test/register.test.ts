@@ -15,6 +15,7 @@ const Message = defineMessageUnion({
   RequestedCreateTodo: { title: Schema.String },
   RequestedDeleteTodo: { id: Schema.String },
   ReceivedTodos: { todos: Schema.Array(Todo) },
+  FailedToCreateTodo: { message: Schema.String },
 })
 
 type Message = typeof Message.Type
@@ -594,5 +595,72 @@ describe('disposal races', () => {
     expect(blocking.signalFor('create_todo')?.aborted).toBe(true)
     expect(blocking.live()).toEqual([])
     expect(registration.registered()).toEqual([])
+  })
+})
+
+describe('AgentWebMcp.register with a completion contract', () => {
+  const CompletingAgent = TodoAgent.define({
+    messages: TodoAgent.expose(Message, {
+      RequestedCreateTodo: {
+        name: 'create_todo',
+        description: 'Create a todo',
+        completion: {
+          success: Message.ReceivedTodos,
+          failure: Message.FailedToCreateTodo,
+        },
+      },
+    }),
+  })
+
+  /** Emits `reply` as the host's response to the dispatched Message. */
+  const runtimeReplying = (reply: Message) => {
+    const observers = new Set<(message: Message) => void>()
+    return TodoAgent.bind({
+      definition: CompletingAgent,
+      host: {
+        model: () => model,
+        dispatch: (message: Message) => {
+          dispatched.push(message)
+          // update can answer synchronously, which is the case the adapter has
+          // to survive.
+          for (const observer of [...observers]) {
+            observer(message)
+            observer(reply)
+          }
+        },
+        observe: (listener: (message: Message) => void) => {
+          observers.add(listener)
+          return () => observers.delete(listener)
+        },
+        subscribe: (listener: () => void) => {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
+      },
+    })
+  }
+
+  it('reports a completed operation with the completing Message', async () => {
+    const agent = runtimeReplying(Message.ReceivedTodos({ todos: [] }))
+    const registration = AgentWebMcp.register({ agent, modelContext })
+    await registration.refresh()
+
+    const result = await modelContext.find('create_todo').execute({ title: 'Write docs' }, {})
+
+    expect(result.isError).toBeFalsy()
+    expect(result.content[0]?.text).toBe('Completed: ReceivedTodos')
+  })
+
+  it('reports a declared completion failure as a tool error', async () => {
+    const agent = runtimeReplying(Message.FailedToCreateTodo({ message: 'disk full' }))
+    const registration = AgentWebMcp.register({ agent, modelContext })
+    await registration.refresh()
+
+    const result = await modelContext.find('create_todo').execute({ title: 'Write docs' }, {})
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toBe('Failed: FailedToCreateTodo')
+    // The Message did reach the host: only its outcome failed.
+    expect(dispatched).toEqual([{ _tag: 'RequestedCreateTodo', title: 'Write docs' }])
   })
 })
