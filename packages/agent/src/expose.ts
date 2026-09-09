@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import type { MessageUnion } from 'foldkit/message'
 import { toJsonSchema } from './jsonSchema.js'
-import { defaultName } from './naming.js'
+import { assertValidName, defaultName } from './naming.js'
 import type { AnyMessage, Completion, InvocationContext, VariantConfig } from './types.js'
 
 type Fields = Schema.Struct.Fields
@@ -146,6 +146,9 @@ export const expose = <
       throw new Error(`Cannot expose "${tag}": "input" was provided without "toMessage"`)
     }
 
+    const name = config.name ?? defaultName(tag)
+    assertValidName(name, tag)
+
     const payload = payloadSchemaOf(constructor)
     const external = config.input
     const inputSchema = (external ?? payload.schema) as Schema.Codec<any, any, never, never>
@@ -157,7 +160,7 @@ export const expose = <
 
     return {
       tag,
-      name: config.name ?? defaultName(tag),
+      name,
       description: config.description,
       inputSchema,
       inputJsonSchema: toJsonSchema(inputSchema, {

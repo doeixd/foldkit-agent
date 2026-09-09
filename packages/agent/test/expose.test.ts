@@ -84,6 +84,26 @@ describe('Agent.expose', () => {
     ).toThrow(/without "toMessage"/)
   })
 
+  it('rejects a name that no tool protocol would accept', () => {
+    for (const name of ['delete todo', 'delete/todo', 'delete.todo', '', 'x'.repeat(129)]) {
+      expect(() =>
+        Agent.expose(Message, {
+          RequestedDeleteTodo: { name, description: 'Delete a todo' },
+        }),
+      ).toThrow(/is not a valid capability name/)
+    }
+  })
+
+  it('accepts the names tool protocols do allow', () => {
+    for (const name of ['delete_todo', 'delete-todo', 'deleteTodo2', 'x'.repeat(128)]) {
+      expect(
+        Agent.expose(Message, {
+          RequestedDeleteTodo: { name, description: 'Delete a todo' },
+        }).variants[0]?.name,
+      ).toBe(name)
+    }
+  })
+
   it('rejects two capabilities sharing a name', () => {
     expect(() =>
       Agent.expose(Message, {

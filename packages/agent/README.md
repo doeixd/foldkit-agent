@@ -123,6 +123,11 @@ RequestedDeleteTodo: {
 `input` and `toMessage` must be supplied together; supplying `input` alone is a
 type error and a runtime error.
 
+A capability `name` becomes a protocol-facing tool name, so it must match
+`[a-zA-Z0-9_-]{1,128}`. An invalid name fails at `Agent.expose`, rather than at
+registration where the client would reject it with no reference back to the
+contract.
+
 ### Introspection
 
 The contract is data, so it is testable without an LLM:

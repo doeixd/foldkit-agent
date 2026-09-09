@@ -30,7 +30,8 @@ export const define = <Model = unknown, Context_ = unknown, Principal = unknown>
   readonly messages: ExposedMessages<Model, Principal>
   readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
 }): Definition<Model, Context_, Principal> => {
-  const resources = options.resources ?? []
+  // Copied so a later mutation of the caller's array cannot change the contract.
+  const resources = [...(options.resources ?? [])]
 
   const names = new Set<string>()
   for (const resource of resources) {
