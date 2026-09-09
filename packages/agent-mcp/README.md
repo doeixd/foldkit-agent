@@ -47,6 +47,47 @@ The spec splits these, and the split matters:
 An authorization refusal reported as a protocol error would have clients retry
 it as a transport fault, which is why it is not one.
 
+## Over HTTP
+
+`httpHandler` implements the Streamable HTTP transport on one endpoint that
+answers POST, GET and DELETE. It is transport-neutral, so it sits behind any
+server:
+
+```ts
+const server = AgentMcp.httpHandler({
+  // One runtime per session. No two principals ever share one.
+  createAgent: ({ principal }) => bindAgentFor(principal),
+
+  // The principal comes from here and nowhere else.
+  authenticate: request => verify(request.headers['authorization']),
+
+  // A request carrying an Origin that is not listed is refused.
+  allowedOrigins: ['https://app.example'],
+})
+
+const response = await server.handle({ method, headers, body })
+```
+
+A session is created by `initialize` and identified by `Mcp-Session-Id`
+afterwards. An unknown or expired session answers 404, which is the client's
+signal to re-initialize; `DELETE` terminates one.
+
+`GET` opens an SSE stream for server notifications. Each event carries an id, so
+a client that reconnects with `Last-Event-ID` is sent what it missed and nothing
+it already saw. An event goes to exactly one stream, never broadcast across
+several.
+
+### What this transport will not do
+
+- **No `Origin`, no allowlist, no entry.** A request carrying an `Origin` that is
+  not configured is refused, including when no origins are configured at all.
+  This is the DNS-rebinding defence the spec requires; a non-browser client
+  sends no `Origin` and is unaffected.
+- **A principal in request params is ignored.** Identity comes from
+  `authenticate`. Reading it from params would let any caller claim any identity
+  and walk straight through `authorize`.
+- Bind to localhost when serving locally, and require authentication otherwise.
+
 ## Notes
 
 `tools/list` returns what is available now, so a Model-dependent capability
@@ -58,6 +99,5 @@ that updates on each keystroke would become a notification storm. Set
 Over stdio, `stdout` carries MCP messages and nothing else. A stray
 `console.log` corrupts the stream; diagnostics belong on `stderr`.
 
-Sessions, `Origin` validation and authentication belong to the HTTP transport,
-which is not implemented yet. Until then this is a local, single-session server:
-the principal comes from the host binding, never from request params.
+Over stdio there is one session and one runtime, bound by the caller; sessions,
+`Origin` validation and authentication are the HTTP transport's job.

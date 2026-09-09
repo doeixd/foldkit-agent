@@ -7,3 +7,11 @@
 export * as AgentMcp from './agentMcp.js'
 export { code as jsonRpcCode } from './jsonRpc.js'
 export type { Id, Notification, Request, Response } from './jsonRpc.js'
+export type {
+  HttpHandler,
+  HttpHandlerOptions,
+  HttpRequest,
+  HttpResponse,
+  SseEvent,
+  SseStream,
+} from './http.js'

@@ -1,0 +1,266 @@
+import type { Agent } from '@foldkit/agent'
+import { type Handler, PROTOCOL_VERSION, handler } from './handler.js'
+import { type Notification, code, failure, isIncoming, isRequest } from './jsonRpc.js'
+
+/** A transport-neutral request, so this can sit behind any HTTP server. */
+export interface HttpRequest {
+  readonly method: string
+  /** Header names lowercased. */
+  readonly headers: Readonly<Record<string, string | undefined>>
+  /** The parsed JSON body, for POST. */
+  readonly body?: unknown
+}
+
+/** One server-sent event. `id` is the cursor a client resumes from. */
+export interface SseEvent {
+  readonly id: string
+  readonly data: string
+}
+
+/** An open SSE stream. Sending `undefined` closes it. */
+export interface SseStream {
+  /** Replayed immediately on subscribe, when the client resumed. */
+  readonly backlog: ReadonlyArray<SseEvent>
+  readonly subscribe: (send: (event: SseEvent) => void) => () => void
+}
+
+export interface HttpResponse {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string>>
+  readonly body?: unknown
+  /** Present when the response is an SSE stream rather than a JSON body. */
+  readonly stream?: SseStream
+}
+
+export interface HttpHandlerOptions<Model, Context_, Principal, ByName, ByTag> {
+  /**
+   * Binds a runtime for one authenticated caller.
+   *
+   * Called once per session, so no two principals ever share a runtime.
+   */
+  readonly createAgent: (context: {
+    readonly principal: Principal
+    readonly sessionId: string
+  }) => Agent.AgentRuntime<Model, Context_, Principal, ByName, ByTag>
+
+  /**
+   * Resolves the caller from the request, returning `undefined` to refuse it.
+   *
+   * The principal comes from here and nowhere else: a principal taken from
+   * request params would let any caller claim any identity.
+   */
+  readonly authenticate?: ((request: HttpRequest) => Principal | undefined) | undefined
+
+  /**
+   * Origins a browser may call from. A request carrying an `Origin` that is not
+   * listed is refused, which is what stops a page on another site from driving
+   * a local server through DNS rebinding.
+   */
+  readonly allowedOrigins?: ReadonlyArray<string> | undefined
+
+  /** Idle sessions are dropped after this long. Defaults to 30 minutes. */
+  readonly sessionTtlMs?: number | undefined
+
+  /** Events kept per session for `Last-Event-ID` resumption. Defaults to 100. */
+  readonly replayBuffer?: number | undefined
+
+  readonly serverInfo?: { readonly name: string; readonly version: string } | undefined
+}
+
+export interface HttpHandler {
+  readonly handle: (request: HttpRequest) => Promise<HttpResponse>
+  /** Sessions currently held. */
+  readonly sessions: () => ReadonlyArray<string>
+  readonly close: () => void
+}
+
+/** Versions this server will answer. An absent header means the pre-header release. */
+const SUPPORTED_VERSIONS = new Set([PROTOCOL_VERSION, '2025-03-26', '2024-11-05'])
+const ASSUMED_VERSION = '2025-03-26'
+
+const json = (
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): HttpResponse => ({
+  status,
+  headers: { 'content-type': 'application/json', ...headers },
+  body,
+})
+
+const empty = (status: number, headers: Record<string, string> = {}): HttpResponse => ({
+  status,
+  headers,
+})
+
+/** Cryptographically random, and visible ASCII only, as the spec requires. */
+const newSessionId = (): string => {
+  const bytes = new Uint8Array(24)
+  crypto.getRandomValues(bytes)
+  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+interface Session {
+  readonly id: string
+  readonly handler: Handler
+  readonly log: Array<SseEvent>
+  readonly send: Set<(event: SseEvent) => void>
+  nextEventId: number
+  lastSeen: number
+}
+
+/**
+ * Serves a contract over the Streamable HTTP transport.
+ *
+ * One endpoint answers POST, GET and DELETE. A session is created on
+ * `initialize` and identified by `Mcp-Session-Id` afterwards; an unknown
+ * session is a 404 so the client re-initializes.
+ */
+export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
+  options: HttpHandlerOptions<Model, Context_, Principal, ByName, ByTag>,
+): HttpHandler => {
+  const ttl = options.sessionTtlMs ?? 30 * 60 * 1000
+  const replayBuffer = options.replayBuffer ?? 100
+  const sessions = new Map<string, Session>()
+
+  const drop = (session: Session): void => {
+    session.handler.close()
+    sessions.delete(session.id)
+  }
+
+  const expire = (): void => {
+    const cutoff = Date.now() - ttl
+    for (const session of [...sessions.values()]) {
+      if (session.lastSeen < cutoff) drop(session)
+    }
+  }
+
+  /** Each message goes to exactly one stream, never broadcast across several. */
+  const emit = (session: Session, notification: Notification): void => {
+    const event: SseEvent = {
+      id: String(session.nextEventId++),
+      data: JSON.stringify(notification),
+    }
+    session.log.push(event)
+    if (session.log.length > replayBuffer) session.log.shift()
+
+    const newest = [...session.send].at(-1)
+    newest?.(event)
+  }
+
+  const originAllowed = (request: HttpRequest): boolean => {
+    const origin = request.headers['origin']
+    // A non-browser client sends no Origin; a browser always does.
+    if (origin === undefined) return true
+    return (options.allowedOrigins ?? []).includes(origin)
+  }
+
+  const versionAccepted = (request: HttpRequest): boolean => {
+    const version = request.headers['mcp-protocol-version'] ?? ASSUMED_VERSION
+    return SUPPORTED_VERSIONS.has(version)
+  }
+
+  const lookup = (request: HttpRequest): Session | undefined => {
+    const id = request.headers['mcp-session-id']
+    if (id === undefined) return undefined
+    expire()
+    const session = sessions.get(id)
+    if (session !== undefined) session.lastSeen = Date.now()
+    return session
+  }
+
+  const handle = async (request: HttpRequest): Promise<HttpResponse> => {
+    if (!originAllowed(request)) {
+      return json(403, { error: 'Origin not allowed' })
+    }
+    if (!versionAccepted(request)) {
+      return json(400, { error: 'Unsupported MCP-Protocol-Version' })
+    }
+
+    const principal = options.authenticate?.(request)
+    if (options.authenticate !== undefined && principal === undefined) {
+      return json(401, { error: 'Unauthenticated' })
+    }
+
+    if (request.method === 'DELETE') {
+      const session = lookup(request)
+      if (session === undefined) return json(404, { error: 'Unknown session' })
+      drop(session)
+      return empty(204)
+    }
+
+    if (request.method === 'GET') {
+      const session = lookup(request)
+      if (session === undefined) return json(404, { error: 'Unknown session' })
+
+      const lastEventId = request.headers['last-event-id']
+      const backlog =
+        lastEventId === undefined
+          ? []
+          : session.log.filter(event => Number(event.id) > Number(lastEventId))
+
+      return {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
+        stream: {
+          backlog,
+          subscribe: send => {
+            session.send.add(send)
+            return () => session.send.delete(send)
+          },
+        },
+      }
+    }
+
+    if (request.method !== 'POST') {
+      return json(405, { error: 'Method not allowed' })
+    }
+
+    const message = request.body
+    if (!isIncoming(message)) {
+      return json(400, failure(null, code.INVALID_REQUEST, 'Not a JSON-RPC 2.0 message'))
+    }
+
+    const existing = lookup(request)
+
+    // A session is created by initialize, and required by everything else.
+    if (existing === undefined) {
+      if (request.headers['mcp-session-id'] !== undefined) {
+        return json(404, { error: 'Unknown session' })
+      }
+      if (!isRequest(message) || message.method !== 'initialize') {
+        return json(400, failure(null, code.INVALID_REQUEST, 'Expected initialize'))
+      }
+
+      const id = newSessionId()
+      const session: Session = {
+        id,
+        handler: handler({
+          agent: options.createAgent({ principal: principal as Principal, sessionId: id }),
+          ...(options.serverInfo === undefined ? {} : { serverInfo: options.serverInfo }),
+          onNotification: notification => emit(session, notification),
+        }),
+        log: [],
+        send: new Set(),
+        nextEventId: 1,
+        lastSeen: Date.now(),
+      }
+      sessions.set(id, session)
+
+      const response = await session.handler.handle(message)
+      return json(200, response, { 'mcp-session-id': id })
+    }
+
+    const response = await existing.handler.handle(message)
+    // A notification or response carries no reply of its own.
+    return response === undefined ? empty(202) : json(200, response)
+  }
+
+  return {
+    handle,
+    sessions: () => [...sessions.keys()],
+    close: () => {
+      for (const session of [...sessions.values()]) drop(session)
+    },
+  }
+}

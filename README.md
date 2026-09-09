@@ -1167,9 +1167,8 @@ That lets the browser API change without forcing the Foldkit agent contract to c
 ```
 
 The contract is protocol-neutral, so this adapter reads the same descriptors the
-WebMCP one does. The protocol mapping is a transport-free handler; `stdio`
-attaches it to a process. Sessions and authentication over Streamable HTTP are
-not implemented yet.
+WebMCP one does. The protocol mapping is a transport-free handler; `stdio` and
+`httpHandler` attach it to a process or a server.
 
 Conceptually:
 
@@ -1214,7 +1213,7 @@ app://todos
 
 Unlike WebMCP, an external MCP client may live outside the browser that owns the Model.
 
-Production external MCP therefore needs a transport/session layer that can bind the caller to the correct Runtime.
+Production external MCP therefore needs a transport/session layer that can bind the caller to the correct Runtime. `httpHandler` is that layer: one runtime per authenticated session, with the principal taken from the transport rather than from request params.
 
 ```text
 MCP client
