@@ -68,17 +68,62 @@ export interface AuditLog extends AuditSink {
 
 const REDACTED = '[redacted]'
 
-/** Shallow: the point is to keep a field name without keeping its value. */
+/**
+ * Copies the containers the caller still holds, so a later mutation cannot
+ * rewrite what was recorded. Cycles resolve to the copy already made. Values
+ * with their own identity -- class instances, functions -- are kept as they
+ * are, because copying them would not reproduce what they do.
+ */
+const snapshot = (value: unknown, seen: WeakMap<object, unknown>): unknown => {
+  if (typeof value !== 'object' || value === null) return value
+
+  const already = seen.get(value)
+  if (already !== undefined) return already
+
+  if (value instanceof Date) return new Date(value.getTime())
+
+  if (Array.isArray(value)) {
+    const copy: Array<unknown> = []
+    seen.set(value, copy)
+    for (const item of value) copy.push(snapshot(item, seen))
+    return copy
+  }
+
+  if (value instanceof Map) {
+    const copy = new Map<unknown, unknown>()
+    seen.set(value, copy)
+    for (const [key, item] of value) copy.set(snapshot(key, seen), snapshot(item, seen))
+    return copy
+  }
+
+  if (value instanceof Set) {
+    const copy = new Set<unknown>()
+    seen.set(value, copy)
+    for (const item of value) copy.add(snapshot(item, seen))
+    return copy
+  }
+
+  const proto = Object.getPrototypeOf(value) as unknown
+  if (proto !== Object.prototype && proto !== null) return value
+
+  const copy: Record<string, unknown> = {}
+  seen.set(value, copy)
+  for (const [key, item] of Object.entries(value)) copy[key] = snapshot(item, seen)
+  return copy
+}
+
+/** Redaction stays top-level: the point is to keep a field name without its value. */
 const redactInput = (
   input: unknown,
   redact: ReadonlyArray<string>,
 ): Record<string, unknown> | undefined => {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return undefined
 
+  const seen = new WeakMap<object, unknown>()
   return Object.fromEntries(
     Object.entries(input as Record<string, unknown>).map(([key, value]) => [
       key,
-      redact.includes(key) ? REDACTED : value,
+      redact.includes(key) ? REDACTED : snapshot(value, seen),
     ]),
   )
 }

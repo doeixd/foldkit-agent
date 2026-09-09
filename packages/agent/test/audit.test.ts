@@ -156,6 +156,95 @@ describe('what is never recorded', () => {
   })
 })
 
+describe('recorded input is a snapshot', () => {
+  const nestedDefinition = TodoAgent.define({
+    messages: TodoAgent.expose(MessageUnion, {
+      ReceivedTodos: { name: 'receive_todos', description: 'Load todos' },
+    }),
+  })
+
+  const record = (audit: Agent.AuditSink, input: unknown) =>
+    audit.record({
+      invocation: { id: 'i', transport: 'in-app' },
+      capability: 'create_todo',
+      tag: 'RequestedCreateTodo',
+      principal: undefined,
+      decision: 'dispatched',
+      outcome: 'dispatched',
+      input,
+    })
+
+  it('does not follow a later mutation of the caller-owned input', async () => {
+    const audit = Agent.auditLog({ includeInput: true })
+    const runtime = TodoAgent.bind({
+      definition: nestedDefinition,
+      audit,
+      host: {
+        model: () => model,
+        dispatch: (message: Message) => void dispatched.push(message),
+        principal: () => principal,
+      },
+    })
+
+    const input = { todos: [{ id: 'a', title: 'original', completed: false }] }
+    await run(runtime.messages.dispatch('receive_todos', input))
+
+    input.todos[0]!.title = 'rewritten'
+    input.todos.push({ id: 'b', title: 'appended', completed: false })
+
+    expect(audit.entries()[0]?.input).toEqual({
+      todos: [{ id: 'a', title: 'original', completed: false }],
+    })
+  })
+
+  it('snapshots dates, maps and sets rather than aliasing them', () => {
+    const audit = Agent.auditLog({ includeInput: true })
+    const when = new Date(0)
+    const tags = new Set(['one'])
+    const byId = new Map([['a', { title: 'original' }]])
+
+    record(audit, { when, tags, byId })
+
+    when.setTime(5000)
+    tags.add('two')
+    byId.get('a')!.title = 'rewritten'
+
+    const input = audit.entries()[0]?.input as {
+      when: Date
+      tags: Set<string>
+      byId: Map<string, { title: string }>
+    }
+    expect(input.when.getTime()).toBe(0)
+    expect([...input.tags]).toEqual(['one'])
+    expect(input.byId.get('a')).toEqual({ title: 'original' })
+  })
+
+  it('records a self-referential input without looping', () => {
+    const audit = Agent.auditLog({ includeInput: true })
+    const nested: Record<string, unknown> = { value: 'original' }
+    nested.self = nested
+
+    record(audit, { nested })
+
+    const recorded = (audit.entries()[0]?.input as { nested: Record<string, unknown> }).nested
+    nested.value = 'rewritten'
+
+    expect(recorded.value).toBe('original')
+    expect(recorded.self).toBe(recorded)
+  })
+
+  it('still redacts only the top-level fields named', () => {
+    const audit = Agent.auditLog({ includeInput: true, redact: ['token'] })
+
+    record(audit, { token: 'secret', nested: { token: 'nested-secret' } })
+
+    expect(audit.entries()[0]?.input).toEqual({
+      token: '[redacted]',
+      nested: { token: 'nested-secret' },
+    })
+  })
+})
+
 describe('the log itself', () => {
   it('is bounded, dropping the oldest', async () => {
     const audit = Agent.auditLog({ capacity: 3 })
