@@ -27,6 +27,7 @@ export type {
   DispatchResult,
   Invocation,
   InvocationContext,
+  MessageConstructor,
   MessageDescriptor,
   ResourceDescriptor,
   Transport,

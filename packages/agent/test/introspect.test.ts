@@ -66,8 +66,24 @@ describe('introspection', () => {
 
   it('reports which capabilities are Model-dependent', () => {
     const descriptors = Agent.messages(AppAgent)
-    expect(descriptors.find(d => d.name === 'delete_todo')?.dynamic).toBe(true)
-    expect(descriptors.find(d => d.name === 'create_todo')?.dynamic).toBe(false)
+    expect(descriptors.find(d => d.name === 'delete_todo')?.modelDependent).toBe(true)
+    expect(descriptors.find(d => d.name === 'create_todo')?.modelDependent).toBe(false)
+  })
+
+  it('reports which capabilities run an authorization hook', () => {
+    const guarded = Agent.define({
+      messages: Agent.expose(Message, {
+        RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
+        RequestedDeleteTodo: {
+          name: 'delete_todo',
+          description: 'Delete a todo',
+          authorize: () => false,
+        },
+      }),
+    })
+    const descriptors = Agent.messages(guarded)
+    expect(descriptors.find(d => d.name === 'delete_todo')?.requiresAuthorization).toBe(true)
+    expect(descriptors.find(d => d.name === 'create_todo')?.requiresAuthorization).toBe(false)
   })
 
   it('derives the projected context schema, not the whole Model', () => {

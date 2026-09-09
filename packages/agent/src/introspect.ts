@@ -16,8 +16,8 @@ export const messages = (
     tag: variant.tag,
     description: variant.description,
     inputSchema: variant.inputJsonSchema,
-    dynamic: variant.available !== undefined,
-    authorized: variant.authorize !== undefined,
+    modelDependent: variant.available !== undefined,
+    requiresAuthorization: variant.authorize !== undefined,
     completion: variant.completion,
   }))
 

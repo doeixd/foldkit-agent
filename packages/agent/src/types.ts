@@ -29,16 +29,24 @@ export interface AuthorizationRequest<Input, Model, Principal = unknown> {
   readonly transport: Transport
 }
 
+/** A callable Foldkit Message constructor, as produced by `defineMessageUnion`. */
+export type MessageConstructor<Message extends AnyMessage = AnyMessage> = (
+  ...args: never
+) => Message
+
 /**
  * Optional description of when a dispatched Message is considered complete.
  *
- * Reserved for a later version: `@foldkit/agent` records the contract and
- * exposes it through introspection, but validated dispatch remains the
- * completion boundary.
+ * Dispatching a Message and completing an operation are not always the same
+ * event: `RequestedDeleteTodo` leads to a Command, which later produces
+ * `DeletedTodo` or `FailedDeleteTodo`.
+ *
+ * Reserved for a later version: the contract is recorded and exposed through
+ * introspection, but validated dispatch remains the completion boundary.
  */
 export interface Completion<Request = unknown, Result = unknown> {
-  readonly success: unknown | ReadonlyArray<unknown>
-  readonly failure?: unknown | ReadonlyArray<unknown>
+  readonly success: MessageConstructor | ReadonlyArray<MessageConstructor>
+  readonly failure?: MessageConstructor | ReadonlyArray<MessageConstructor> | undefined
   readonly correlate?: ((request: Request, result: Result) => boolean) | undefined
   readonly timeout?: Duration.Input | undefined
 }
@@ -91,10 +99,10 @@ export interface MessageDescriptor {
   readonly description: string
   /** JSON Schema for the capability's input, derived from the Effect Schema. */
   readonly inputSchema: Record<string, unknown>
-  /** True when the variant declares an `available` predicate. */
-  readonly dynamic: boolean
-  /** True when the variant declares an `authorize` hook. */
-  readonly authorized: boolean
+  /** True when the variant declares an `available` predicate, so its presence follows the Model. */
+  readonly modelDependent: boolean
+  /** True when the variant declares an `authorize` hook that runs before dispatch. */
+  readonly requiresAuthorization: boolean
   /** The declared completion contract, if any. */
   readonly completion?: Completion | undefined
 }
