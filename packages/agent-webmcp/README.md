@@ -79,10 +79,22 @@ user selects todo  -> Model changes
                    -> tools: create_todo, delete_todo
 ```
 
-The adapter holds one `AbortController` per registered tool. When a capability
-becomes unavailable its registration signal is aborted; when it returns, it is
-registered again. This is the registration signal, distinct from the execution
-signal passed to `execute`, which is forwarded as `Invocation.signal`.
+The adapter holds one `AbortController` per registered tool and passes its
+signal in the options bag, where `registerTool` takes it:
+
+```ts
+await document.modelContext.registerTool(tool, { signal: controller.signal })
+```
+
+Aborting that signal is what unregisters the tool, so it must not go on the
+descriptor. This is the registration signal, distinct from the execution signal
+passed to `execute`, which is forwarded as `Invocation.signal`.
+
+Reconciles are serialized, and a capability is recorded as registered only once
+`registerTool` resolves. A registration the browser refuses is not recorded and
+is retried on the next reconcile; `refresh()` rejects with the first failure
+after attempting the rest. Nothing is registered once `unregister()` has run,
+and a registration that was in flight when it ran is aborted.
 
 ## Errors
 

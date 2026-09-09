@@ -1,9 +1,9 @@
 import { Agent } from '@foldkit/agent'
-import { Option, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AgentWebMcp } from '../src/index.js'
-import type { ModelContext, ToolDescriptor } from '../src/webmcp.js'
+import type { ModelContext, RegisterToolOptions, ToolDescriptor } from '../src/webmcp.js'
 
 const Todo = Schema.Struct({
   id: Schema.String,
@@ -39,17 +39,32 @@ const AppAgent = TodoAgent.define({
   }),
 })
 
-/** Records every registerTool call, standing in for `document.modelContext`. */
+/**
+ * Stands in for `document.modelContext`.
+ *
+ * It records the registration signal from the second argument, where the
+ * documented API takes it, so a test cannot pass by agreeing with the adapter
+ * about the wrong shape.
+ */
 class FakeModelContext implements ModelContext {
-  readonly tools: Array<ToolDescriptor> = []
+  readonly tools: Array<{ tool: ToolDescriptor; signal: AbortSignal | undefined }> = []
+  /** Names the browser refuses to register, as one may. */
+  readonly failing = new Set<string>()
 
-  registerTool = (tool: ToolDescriptor): void => {
-    this.tools.push(tool)
+  registerTool = (tool: ToolDescriptor, options?: RegisterToolOptions): void => {
+    if (this.failing.has(tool.name)) {
+      throw new Error(`registerTool refused ${tool.name}`)
+    }
+    this.tools.push({ tool, signal: options?.signal })
   }
 
   /** The tools that have not had their registration signal aborted. */
   live(): ReadonlyArray<ToolDescriptor> {
-    return this.tools.filter(tool => tool.signal?.aborted !== true)
+    return this.tools.filter(entry => entry.signal?.aborted !== true).map(entry => entry.tool)
+  }
+
+  signalFor(name: string): AbortSignal | undefined {
+    return this.tools.find(entry => entry.tool.name === name)?.signal
   }
 
   find(name: string): ToolDescriptor {
@@ -156,8 +171,7 @@ describe('AgentWebMcp.register', () => {
     await registration.refresh()
 
     expect(registration.registered()).toEqual(['create_todo'])
-    const deleteTool = modelContext.tools.find(tool => tool.name === 'delete_todo')
-    expect(deleteTool?.signal?.aborted).toBe(true)
+    expect(modelContext.signalFor('delete_todo')?.aborted).toBe(true)
   })
 
   it('registers each capability only once across refreshes', async () => {
@@ -166,7 +180,7 @@ describe('AgentWebMcp.register', () => {
     await registration.refresh()
     await registration.refresh()
 
-    expect(modelContext.tools.filter(tool => tool.name === 'create_todo')).toHaveLength(1)
+    expect(modelContext.tools.filter(entry => entry.tool.name === 'create_todo')).toHaveLength(1)
   })
 
   it('passes the execution signal through to the invocation', async () => {
@@ -316,7 +330,7 @@ describe('AgentWebMcp.register', () => {
     const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
     await registration.refresh()
 
-    expect(modelContext.tools.map(tool => tool.name)).not.toContain('received_todos')
+    expect(modelContext.tools.map(entry => entry.tool.name)).not.toContain('received_todos')
   })
 
   it('explains itself when the page provides no modelContext', () => {
@@ -407,5 +421,180 @@ describe('AgentWebMcp end to end', () => {
     expect(result.isError).toBe(true)
     expect(result.content[0]?.text).toMatch(/Invalid input/)
     expect(dispatched).toEqual([])
+  })
+})
+
+describe('registration lifecycle, against the documented API', () => {
+  it('passes the registration signal where registerTool takes it', async () => {
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
+    await registration.refresh()
+
+    // Not on the descriptor: aborting the options signal is what unregisters.
+    expect(modelContext.signalFor('create_todo')).toBeInstanceOf(AbortSignal)
+    expect(modelContext.find('create_todo')).not.toHaveProperty('signal')
+
+    registration.unregister()
+    expect(modelContext.signalFor('create_todo')?.aborted).toBe(true)
+  })
+
+  it('does not register a tool after disposal', async () => {
+    let release: () => void = () => {}
+    const blocked = new Promise<void>(resolve => {
+      release = resolve
+    })
+    let entered: () => void = () => {}
+    const hasEntered = new Promise<void>(resolve => {
+      entered = resolve
+    })
+
+    const runtime = TodoAgent.bind({
+      definition: AppAgent,
+      host: { model: () => model, dispatch: (_: Message) => {} },
+    })
+
+    // Reading availability blocks, so unregister lands while a reconcile is
+    // already past its first disposal check.
+    let reads = 0
+    const slow = {
+      ...runtime,
+      messages: {
+        ...runtime.messages,
+        available: Effect.promise(async () => {
+          reads += 1
+          entered()
+          await blocked
+          return Effect.runSync(runtime.messages.available)
+        }),
+      },
+    }
+
+    const registration = AgentWebMcp.register({ agent: slow as never, modelContext })
+    await hasEntered
+
+    registration.unregister()
+    release()
+    await registration.refresh()
+
+    expect(reads).toBe(1)
+    expect(modelContext.live()).toEqual([])
+    expect(registration.registered()).toEqual([])
+  })
+
+  it('does not record a registration the browser refused', async () => {
+    modelContext.failing.add('create_todo')
+
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
+
+    await expect(registration.refresh()).rejects.toThrow(/refused create_todo/)
+    expect(registration.registered()).toEqual([])
+  })
+
+  it('registers the rest when one registration is refused', async () => {
+    setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
+    modelContext.failing.add('create_todo')
+
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
+    await registration.refresh().catch(() => {})
+
+    expect(registration.registered()).toEqual(['delete_todo'])
+  })
+
+  it('retries a refused registration on the next reconcile', async () => {
+    modelContext.failing.add('create_todo')
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
+    await registration.refresh().catch(() => {})
+    expect(registration.registered()).toEqual([])
+
+    modelContext.failing.clear()
+    await registration.refresh()
+    expect(registration.registered()).toEqual(['create_todo'])
+  })
+
+  it('registers each capability once when reconciles overlap', async () => {
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
+
+    await Promise.all([registration.refresh(), registration.refresh(), registration.refresh()])
+
+    expect(modelContext.tools.filter(entry => entry.tool.name === 'create_todo')).toHaveLength(1)
+  })
+})
+
+describe('disposal races', () => {
+  /** A modelContext whose registrations can be held open. */
+  class BlockingModelContext extends FakeModelContext {
+    private release: (() => void) | undefined
+    readonly registering: Promise<void>
+    private entered: () => void = () => {}
+
+    constructor() {
+      super()
+      this.registering = new Promise<void>(resolve => {
+        this.entered = resolve
+      })
+    }
+
+    override registerTool = async (
+      tool: ToolDescriptor,
+      options?: RegisterToolOptions,
+    ): Promise<void> => {
+      this.tools.push({ tool, signal: options?.signal })
+      this.entered()
+      await new Promise<void>(resolve => {
+        this.release = resolve
+      })
+    }
+
+    finish(): void {
+      this.release?.()
+    }
+  }
+
+  it('attempts no registration once disposed', async () => {
+    let release: () => void = () => {}
+    const blocked = new Promise<void>(resolve => {
+      release = resolve
+    })
+    let entered: () => void = () => {}
+    const hasEntered = new Promise<void>(resolve => {
+      entered = resolve
+    })
+
+    const runtime = makeRuntime()
+    const slow = {
+      ...runtime,
+      messages: {
+        ...runtime.messages,
+        available: Effect.promise(async () => {
+          entered()
+          await blocked
+          return Effect.runSync(runtime.messages.available)
+        }),
+      },
+    }
+
+    const registration = AgentWebMcp.register({ agent: slow as never, modelContext })
+    await hasEntered
+    registration.unregister()
+    release()
+    await registration.refresh()
+
+    // Not merely aborted afterwards: never handed to the browser at all.
+    expect(modelContext.tools).toEqual([])
+  })
+
+  it('takes back a tool that was registered while disposal landed', async () => {
+    const blocking = new BlockingModelContext()
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext: blocking })
+
+    await blocking.registering
+    registration.unregister()
+    blocking.finish()
+    await registration.refresh()
+
+    // The browser accepted it, so it has to be aborted rather than forgotten.
+    expect(blocking.tools).toHaveLength(1)
+    expect(blocking.signalFor('create_todo')?.aborted).toBe(true)
+    expect(blocking.live()).toEqual([])
+    expect(registration.registered()).toEqual([])
   })
 })

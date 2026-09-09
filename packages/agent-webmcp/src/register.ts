@@ -116,13 +116,10 @@ export const register = <Model, Context_, Principal, ByName, ByTag>(
       }
     }
 
-    return {
-      controller,
-      tool: { name, description, inputSchema, execute, signal: controller.signal },
-    }
+    return { controller, tool: { name, description, inputSchema, execute } }
   }
 
-  const reconcile = async (): Promise<void> => {
+  const runReconcile = async (): Promise<void> => {
     if (disposed) return
 
     const available = await Effect.runPromise(agent.messages.available)
@@ -137,12 +134,54 @@ export const register = <Model, Context_, Principal, ByName, ByTag>(
     }
 
     // Register capabilities that have appeared.
+    let failure: unknown
     for (const [name, descriptor] of wanted) {
+      // unregister() can land while an await above is pending. Nothing more is
+      // registered after that.
+      if (disposed) return
       if (controllers.has(name)) continue
+
       const { controller, tool } = toolFor(name, descriptor.description, descriptor.inputSchema)
+
+      try {
+        // The signal goes in the options bag: aborting it is what unregisters
+        // the tool.
+        await modelContext.registerTool(tool, { signal: controller.signal })
+      } catch (error) {
+        // Nothing was registered, so nothing is recorded and nothing to abort.
+        failure ??= error
+        continue
+      }
+
+      // Disposal can also land while this registration is in flight, in which
+      // case the tool is already registered and has to be taken back.
+      if (disposed) {
+        controller.abort()
+        return
+      }
+
+      // Recorded only once the browser has accepted it.
       controllers.set(name, controller)
-      await modelContext.registerTool(tool)
     }
+
+    if (failure !== undefined) throw failure
+  }
+
+  /**
+   * Reconciles are serialized.
+   *
+   * A capability is recorded only once the browser has accepted it, so two
+   * overlapping reconciles would both see it as missing and register it twice.
+   */
+  let queue: Promise<void> = Promise.resolve()
+
+  const reconcile = (): Promise<void> => {
+    const next = queue.then(runReconcile, runReconcile)
+    queue = next.then(
+      () => {},
+      () => {},
+    )
+    return next
   }
 
   let unsubscribe: () => void = () => {}

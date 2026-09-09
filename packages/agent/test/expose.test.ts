@@ -1,7 +1,7 @@
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
-import { Message } from './todoApp.js'
+import { Message, emptyModel } from './todoApp.js'
 
 describe('Agent.expose', () => {
   it('derives a descriptor from the existing Message union', () => {
@@ -111,5 +111,88 @@ describe('Agent.expose', () => {
         RequestedDeleteTodo: { name: 'todo', description: 'Delete' },
       }),
     ).toThrow(/Duplicate exposed capability name/)
+  })
+})
+
+describe('payload-free capabilities', () => {
+  const messages = Agent.expose(Message, {
+    ClearedSelection: { name: 'clear_selection', description: 'Clear the selection' },
+  })
+  const inputSchema = messages.variants[0]!.inputSchema
+
+  const decode = (input: unknown) =>
+    Effect.runSync(
+      Effect.result(Schema.decodeUnknownEffect(inputSchema, { onExcessProperty: 'error' })(input)),
+    )._tag
+
+  it('advertises a closed empty object', () => {
+    expect(messages.variants[0]?.inputJsonSchema).toEqual({
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    })
+  })
+
+  it('accepts an empty object', () => {
+    expect(decode({})).toBe('Success')
+  })
+
+  it('enforces what it advertises', () => {
+    // Schema.Struct({}) accepts all of these, which the advertised schema forbids.
+    expect(decode({ foo: 1 })).toBe('Failure')
+    expect(decode([])).toBe('Failure')
+    expect(decode('str')).toBe('Failure')
+    expect(decode(42)).toBe('Failure')
+  })
+
+  it('refuses undeclared input through the runtime, before update', () => {
+    const dispatched: Array<unknown> = []
+    const runtime = Agent.bind({
+      definition: Agent.define({ messages }),
+      host: { model: () => emptyModel, dispatch: message => void dispatched.push(message) },
+    })
+
+    const result = Effect.runSync(
+      Effect.result(runtime.messages.dispatchUnknown('clear_selection', { unexpected: true })),
+    )
+
+    expect(result._tag).toBe('Failure')
+    expect(dispatched).toEqual([])
+  })
+})
+
+describe('an externally declared empty input', () => {
+  const messages = Agent.expose(Message, {
+    RequestedDeleteTodo: {
+      name: 'delete_selected',
+      description: 'Delete whichever todo is selected',
+      input: Schema.Struct({}),
+      toMessage: () => ({ id: 'from-the-model' }),
+    },
+  })
+
+  it('advertises a closed empty object', () => {
+    expect(messages.variants[0]?.inputJsonSchema).toEqual({
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    })
+  })
+
+  it('enforces what it advertises', () => {
+    const decode = (input: unknown) =>
+      Effect.runSync(
+        Effect.result(
+          Schema.decodeUnknownEffect(messages.variants[0]!.inputSchema, {
+            onExcessProperty: 'error',
+          })(input),
+        ),
+      )._tag
+
+    expect(decode({})).toBe('Success')
+    expect(decode({ id: 'injected' })).toBe('Failure')
+    expect(decode([])).toBe('Failure')
   })
 })

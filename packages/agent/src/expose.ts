@@ -134,6 +134,16 @@ export interface ExposedMessages<
   readonly '~capabilities'?: { readonly byName: ByName; readonly byTag: ByTag }
 }
 
+/**
+ * The schema for a capability that takes no input.
+ *
+ * `Schema.Struct({})` is not an empty-object schema: it accepts `{ foo: 1 }`,
+ * `[]`, and `"str"` alike, even with `onExcessProperty: 'error'`. A record with
+ * no permitted values accepts `{}` and nothing else, which is what the derived
+ * JSON Schema advertises.
+ */
+const EmptyPayload = Schema.Record(Schema.String, Schema.Never)
+
 /** True for a struct Schema with no fields, whose JSON Schema needs normalizing. */
 const isEmptyStruct = (schema: unknown): boolean => {
   const fields = (schema as { fields?: Record<string, unknown> }).fields
@@ -141,15 +151,18 @@ const isEmptyStruct = (schema: unknown): boolean => {
 }
 
 /** Strips the `_tag` literal so only the agent-facing payload fields remain. */
-const payloadSchemaOf = (constructor: unknown): { schema: Schema.Struct<Fields>; empty: boolean } => {
+const payloadSchemaOf = (
+  constructor: unknown,
+): { schema: Schema.Codec<any, any, never, never>; empty: boolean } => {
   const fields = (constructor as { fields?: Fields }).fields ?? {}
   const payload: Record<string, unknown> = {}
   for (const key of Object.keys(fields)) {
     if (key !== '_tag') payload[key] = (fields as Record<string, unknown>)[key]
   }
+  const empty = Object.keys(payload).length === 0
   return {
-    schema: Schema.Struct(payload as Fields),
-    empty: Object.keys(payload).length === 0,
+    schema: empty ? EmptyPayload : (Schema.Struct(payload as Fields) as never),
+    empty,
   }
 }
 
@@ -206,7 +219,12 @@ export const expose = <
 
     const payload = payloadSchemaOf(constructor)
     const external = config.input
-    const inputSchema = (external ?? payload.schema) as Schema.Codec<any, any, never, never>
+    // An externally declared empty struct has the same hole, and the JSON
+    // Schema derived for it makes the same promise, so enforce it the same way.
+    const externalIsEmpty = external !== undefined && isEmptyStruct(external)
+    const inputSchema = (
+      external === undefined ? payload.schema : externalIsEmpty ? EmptyPayload : external
+    ) as Schema.Codec<any, any, never, never>
 
     const make = constructor as (value: unknown) => AnyMessage
     const toMessage = config.toMessage
@@ -219,7 +237,7 @@ export const expose = <
       description: config.description,
       inputSchema,
       inputJsonSchema: toJsonSchema(inputSchema, {
-        emptyStructIsObject: external === undefined ? payload.empty : isEmptyStruct(external),
+        emptyPayload: external === undefined ? payload.empty : externalIsEmpty,
       }),
       construct,
       messageConstructor: constructor,

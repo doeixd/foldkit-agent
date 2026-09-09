@@ -24,13 +24,24 @@ export interface ToolDescriptor {
   readonly description: string
   readonly inputSchema: Record<string, unknown>
   readonly execute: (input: any, context: ToolExecutionContext) => Promise<ToolResult>
-  /** Cancellation for the registration: should this tool remain registered? */
+}
+
+/**
+ * Options accepted alongside a tool registration.
+ *
+ * The registration signal belongs here, not on the descriptor: aborting it is
+ * how the documented API unregisters a tool.
+ */
+export interface RegisterToolOptions {
   readonly signal?: AbortSignal | undefined
 }
 
 /** The producer surface exposed on `document.modelContext`. */
 export interface ModelContext {
-  readonly registerTool: (tool: ToolDescriptor) => void | Promise<unknown>
+  readonly registerTool: (
+    tool: ToolDescriptor,
+    options?: RegisterToolOptions,
+  ) => void | Promise<unknown>
 }
 
 /** Reads `document.modelContext`, when the page provides it. */

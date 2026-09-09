@@ -6,4 +6,10 @@
  * already using. No DOM automation, and no external browser-session bridge.
  */
 export * as AgentWebMcp from './agentWebMcp.js'
-export type { ModelContext, ToolDescriptor, ToolExecutionContext, ToolResult } from './webmcp.js'
+export type {
+  ModelContext,
+  RegisterToolOptions,
+  ToolDescriptor,
+  ToolExecutionContext,
+  ToolResult,
+} from './webmcp.js'

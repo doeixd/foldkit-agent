@@ -1,6 +1,6 @@
 import { Agent } from '@foldkit/agent'
 import { AgentWebMcp } from '@foldkit/agent-webmcp'
-import type { ModelContext, ToolDescriptor } from '@foldkit/agent-webmcp'
+import type { ModelContext, RegisterToolOptions, ToolDescriptor } from '@foldkit/agent-webmcp'
 import { Effect, Option } from 'effect'
 import { AppAgent, type Principal, bindAgent } from './agent.js'
 import { Message, resetIds } from './app.js'
@@ -8,14 +8,14 @@ import { makeStore } from './store.js'
 
 /** Stands in for `document.modelContext` outside a browser. */
 class RecordingModelContext implements ModelContext {
-  readonly tools: Array<ToolDescriptor> = []
+  readonly tools: Array<{ tool: ToolDescriptor; signal: AbortSignal | undefined }> = []
 
-  registerTool = (tool: ToolDescriptor): void => {
-    this.tools.push(tool)
+  registerTool = (tool: ToolDescriptor, options?: RegisterToolOptions): void => {
+    this.tools.push({ tool, signal: options?.signal })
   }
 
   live(): ReadonlyArray<ToolDescriptor> {
-    return this.tools.filter(tool => tool.signal?.aborted !== true)
+    return this.tools.filter(entry => entry.signal?.aborted !== true).map(entry => entry.tool)
   }
 
   tool(name: string): ToolDescriptor {

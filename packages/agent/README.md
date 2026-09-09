@@ -185,7 +185,9 @@ dispatch the Message. A failure at any step means no Message reaches `update`.
 `available` is checked before `authorize`, so a capability the Model does not
 currently offer reports as unavailable rather than leaking whether the caller
 would have been permitted. Decoding rejects undeclared fields, matching the
-`additionalProperties: false` the derived JSON Schema advertises.
+`additionalProperties: false` the derived JSON Schema advertises. A capability
+with no payload accepts `{}` and nothing else -- not `[]`, not a string, and not
+an object with fields it never declared.
 
 Failures are tagged and `Schema`-backed, so `Effect.catchTag` narrows them and
 an adapter can encode one to JSON and send it across a protocol boundary:
