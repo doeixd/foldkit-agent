@@ -49,9 +49,27 @@ it as a transport fault, which is why it is not one.
 
 ## Over HTTP
 
-`httpHandler` implements the Streamable HTTP transport on one endpoint that
-answers POST, GET and DELETE. It is transport-neutral, so it sits behind any
-server:
+`httpApp` serves the Streamable HTTP transport as an Effect HTTP application,
+so it runs behind any Effect server or as a plain web handler, on Node, Bun,
+Deno or a worker:
+
+```ts
+import * as HttpEffect from 'effect/unstable/http/HttpEffect'
+
+const handler = HttpEffect.toWebHandler(
+  AgentMcp.httpApp({
+    createAgent: ({ principal }) => bindAgentFor(principal),
+    authenticate: request => verify(request.headers['authorization']),
+    allowedOrigins: ['https://app.example'],
+  }),
+)
+
+const response = await handler(request) // Request -> Response
+```
+
+Underneath, `httpHandler` holds the session and security rules against a
+transport-neutral request shape. Reach for it directly only to embed the server
+in something that is not Effect-based:
 
 ```ts
 const server = AgentMcp.httpHandler({

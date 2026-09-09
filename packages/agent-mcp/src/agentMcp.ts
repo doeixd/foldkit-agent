@@ -8,4 +8,5 @@ export {
   type SseEvent,
   type SseStream,
 } from './http.js'
+export { httpApp, type HttpAppOptions } from './httpApp.js'
 export { stdio, type StdioOptions } from './stdio.js'

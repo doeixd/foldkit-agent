@@ -15,3 +15,4 @@ export type {
   SseEvent,
   SseStream,
 } from './http.js'
+export type { HttpAppOptions } from './httpApp.js'
