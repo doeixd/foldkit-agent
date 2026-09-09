@@ -5,7 +5,10 @@
     "outDir": ".tsbuild",
     "emitDeclarationOnly": true,
     "composite": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "@foldkit/agent": ["../agent/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
   "references": [{ "path": "../agent" }]

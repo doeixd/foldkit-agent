@@ -15,6 +15,7 @@
     "foldkit": "0.158.2",
     "tsdown": "^0.23.0",
     "typescript": "^5.7.2",
+    "unrun": "^0.3.1",
     "vitest": "^2.1.8"
   }
 }
