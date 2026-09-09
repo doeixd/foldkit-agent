@@ -1,6 +1,6 @@
 # `@foldkit/agent`
 
-> **Proposal** — a thin, Schema-first agent layer for Foldkit.
+> A thin, Schema-first agent layer for Foldkit.
 >
 > Project a Foldkit application's **Model** and **Message union** into a deliberate agent interface, then expose the same contract through **WebMCP**, MCP, in-app agents, A2A, or other protocols without implementing application behavior twice.
 
@@ -24,9 +24,22 @@
 
 ## Status
 
-This README describes a **proposed API**, not an API that currently ships with Foldkit.
+This document is both the design rationale and the documentation for what is
+implemented in this repository:
 
-The proposal is intentionally built on Foldkit's existing architecture rather than introducing a second application-action system.
+| Package | What it is |
+| --- | --- |
+| [`@foldkit/agent`](./packages/agent) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
+| [`@foldkit/agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
+
+It is deliberately built on Foldkit's existing architecture rather than
+introducing a second application-action system.
+
+One part of the original proposal cannot be built from outside Foldkit. As of
+`v0.158.2`, `Runtime.makeApplication` accepts no `agent` option and its runtime
+handle exposes neither the current Model nor a dispatch function, so the
+application supplies that seam through `Agent.bind`. See
+[Runtime integration](#runtime-integration).
 
 As of Foldkit `v0.158.2`, Foldkit already has most of the underlying machinery:
 
@@ -177,8 +190,6 @@ The core package does **not** make MCP or WebMCP the source of truth. Foldkit re
 
 # Installation
 
-Proposed packages:
-
 ```bash
 pnpm add @foldkit/agent
 ```
@@ -189,13 +200,11 @@ Browser-native WebMCP:
 pnpm add @foldkit/agent @foldkit/agent-webmcp
 ```
 
-External MCP:
+`foldkit` and `effect` are peer dependencies. Foldkit `0.158.2` peer-depends on
+`effect@4.0.0-rc.112`, so the snippets here use Effect 4 names.
 
-```bash
-pnpm add @foldkit/agent @foldkit/agent-mcp
-```
-
-`foldkit` and `effect` remain peer dependencies.
+An external MCP adapter (`@foldkit/agent-mcp`) is still proposed rather than
+implemented; the [section below](#external-mcp-adapter) describes its shape.
 
 # Quick start
 
@@ -213,7 +222,7 @@ const Todo = Schema.Struct({
 
 const Model = Schema.Struct({
   todos: Schema.Array(Todo),
-  selectedTodoId: Schema.OptionFromSelf(Schema.String),
+  selectedTodoId: Schema.Option(Schema.String),
 })
 
 type Model = typeof Model.Type
@@ -242,39 +251,33 @@ const Message = defineMessageUnion({
 })
 ```
 
-Project the Model state that agents may observe:
+Bind the constructors to this application's Model. TypeScript cannot infer a
+Model from a `select` or `available` callback alone, so fixing it once removes
+the annotation from every call site:
 
 ```ts
 import { Agent } from "@foldkit/agent"
 
-const AgentContext = Schema.Struct({
-  selectedTodoId: Schema.OptionFromSelf(Schema.String),
-  todos: Schema.Array(Todo),
-})
-
-const context = Agent.context({
-  schema: AgentContext,
-
-  select: (model: Model) => ({
-    selectedTodoId: model.selectedTodoId,
-    todos: model.todos,
-  }),
-})
+const TodoAgent = Agent.forModel<Model>()
 ```
 
-Expose a subset of the **existing Message union**:
+Project the Model state that agents may observe:
 
 ```ts
-const messages = Agent.expose(Message, {
-  RequestedCreateTodo: {
-    name: "create_todo",
-    description: "Create a new todo",
-  },
+const context = Agent.pick(Model, ["selectedTodoId", "todos"])
+```
 
-  RequestedRenameTodo: {
-    name: "rename_todo",
-    description: "Rename an existing todo",
-  },
+`Agent.pick` derives the context schema and the projection from one field list.
+Where the projection is not a straight subset of the Model, write it out with
+`Agent.context({ schema, select })`.
+
+Expose a subset of the **existing Message union**. A variant that needs nothing
+but a description can be written as one:
+
+```ts
+const messages = TodoAgent.expose(Message, {
+  RequestedCreateTodo: "Create a new todo",
+  RequestedRenameTodo: "Rename an existing todo",
 
   RequestedDeleteTodo: {
     name: "delete_todo",
@@ -286,22 +289,28 @@ const messages = Agent.expose(Message, {
 Combine them:
 
 ```ts
-const AppAgent = Agent.define({
+const AppAgent = TodoAgent.define({
   context,
   messages,
 })
 ```
 
-Attach the definition to the Foldkit Runtime:
+Bind the definition to the live Runtime:
 
 ```ts
-const Application = Runtime.makeApplication({
-  // existing Foldkit application configuration...
-  agent: AppAgent,
+const agentRuntime = TodoAgent.bind({
+  definition: AppAgent,
+
+  host: {
+    model: currentModel,
+    dispatch: sendToRuntime,
+    subscribe: onModelChange,
+  },
 })
 ```
 
-From that one definition, protocol adapters can derive their tool surfaces automatically.
+From that one definition, protocol adapters derive their tool surfaces
+automatically.
 
 # What gets generated
 
@@ -327,7 +336,7 @@ Message constructor  → Message.RequestedDeleteTodo
 execution            → Runtime.dispatch(...)
 ```
 
-A WebMCP adapter can mechanically produce something equivalent to:
+The WebMCP adapter mechanically produces the equivalent of:
 
 ```ts
 await document.modelContext.registerTool({
@@ -335,10 +344,10 @@ await document.modelContext.registerTool({
   description: "Delete a todo",
   inputSchema: /* derived JSON Schema */,
 
-  execute: async ({ id }, { signal }) =>
-    agentRuntime.messages.dispatch(
+  execute: async (input, { signal }) =>
+    agentRuntime.messages.dispatchUnknown(
       "delete_todo",
-      { id },
+      input,
       {
         id: crypto.randomUUID(),
         transport: "webmcp",
@@ -347,6 +356,9 @@ await document.modelContext.registerTool({
     ),
 })
 ```
+
+`dispatchUnknown` rather than `dispatch`, because the name and payload arrive
+from the wire and cannot be checked at compile time.
 
 An external MCP adapter can expose the same contract through `tools/list` and `tools/call`.
 
@@ -459,15 +471,18 @@ const AppAgent = Agent.define({
 })
 ```
 
-Conceptual signature:
+Signature:
 
 ```ts
-Agent.define<Model, Message, Context, Resources>(options: {
+Agent.define<Model, Context, Principal, ByName, ByTag>(options: {
   context?: Agent.Context<Model, Context>
-  messages: Agent.ExposedMessages<Message>
+  messages: Agent.ExposedMessages<Model, Principal, ByName, ByTag>
   resources?: ReadonlyArray<Agent.Resource<Model, unknown>>
-}): Agent.Definition<Model, Message, Context, Resources>
+}): Agent.Definition<Model, Context, Principal, ByName, ByTag>
 ```
+
+`ByName` and `ByTag` carry each capability's input type. They are inferred, and
+they are what makes [dispatch](#dispatch) checked.
 
 `Agent.define` contains no model-provider or MCP/WebMCP configuration. It describes the application's agent contract only.
 
@@ -486,14 +501,26 @@ const context = Agent.context({
 })
 ```
 
-Conceptual signature:
+Signature:
 
 ```ts
 Agent.context<Model, Context>(options: {
-  schema: Schema.Schema<Context>
+  schema: Schema.Codec<Context>
   select: (model: Model) => Context
 }): Agent.Context<Model, Context>
 ```
+
+### `Agent.pick`
+
+When the projection is a straight subset of the Model, `Agent.pick` derives both
+halves from one field list:
+
+```ts
+const context = Agent.pick(Model, ["selectedTodoId", "todos"])
+```
+
+Writing the field list twice invites the schema and `select` to drift, and a
+mismatch would only surface when the context is read.
 
 ### `schema`
 
@@ -521,21 +548,30 @@ const messages = Agent.expose(Message, {
 })
 ```
 
-Conceptually:
+A variant that needs nothing but a description can be written as one:
 
 ```ts
-Agent.expose<MessageUnion, SelectedTags>(
-  Message: MessageUnion,
-  variants: {
-    [Tag in SelectedTags]: Agent.VariantConfig<
-      MessageUnion,
-      Tag
-    >
-  }
-): Agent.ExposedMessages<MessageUnion, SelectedTags>
+const messages = Agent.expose(Message, {
+  RequestedCreateTodo: "Create a todo",
+  RequestedDeleteTodo: "Delete a todo",
+})
 ```
 
-For every selected variant, Foldkit can derive:
+Signature:
+
+```ts
+Agent.expose<Cases, Variants, Model, Principal>(
+  Message: MessageUnion<Cases>,
+  variants: Variants,
+): Agent.ExposedMessages<
+  Model,
+  Principal,
+  CapabilitiesByName<Cases, Variants>,
+  CapabilitiesByTag<Cases, Variants>
+>
+```
+
+For every selected variant, Foldkit derives:
 
 - Message tag;
 - constructor;
@@ -543,9 +579,10 @@ For every selected variant, Foldkit can derive:
 - JSON Schema;
 - default external name;
 - decoding logic;
-- dispatch logic.
+- dispatch logic;
+- the capability's input type, for checked dispatch.
 
-There should be no production `exposeAll()` default. Exposure is a capability boundary.
+There is no `exposeAll()`. Exposure is a capability boundary.
 
 ## `Agent.VariantConfig`
 
@@ -561,7 +598,7 @@ RequestedDeleteTodo: {
 }
 ```
 
-Conceptual shape:
+The shape:
 
 ```ts
 interface VariantConfig<
@@ -606,7 +643,12 @@ RequestedDeleteTodo: {
 }
 ```
 
-Without an override, adapters may normalize the Message tag.
+Without an override, the Message tag is normalized: `RequestedDeleteTodo`
+becomes `requested_delete_todo`. Every capital starts a word, with no special
+case for runs of them, so a tag containing an acronym is better given an
+explicit name. The name must match `[a-zA-Z0-9_-]{1,128}`, which is what MCP and
+WebMCP accept, and an invalid one fails at `Agent.expose` rather than at
+registration.
 
 The internal Message tag never changes.
 
@@ -639,7 +681,7 @@ RequestedDeleteTodo: {
 }
 ```
 
-Conceptual signature:
+Signature:
 
 ```ts
 readonly available?: (model: Model) => boolean
@@ -657,7 +699,9 @@ agent-visible capability set
 WebMCP registrations reconciled
 ```
 
-A WebMCP adapter can use registration `AbortSignal`s to unregister capabilities that are no longer available and register them again when state changes.
+The adapter holds one `AbortController` per registered tool: when a capability
+becomes unavailable its registration signal is aborted, and when it returns it
+is registered again.
 
 `available` controls **discoverability/capability presence**, not authorization. Calls may still require `authorize`, and backend/domain authorization remains authoritative.
 
@@ -674,7 +718,7 @@ RequestedDeleteTodo: {
 }
 ```
 
-Conceptual request:
+The request:
 
 ```ts
 interface AuthorizationRequest<Input, Model, Principal> {
@@ -685,7 +729,9 @@ interface AuthorizationRequest<Input, Model, Principal> {
 }
 ```
 
-Denied calls never dispatch a Message.
+Denied calls never dispatch a Message. `available` is checked first, so a
+capability the Model does not currently offer reports as unavailable rather than
+leaking whether the caller would have been permitted.
 
 This is an additional interface boundary, not a replacement for authorization in Commands, APIs, services, or databases.
 
@@ -765,7 +811,9 @@ RequestedDeleteTodo: {
 }
 ```
 
-Conceptually:
+Completion is **not executed** in this version. The contract is recorded and
+exposed through introspection, and validated dispatch remains the completion
+boundary:
 
 ```ts
 interface Completion<Request, Result> {
@@ -800,7 +848,7 @@ const TodosResource = Agent.resource("todos", {
 })
 ```
 
-Conceptual signature:
+Signature:
 
 ```ts
 Agent.resource<Model, Value>(
@@ -833,21 +881,19 @@ Agent.messages(AppAgent)
 Agent.contextSchema(AppAgent)
 ```
 
-Conceptual signatures:
+Signatures:
 
 ```ts
-Agent.schema(
-  definition: Agent.Definition<any, any, any, any>,
-): Agent.Schema
-
-Agent.messages(
-  definition: Agent.Definition<any, any, any, any>,
-): ReadonlyArray<Agent.MessageDescriptor>
-
-Agent.contextSchema(
-  definition: Agent.Definition<any, any, any, any>,
-): JsonSchema.JsonSchema | undefined
+Agent.schema(definition): Agent.Schema
+Agent.messages(definition): ReadonlyArray<Agent.MessageDescriptor>
+Agent.resources(definition): ReadonlyArray<Agent.ResourceDescriptor>
+Agent.contextSchema(definition): Record<string, unknown> | undefined
 ```
+
+A `MessageDescriptor` carries the protocol `name`, the internal `tag`, the
+`description`, the derived `inputSchema`, and two flags: `modelDependent` when
+the variant declares `available`, and `requiresAuthorization` when it declares
+`authorize`.
 
 Adapters can depend on this protocol-neutral description rather than inspecting application internals.
 
@@ -869,9 +915,11 @@ interface Invocation {
 }
 ```
 
-The optional `signal` gives adapters a common cancellation primitive.
+The optional `signal` gives adapters a common cancellation primitive. For WebMCP
+it maps from the cancellation signal passed to a tool's `execute` function.
 
-For WebMCP this maps naturally from the cancellation signal passed to a tool's `execute` function.
+The whole `Invocation` is optional at the call site. In-app callers omit it: the
+id is generated and the transport defaults to `in-app`.
 
 # Runtime integration
 
@@ -883,7 +931,7 @@ The Foldkit Runtime already owns the pieces an agent adapter needs:
 - Message history;
 - Command execution.
 
-So the natural integration point is:
+The natural integration point would be:
 
 ```ts
 Runtime.makeApplication({
@@ -892,7 +940,27 @@ Runtime.makeApplication({
 })
 ```
 
-Conceptually this binds an abstract `Agent.Definition` to a live runtime:
+Foldkit `0.158.2` does not accept that option, and `MakeRuntimeReturn` exposes
+neither the current Model nor a dispatch function, so it cannot be implemented
+from outside Foldkit. Until it can, the application supplies the seam:
+
+```ts
+const agentRuntime = Agent.bind({
+  definition: AppAgent,
+
+  host: {
+    model: () => currentModel,          // read the Model
+    dispatch: message => send(message),  // send a Message into the Runtime
+    subscribe: onModelChange,            // optional: lets adapters reconcile
+    principal: () => currentPrincipal,   // optional: identity for authorize
+  },
+})
+```
+
+If Foldkit later accepts an `agent` option, it can construct the same seam
+internally without the contract changing.
+
+Binding an abstract `Agent.Definition` to a live runtime gives:
 
 ```text
 Agent.Definition
@@ -907,13 +975,13 @@ bound AgentRuntime
       └── messages.dispatch(name, input, invocation)
 ```
 
-A possible internal seam:
+The seam:
 
 ```ts
-interface AgentRuntime {
-  readonly definition: Agent.Definition<any, any, any, any>
+interface AgentRuntime<Model, Context, Principal, ByName, ByTag> {
+  readonly definition: Agent.Definition<Model, Context, Principal, ByName, ByTag>
 
-  readonly context: Effect.Effect<unknown>
+  readonly context: Effect.Effect<Context | undefined>
 
   readonly resources: {
     readonly read: (
@@ -922,27 +990,67 @@ interface AgentRuntime {
   }
 
   readonly messages: {
-    readonly list: Effect.Effect<
-      ReadonlyArray<Agent.MessageDescriptor>
-    >
+    /** Every exposed capability. */
+    readonly list: Effect.Effect<ReadonlyArray<Agent.MessageDescriptor>>
 
-    readonly dispatch: (
+    /** Only those whose `available(model)` currently holds. */
+    readonly available: Effect.Effect<ReadonlyArray<Agent.MessageDescriptor>>
+
+    /** Checked: names a capability by Message constructor or by name. */
+    readonly dispatch: Agent.Dispatch<ByName, ByTag>
+
+    /** The protocol path: a name and payload that came off the wire. */
+    readonly dispatchUnknown: (
       name: string,
       input: unknown,
-      invocation: Agent.Invocation,
-    ) => Effect.Effect<
-      Agent.DispatchResult,
-      Agent.DispatchError
-    >
+      invocation?: Partial<Agent.Invocation>,
+    ) => Effect.Effect<Agent.DispatchResult, Agent.DispatchError>
   }
+
+  /** Model changes, when the host supports it. Returns an unsubscribe. */
+  readonly subscribe: (listener: () => void) => () => void
 }
 ```
 
 Protocol adapters bind to this seam rather than reaching into `update` directly.
 
-# WebMCP adapter
+## Dispatch
 
-Proposed package:
+A capability is named by its Message constructor or by its protocol name. Both
+are checked, and both infer the input:
+
+```ts
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id })
+agentRuntime.messages.dispatch("delete_todo", { id })
+```
+
+Each of these fails to compile:
+
+```ts
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { todoId }) // wrong payload
+agentRuntime.messages.dispatch(Message.ReceivedTodos, { todos })        // not exposed
+agentRuntime.messages.dispatch("delete_todoo", { id })                  // no such capability
+```
+
+Prefer the reference form: it survives renaming a capability, and it needs no
+name at all for a variant that never declared one.
+
+Dispatch runs in a fixed order — resolve the capability, check `available`,
+decode input through its Effect Schema, run `authorize`, then construct and
+dispatch the Message. A failure at any step means no Message reaches `update`.
+Decoding rejects undeclared fields, matching the `additionalProperties: false`
+that the derived JSON Schema advertises.
+
+Failures are `Schema`-backed, so `Effect.catchTag` narrows them and an adapter
+can encode one to JSON and send it on: `AgentUnknownCapabilityError`,
+`AgentCapabilityUnavailableError`, `AgentInvalidInputError`,
+`AgentAuthorizationError`, and `AgentResourceError`. Every `message` is written
+for the calling agent and never restates application internals.
+
+Dispatch runs inside an `Agent.dispatch` span annotated with the capability,
+transport, and invocation id.
+
+# WebMCP adapter
 
 ```text
 @foldkit/agent-webmcp
@@ -953,10 +1061,13 @@ Minimal usage:
 ```ts
 import { AgentWebMcp } from "@foldkit/agent-webmcp"
 
-const registration = AgentWebMcp.register({
-  application: Application,
-})
+const registration = AgentWebMcp.register({ agent: agentRuntime })
 ```
+
+The registration exposes `refresh()` to reconcile against the current Model,
+`registered()` for the capability names currently registered, and
+`unregister()`. See the [package README](./packages/agent-webmcp) for the
+options.
 
 The adapter projects exposed Message variants into `document.modelContext.registerTool(...)` calls.
 
@@ -1047,7 +1158,8 @@ That lets the browser API change without forcing the Foldkit agent contract to c
 
 # External MCP adapter
 
-Proposed package:
+Proposed, not implemented. The contract is protocol-neutral, so this adapter
+reads the same descriptors the WebMCP one does.
 
 ```text
 @foldkit/agent-mcp
@@ -1058,16 +1170,14 @@ Conceptually:
 ```ts
 import { AgentMcp } from "@foldkit/agent-mcp"
 
-const server = AgentMcp.make({
-  application: Application,
-})
+const server = AgentMcp.make({ agent: agentRuntime })
 ```
 
 or:
 
 ```ts
 AgentMcp.serve({
-  application: Application,
+  agent: agentRuntime,
   path: "/mcp",
 })
 ```
@@ -1151,9 +1261,7 @@ with an API such as:
 ```ts
 import { AgentNative } from "@foldkit/agent-agent-native"
 
-AgentNative.bind({
-  application: Application,
-})
+AgentNative.bind({ agent: agentRuntime })
 ```
 
 The adapter would compile exposed Foldkit Messages into generated Agent Native Actions:
@@ -1179,7 +1287,7 @@ defineAction({
   schema: /* derived from the Foldkit Message Schema */,
 
   run: input =>
-    foldkitAgentRuntime.messages.dispatch(
+    foldkitAgentRuntime.messages.dispatchUnknown(
       "delete_todo",
       input,
       invocation,
@@ -1285,7 +1393,13 @@ agent adapter
 Foldkit Runtime.dispatch
 ```
 
-The same `AppAgent` used by WebMCP and MCP can therefore power an application-native chat or command surface.
+The same `AppAgent` used by WebMCP and MCP can therefore power an
+application-native chat or command surface. In-app, dispatch is checked and the
+invocation can be omitted:
+
+```ts
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id })
+```
 
 # DevTools MCP vs `@foldkit/agent`
 
@@ -1374,6 +1488,8 @@ For WebMCP, browser/origin permissions and protocol controls such as `exposedTo`
 
 The contract should be testable without an LLM.
 
+Both tests below are in the suite, verbatim:
+
 ```ts
 test("only intended Messages are exposed", () => {
   expect(
@@ -1404,6 +1520,9 @@ test("delete_todo derives its input Schema", () => {
 ```
 
 Agent-originated transitions need no special state-machine semantics. They are ordinary Foldkit Messages and can use the existing Story/Scene testing model.
+
+A contract can also be exercised end to end without a browser: bind it to a host
+that records what it dispatches, and assert on that.
 
 # Design principles
 
@@ -1464,34 +1583,28 @@ Adapters dispatch Messages. They do not reimplement application behavior.
 - infer arbitrary capabilities from rendered DOM;
 - create a second `Action` architecture beside Foldkit.
 
-# Minimal v1
+# v1
 
-The core can remain very small:
+The core is small:
 
 ```ts
-Agent.context(...)
+Agent.context(...)   // or Agent.pick(...)
 Agent.expose(...)
 Agent.define(...)
+Agent.bind(...)
 ```
 
-with Runtime integration:
+Deferred, as planned:
 
-```ts
-Runtime.makeApplication({
-  agent: AppAgent,
-})
-```
-
-A realistic v1 can defer:
-
-- async completion tracking;
-- custom input mapping;
-- named resources;
+- async completion tracking (the contract is recorded, not executed);
 - A2A;
 - automatic docs generation;
 - history/replay.
 
-The smallest useful production adapter is likely WebMCP:
+Shipped rather than deferred, because they cost little: custom input mapping
+(`input` + `toMessage`) and named resources.
+
+The smallest useful production adapter is WebMCP:
 
 ```text
 read exposed Message descriptors
@@ -1505,27 +1618,16 @@ validate + Runtime.dispatch(...)
 
 External MCP can follow from the same contract.
 
-# Proposed v1 API
+# The v1 API, end to end
 
 ```ts
-const AgentContext = Schema.Struct({
-  selectedTodoId: Schema.OptionFromSelf(Schema.String),
-})
+const TodoAgent = Agent.forModel<Model>()
 
-const AppAgent = Agent.define({
-  context: Agent.context({
-    schema: AgentContext,
+const AppAgent = TodoAgent.define({
+  context: Agent.pick(Model, ["selectedTodoId"]),
 
-    select: model => ({
-      selectedTodoId: model.selectedTodoId,
-    }),
-  }),
-
-  messages: Agent.expose(Message, {
-    RequestedCreateTodo: {
-      name: "create_todo",
-      description: "Create a todo",
-    },
+  messages: TodoAgent.expose(Message, {
+    RequestedCreateTodo: "Create a todo",
 
     RequestedDeleteTodo: {
       name: "delete_todo",
@@ -1537,18 +1639,22 @@ const AppAgent = Agent.define({
   }),
 })
 
-const Application = Runtime.makeApplication({
-  // ...
-  agent: AppAgent,
+const agentRuntime = TodoAgent.bind({
+  definition: AppAgent,
+  host: { model: currentModel, dispatch: sendToRuntime },
 })
 ```
 
 Browser adapter:
 
 ```ts
-AgentWebMcp.register({
-  application: Application,
-})
+AgentWebMcp.register({ agent: agentRuntime })
+```
+
+In-app, against the same contract:
+
+```ts
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id })
 ```
 
 That is the entire idea:
@@ -1559,7 +1665,9 @@ That is the entire idea:
 
 ## Should `Agent.context` be required?
 
-Probably not. A capability may contain every identifier it needs in its input.
+No. It is optional, and `Agent.contextSchema` returns `undefined` when a
+definition declares none. A capability may contain every identifier it needs in
+its input.
 
 ## Should descriptions live on the Message union itself?
 
@@ -1567,7 +1675,7 @@ Probably not initially. Agent descriptions are interface metadata. Keeping them 
 
 ## One tool per Message or one `dispatch` tool?
 
-For production WebMCP/MCP, one tool per exposed variant is probably the better default:
+One tool per exposed variant, which is what the WebMCP adapter registers:
 
 ```text
 create_todo
@@ -1583,7 +1691,10 @@ That should remain adapter policy. The current WebMCP producer API is tool-orien
 
 ## Should completion ship in v1?
 
-Probably not. Validated dispatch is already a useful and well-defined boundary. Completion tracking becomes important when external agents need synchronous outcomes from Command-driven workflows.
+It did not. Validated dispatch is a useful and well-defined boundary. The
+`completion` contract is accepted and surfaced through introspection, but
+nothing executes it yet. Completion tracking becomes important when external
+agents need synchronous outcomes from Command-driven workflows.
 
 # Summary
 
@@ -1615,6 +1726,20 @@ From there:
 ```
 
 WebMCP is particularly compelling because it can expose these capabilities directly from the page that already owns the Foldkit Runtime — no DOM automation and no external browser-session bridge required.
+
+## Repository
+
+```text
+packages/agent          @foldkit/agent
+packages/agent-webmcp   @foldkit/agent-webmcp
+```
+
+```bash
+pnpm install
+pnpm test        # vitest
+pnpm typecheck   # tsc -b
+pnpm build       # tsdown
+```
 
 **Build the state machine once. Let humans and agents speak the same Message language.**
 
