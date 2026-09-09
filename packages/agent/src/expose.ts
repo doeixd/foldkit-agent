@@ -90,6 +90,12 @@ export interface ExposedMessages<Model = unknown, Principal = unknown> {
   readonly variants: ReadonlyArray<ExposedVariant<Model, Principal>>
 }
 
+/** True for a struct Schema with no fields, whose JSON Schema needs normalizing. */
+const isEmptyStruct = (schema: unknown): boolean => {
+  const fields = (schema as { fields?: Record<string, unknown> }).fields
+  return fields !== undefined && Object.keys(fields).length === 0
+}
+
 /** Strips the `_tag` literal so only the agent-facing payload fields remain. */
 const payloadSchemaOf = (constructor: unknown): { schema: Schema.Struct<Fields>; empty: boolean } => {
   const fields = (constructor as { fields?: Fields }).fields ?? {}
@@ -144,11 +150,10 @@ export const expose = <
     const external = config.input
     const inputSchema = (external ?? payload.schema) as Schema.Codec<any, any, never, never>
 
+    const make = constructor as (value: unknown) => AnyMessage
     const toMessage = config.toMessage
     const construct = (input: unknown, context: InvocationContext<Model, Principal>): AnyMessage =>
-      toMessage === undefined
-        ? (constructor as (value: unknown) => AnyMessage)(input)
-        : ((constructor as (value: unknown) => AnyMessage)(toMessage(input, context)) as AnyMessage)
+      toMessage === undefined ? make(input) : make(toMessage(input, context))
 
     return {
       tag,
@@ -156,7 +161,7 @@ export const expose = <
       description: config.description,
       inputSchema,
       inputJsonSchema: toJsonSchema(inputSchema, {
-        emptyStructIsObject: external === undefined && payload.empty,
+        emptyStructIsObject: external === undefined ? payload.empty : isEmptyStruct(external),
       }),
       construct,
       available: config.available,
