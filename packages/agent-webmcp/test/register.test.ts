@@ -323,3 +323,89 @@ describe('AgentWebMcp.register', () => {
     expect(() => AgentWebMcp.register({ agent: makeRuntime() })).toThrow(/no document.modelContext/)
   })
 })
+
+describe('AgentWebMcp end to end', () => {
+  /**
+   * The adapter, the contract, and the Runtime together: a capability that is
+   * both Model-dependent and authorized, reached through a registered tool.
+   */
+  it('carries an authorization denial through to the tool caller', async () => {
+    let allowed = false
+    const definition = TodoAgent.define({
+      messages: TodoAgent.expose(Message, {
+        RequestedDeleteTodo: {
+          name: 'delete_todo',
+          description: 'Delete the selected todo',
+          available: model => Option.isSome(model.selectedTodoId),
+          authorize: () => allowed,
+        },
+      }),
+    })
+
+    model = { ...emptyModel, selectedTodoId: Option.some('a') }
+    const runtime = TodoAgent.bind({
+      definition,
+      host: { model: () => model, dispatch: (message: Message) => void dispatched.push(message) },
+    })
+
+    const registration = AgentWebMcp.register({ agent: runtime, modelContext })
+    await registration.refresh()
+
+    const denied = await modelContext.find('delete_todo').execute({ id: 'a' }, {})
+    expect(denied.isError).toBe(true)
+    expect(denied.content[0]?.text).toMatch(/Not authorized/)
+    expect(dispatched).toEqual([])
+
+    allowed = true
+    const permitted = await modelContext.find('delete_todo').execute({ id: 'a' }, {})
+    expect(permitted.isError).toBeFalsy()
+    expect(dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'a' }])
+  })
+
+  it('registers the external schema and dispatches the mapped Message', async () => {
+    const definition = TodoAgent.define({
+      messages: TodoAgent.expose(Message, {
+        RequestedCreateTodo: {
+          name: 'create_todo',
+          description: 'Create a todo',
+          input: Schema.Struct({ title: Schema.String }),
+          toMessage: ({ title }, { invocation }) => ({ title: `${title} (${invocation.id})` }),
+        },
+      }),
+    })
+
+    const runtime = TodoAgent.bind({
+      definition,
+      host: { model: () => model, dispatch: (message: Message) => void dispatched.push(message) },
+    })
+
+    const registration = AgentWebMcp.register({
+      agent: runtime,
+      modelContext,
+      invocationId: () => 'fixed-id',
+    })
+    await registration.refresh()
+
+    const tool = modelContext.find('create_todo')
+    expect(tool.inputSchema).toMatchObject({ required: ['title'] })
+
+    await tool.execute({ title: 'Write docs' }, {})
+    expect(dispatched).toEqual([
+      { _tag: 'RequestedCreateTodo', title: 'Write docs (fixed-id)' },
+    ])
+  })
+
+  it('rejects a field the registered schema does not advertise', async () => {
+    const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
+    await registration.refresh()
+
+    // The registered inputSchema says additionalProperties: false.
+    const result = await modelContext
+      .find('create_todo')
+      .execute({ title: 'x', completed: true }, {})
+
+    expect(result.isError).toBe(true)
+    expect(result.content[0]?.text).toMatch(/Invalid input/)
+    expect(dispatched).toEqual([])
+  })
+})

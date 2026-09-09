@@ -156,6 +156,11 @@ Dispatch runs in a fixed order: resolve the capability, check `available`,
 decode input through its Effect Schema, run `authorize`, then construct and
 dispatch the Message. A failure at any step means no Message reaches `update`.
 
+`available` is checked before `authorize`, so a capability the Model does not
+currently offer reports as unavailable rather than leaking whether the caller
+would have been permitted. Decoding rejects undeclared fields, matching the
+`additionalProperties: false` the derived JSON Schema advertises.
+
 Failures are tagged: `AgentUnknownCapabilityError`,
 `AgentCapabilityUnavailableError`, `AgentInvalidInputError`,
 `AgentAuthorizationError`, and `AgentResourceError` for resource reads.

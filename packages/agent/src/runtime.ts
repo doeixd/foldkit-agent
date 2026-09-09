@@ -131,8 +131,11 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
       }
 
       // Untrusted agent input crosses a Schema boundary before anything else.
+      // Excess properties are an error, not stripped: the derived JSON Schema
+      // advertises additionalProperties: false, so accepting them would enforce
+      // something looser than the contract the agent was handed.
       const decoded: unknown = yield* Effect.mapError(
-        Schema.decodeUnknownEffect(variant.inputSchema)(input),
+        Schema.decodeUnknownEffect(variant.inputSchema, { onExcessProperty: 'error' })(input),
         cause => new InvalidInputError({ capability: name, tag: variant.tag, cause }),
       )
 
