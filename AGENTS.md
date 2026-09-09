@@ -126,6 +126,19 @@ installed `.d.ts` before reaching for a remembered API.
   a suite full of positive cases.
 - **Tie generics to the definition they belong to.** A host's Message type
   inferred independently of the contract let an incompatible host bind.
+- **To type a callback from a sibling property, map over the inferred type, not
+  over the keys you already know.** `expose`'s variants map was mapped over the
+  Message tags, so `authorize`'s input could only be pinned to one type for
+  every variant, and `any` was what kept `principal`/`model` inferable. Mapping
+  over `keyof Ext` instead makes it a *reverse mapped type*: TypeScript infers
+  one `Ext[Tag]` per variant from that variant's own `input` codec, then
+  contextually types the callbacks beside it. A conditional is fine in the
+  template (`Tag extends keyof C ? ... : never`) and in a callback parameter
+  (`unknown extends Ext ? Payload : Ext`); it is only circular when the mapped
+  type is F-bounded on the object being checked. The parameter must be
+  `V & Mapped<...>` to keep `V` for the return type -- and an intersection is
+  not excess-property-checked, so the unknown-key rejection has to move into the
+  template.
 
 **Async**
 

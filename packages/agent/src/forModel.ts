@@ -24,9 +24,13 @@ import type { MessageUnion } from 'foldkit/message'
 export interface BoundAgent<Model, Principal> {
   readonly context: <Value>(options: ContextOptions<Model, Value>) => Context<Model, Value>
 
-  readonly expose: <const C extends Cases, const V extends ValidateVariants<C, Model, Principal>>(
+  readonly expose: <
+    const C extends Cases,
+    const V extends Record<string, unknown>,
+    Ext extends Record<string, unknown> = {},
+  >(
     message: MessageUnion<C>,
-    variants: V,
+    variants: V & ValidateVariants<C, Ext, Model, Principal>,
   ) => ExposedMessages<Model, Principal, CapabilitiesByName<C, V>, CapabilitiesByTag<C, V>>
 
   readonly resource: <Value>(

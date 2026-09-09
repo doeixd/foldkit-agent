@@ -26,10 +26,10 @@ Agent.expose(Message, {
 
 // `toMessage` must produce the internal Message payload.
 Agent.expose(Message, {
+  // @ts-expect-error the RequestedDeleteTodo payload requires `id`, not `todoId`.
   RequestedDeleteTodo: {
     description: 'Delete a todo',
     input: Schema.Struct({ id: Schema.String }),
-    // @ts-expect-error the RequestedDeleteTodo payload requires `id`, not `todoId`.
     toMessage: ({ id }: { id: string }) => ({ todoId: id }),
   },
 })
@@ -84,6 +84,99 @@ TodoAgent.expose(Message, {
   RequestedDeleteTodo: {
     description: 'Delete a todo',
     authorize: ({ model, transport }) => transport === 'webmcp' && model.todos.length > 0,
+  },
+})
+
+// A direct variant's `authorize` sees the decoded Message payload.
+Agent.expose(Message, {
+  RequestedCreateTodo: {
+    description: 'Create a todo',
+    authorize: ({ input }) => input.title !== '',
+  },
+})
+
+Agent.expose(Message, {
+  RequestedCreateTodo: {
+    description: 'Create a todo',
+    // @ts-expect-error `notAField` is not on the RequestedCreateTodo payload.
+    authorize: ({ input }) => input.notAField === undefined,
+  },
+})
+
+// The input type arrives alongside `principal` and `model`, not instead of them.
+const Authorized = Agent.forModel<Model, { readonly allowed: boolean }>()
+
+Authorized.expose(Message, {
+  RequestedCreateTodo: {
+    description: 'Create a todo',
+    authorize: ({ input, model, principal, transport }) =>
+      principal.allowed && model.todos.length === 0 && input.title !== '' && transport === 'mcp',
+  },
+})
+
+Authorized.expose(Message, {
+  RequestedCreateTodo: {
+    description: 'Create a todo',
+    // @ts-expect-error `notAField` is not on the Model.
+    authorize: ({ model }) => model.notAField,
+  },
+})
+
+Authorized.expose(Message, {
+  RequestedCreateTodo: {
+    description: 'Create a todo',
+    // @ts-expect-error `notAField` is not on the principal.
+    authorize: ({ principal }) => principal.notAField,
+  },
+})
+
+// An inline mapped variant infers both callbacks from its own `input` codec.
+Agent.expose(Message, {
+  RequestedRenameTodo: {
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String, heading: Schema.String }),
+    toMessage: input => ({ id: input.id, title: input.heading }),
+    authorize: ({ input }) => input.heading !== '',
+  },
+})
+
+Agent.expose(Message, {
+  RequestedRenameTodo: {
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String, heading: Schema.String }),
+    toMessage: input => ({ id: input.id, title: input.heading }),
+    // @ts-expect-error `notAField` is not on the declared input.
+    authorize: ({ input }) => input.notAField === undefined,
+  },
+})
+
+Agent.expose(Message, {
+  RequestedRenameTodo: {
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String, heading: Schema.String }),
+    // @ts-expect-error `notAField` is not on the declared input.
+    toMessage: input => ({ id: input.id, title: input.notAField }),
+  },
+})
+
+// A transforming input codec hands the callbacks its decoded side.
+const Counted = defineMessageUnion({ Set: { value: Schema.Number } })
+
+Agent.expose(Counted, {
+  Set: {
+    description: 'Set a value',
+    input: Schema.Struct({ value: Schema.NumberFromString }),
+    toMessage: input => ({ value: input.value + 1 }),
+    authorize: ({ input }) => input.value > 0,
+  },
+})
+
+Agent.expose(Counted, {
+  Set: {
+    description: 'Set a value',
+    input: Schema.Struct({ value: Schema.NumberFromString }),
+    // @ts-expect-error the decoded side is a number, so the wire string is gone.
+    toMessage: input => ({ value: input.value.padStart(2, '0') }),
   },
 })
 

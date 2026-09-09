@@ -31,17 +31,20 @@ export type MessageInputOf<C extends Cases, Tag extends keyof C & string> =
   ConstructorFor<C, Tag> extends (value: infer Input) => any ? Input : never
 
 /**
- * A variant that exposes its internal Message payload directly.
+ * The external input of one variant: its `input` codec's decoded type, or the
+ * Message payload when it declares no `input`.
  *
- * `authorize` is pinned to the same request type as the mapped variant's. The
- * two members are otherwise indistinguishable to contextual typing, and a
- * callback parameter that differs between them makes `principal`, `model` and
- * `transport` uninferable at the call site. `input` is the field that pays for
- * that; `Agent.variant` types it where it matters.
+ * `Ext` is inferred per tag by `expose`, from the `input` codec sitting beside
+ * the callbacks. A variant without `input` leaves the inference with no
+ * candidate, which resolves to `unknown`; that is the direct form, whose
+ * external input *is* the payload.
  */
-type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
+type ExternalOr<Ext, MessageInput> = unknown extends Ext ? MessageInput : Ext
+
+/** A variant that exposes its internal Message payload directly. */
+type DirectVariant<MessageInput, Ext, Model, Principal> = VariantConfig<
   MessageInput,
-  any,
+  ExternalOr<Ext, MessageInput>,
   Model,
   Principal,
   MessageInput,
@@ -53,18 +56,19 @@ type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
 }
 
 /** A variant that maps a distinct external input onto its internal Message. */
-type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfig<
+type MappedVariant<MessageInput, Ext, Model, Principal> = VariantConfig<
   MessageInput,
-  ExternalInput,
+  ExternalOr<Ext, MessageInput>,
   Model,
   Principal,
   MessageInput,
   any,
   any
 > & {
-  readonly input: Schema.Codec<ExternalInput, any, never, never>
+  // The one place `Ext` appears bare: this is the site `expose` infers it from.
+  readonly input: Schema.Codec<Ext, any, never, never>
   readonly toMessage: (
-    input: ExternalInput,
+    input: ExternalOr<Ext, MessageInput>,
     context: InvocationContext<Model, Principal>,
   ) => MessageInput
 }
@@ -76,22 +80,26 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
  * exposes its Message payload directly, or supplies both `input` and
  * `toMessage`; an object with `input` alone matches no member and is rejected.
  *
- * This is a union rather than a conditional on `V[Tag]`, because a conditional
- * would be circular inside a reverse mapped type and would silently collapse to
- * the direct branch.
+ * This is mapped over `keyof Ext`, not `keyof C`, which makes it a reverse
+ * mapped type: `expose` infers one `Ext[Tag]` per declared variant, from that
+ * variant's own `input` codec, before it contextually types the callbacks
+ * beside it. That is what lets `authorize` and `toMessage` see a real input
+ * type instead of `any`. The tag check moves into the template, because an
+ * intersection is not subject to excess property checking.
  *
- * Both members must give `completion` the *same* type. A nested object literal
- * whose contextual type differs between union members gets no contextual type at
- * all, and `correlate`'s parameters then fail `noImplicitAny` -- so the inline
- * form types `request` as the Message payload and leaves `result` open.
- * `Agent.variant` is where a mapped input and the named Messages are both
- * checked.
+ * The direct and mapped members must agree on the type of every field a nested
+ * object literal is written into. A nested literal whose contextual type
+ * differs between union members gets no contextual type at all, and
+ * `correlate`'s parameters then fail `noImplicitAny` -- so `completion`'s
+ * request is the Message payload in both, and `Agent.variant` remains where a
+ * mapped input and the named Messages are checked together.
  */
-export type ValidateVariants<C extends Cases, Model, Principal> = {
-  readonly [Tag in keyof C & string]?:
-    | DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
-    | MappedVariant<MessageInputOf<C, Tag>, any, Model, Principal>
-    | string
+export type ValidateVariants<C extends Cases, Ext, Model, Principal> = {
+  readonly [Tag in keyof Ext]: Tag extends keyof C & string
+    ? | DirectVariant<MessageInputOf<C, Tag>, Ext[Tag], Model, Principal>
+      | MappedVariant<MessageInputOf<C, Tag>, Ext[Tag], Model, Principal>
+      | string
+    : never
 }
 
 /** The tags of the union that this variants object exposes. */
@@ -249,10 +257,10 @@ type VariantCompletion<Request, Success extends Constructors, Failure extends Co
 /**
  * Types a variant that maps a distinct external input onto its Message.
  *
- * Written inline, `toMessage` and `authorize` receive `any`: their input comes
- * from the `input` codec beside them, which TypeScript has not finished
- * inferring while it types the object. Passing the config through a generic
- * function infers it first, so the callbacks are checked.
+ * `expose` already infers `toMessage` and `authorize` from the `input` codec
+ * beside them. What it cannot infer inline is `completion`: `success` and
+ * `failure` are inference sites here, so `correlate`'s `result` is the union of
+ * the Messages this contract actually names rather than any Message.
  *
  * @example
  * ```ts
@@ -334,12 +342,13 @@ const payloadSchemaOf = (
  */
 export const expose = <
   const C extends Cases,
-  const V extends ValidateVariants<C, Model, Principal>,
+  const V extends Record<string, unknown>,
+  Ext extends Record<string, unknown> = {},
   Model = any,
   Principal = any,
 >(
   message: MessageUnion<C>,
-  variants: V,
+  variants: V & ValidateVariants<C, Ext, Model, Principal>,
 ): ExposedMessages<Model, Principal, CapabilitiesByName<C, V>, CapabilitiesByTag<C, V>> => {
   const union = message as unknown as Record<string, unknown>
 
