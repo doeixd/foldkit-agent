@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 import type { MessageUnion } from 'foldkit/message'
 import { toJsonSchema } from './jsonSchema.js'
+import { type CompiledCompletion, compileCompletion } from './completion.js'
 import { type SnakeCase, assertValidName, defaultName } from './naming.js'
 import type { AnyMessage, Completion, InvocationContext, VariantConfig } from './types.js'
 
@@ -144,6 +145,8 @@ export interface ExposedVariant<Model = unknown, Principal = unknown> {
   readonly available?: ((model: Model) => boolean) | undefined
   readonly authorize?: VariantConfig<any, any, Model, Principal>['authorize']
   readonly completion?: Completion | undefined
+  /** The completion contract compiled to the tags and predicate the runtime matches on. */
+  readonly compiledCompletion?: CompiledCompletion | undefined
 }
 
 /**
@@ -304,6 +307,9 @@ export const expose = <
       construct,
       messageConstructor: constructor,
       available: config.available,
+      ...(config.completion === undefined
+        ? {}
+        : { compiledCompletion: compileCompletion(config.completion, name) }),
       authorize: config.authorize,
       completion: config.completion,
     }

@@ -11,6 +11,7 @@ import {
 } from './errors.js'
 import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedVariant } from './expose.js'
 import { resolveInvocation } from './invocation.js'
+import { awaitCompletion } from './completion.js'
 import { messageTag } from './tag.js'
 import type {
   AnyMessage,
@@ -45,6 +46,13 @@ export interface AgentHost<Model, Message extends AnyMessage = AnyMessage, Princ
   readonly principal?: (invocation: Invocation) => Principal
   /** Subscribes to Model changes so adapters can reconcile availability. */
   readonly subscribe?: (listener: () => void) => () => void
+  /**
+   * Subscribes to every Message the Runtime processes.
+   *
+   * Required only by a contract that declares a `completion`, which needs to
+   * see the Message that finishes the operation.
+   */
+  readonly observe?: (listener: (message: AnyMessage) => void) => () => void
 }
 
 /**
@@ -198,6 +206,19 @@ export const bind = <
     definition.resources.map(resource => [resource.name, resource] as const),
   )
 
+  // A contract that cannot be honoured is refused here rather than at the first
+  // call, where it would look like an application bug.
+  const needsObserve = definition.messages.variants.filter(
+    variant => variant.compiledCompletion !== undefined,
+  )
+  if (needsObserve.length > 0 && host.observe === undefined) {
+    throw new Error(
+      `This host cannot observe Messages, which ${needsObserve
+        .map(variant => `"${variant.name}"`)
+        .join(', ')} needs to report completion. Supply host.observe.`,
+    )
+  }
+
   const descriptors = describeMessages(definition)
   const descriptorByName = new Map(
     descriptors.map(descriptor => [descriptor.name, descriptor] as const),
@@ -274,15 +295,39 @@ export const bind = <
       const context: InvocationContext<Model, Principal> = { model, principal, invocation }
       const message = variant.construct(decoded, context)
 
-      // `construct` always produces a member of this application's Message union.
-      const sent = host.dispatch(message as Message)
-      if (Effect.isEffect(sent)) {
-        yield* Effect.orDie(sent)
-      } else if (sent instanceof Promise) {
-        yield* Effect.orDie(Effect.promise(() => sent))
+      // Subscribed before dispatching: `update` can produce the completing
+      // Message synchronously, and a waiter that started afterwards would miss
+      // it and then sit until its timeout.
+      const waiter =
+        variant.compiledCompletion === undefined || host.observe === undefined
+          ? undefined
+          : awaitCompletion({
+              completion: variant.compiledCompletion,
+              capability: name,
+              input: decoded,
+              invocation,
+              observe: host.observe,
+            })
+
+      try {
+        // `construct` always produces a member of this application's Message union.
+        const sent = host.dispatch(message as Message)
+        if (Effect.isEffect(sent)) {
+          yield* Effect.orDie(sent)
+        } else if (sent instanceof Promise) {
+          yield* Effect.orDie(Effect.promise(() => sent))
+        }
+      } catch (error) {
+        waiter?.release()
+        throw error
       }
 
-      return { name, tag: variant.tag, message, invocation } satisfies DispatchResult
+      if (waiter === undefined) {
+        return { name, tag: variant.tag, message, invocation } satisfies DispatchResult
+      }
+
+      const completion = yield* waiter.outcome
+      return { name, tag: variant.tag, message, invocation, completion } satisfies DispatchResult
     }
   })
 

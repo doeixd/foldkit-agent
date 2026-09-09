@@ -97,6 +97,31 @@ export class CancelledError extends Schema.TaggedError<CancelledError>()('AgentC
   }
 }
 
+/**
+ * The Message was dispatched, but its completion contract did not resolve in
+ * time.
+ *
+ * The Message reached `update`; only the waiting stopped. Nothing is undone.
+ */
+export class CompletionTimeoutError extends Schema.TaggedError<CompletionTimeoutError>()(
+  'AgentCompletionTimeoutError',
+  {
+    capability: Schema.String,
+    invocation: Schema.String,
+    message: Schema.String,
+  },
+) {
+  static of(capability: string, invocation: string, timeout: unknown): CompletionTimeoutError {
+    return new CompletionTimeoutError({
+      capability,
+      invocation,
+      message:
+        `"${capability}" was dispatched but did not complete within ` +
+        `${String(timeout)}. The Message still reached update.`,
+    })
+  }
+}
+
 /** A named resource does not exist or cannot be read. */
 export class ResourceError extends Schema.TaggedError<ResourceError>()('AgentResourceError', {
   resource: Schema.String,
@@ -117,3 +142,4 @@ export type DispatchError =
   | InvalidInputError
   | AuthorizationError
   | CancelledError
+  | CompletionTimeoutError

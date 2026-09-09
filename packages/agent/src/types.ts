@@ -128,4 +128,12 @@ export interface DispatchResult<Message extends AnyMessage = AnyMessage> {
   /** The Message that was dispatched into the Foldkit Runtime. */
   readonly message: Message
   readonly invocation: Invocation
+  /**
+   * How the operation finished, when the capability declares a completion
+   * contract. Absent otherwise: validated dispatch is then the boundary.
+   */
+  readonly completion?: {
+    readonly status: 'completed' | 'failed'
+    readonly message: AnyMessage
+  }
 }

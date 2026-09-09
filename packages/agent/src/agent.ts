@@ -4,6 +4,7 @@ export {
   AuthorizationError,
   CancelledError,
   CapabilityUnavailableError,
+  CompletionTimeoutError,
   type DispatchError,
   InvalidInputError,
   ResourceError,
@@ -17,6 +18,7 @@ export {
   type MessageInputOf,
 } from './expose.js'
 export { forModel, type BoundAgent } from './forModel.js'
+export type { CompletionOutcome } from './completion.js'
 export { toManifest, toMarkdown, type Manifest } from './docs.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'
 export { newInvocationId } from './invocation.js'

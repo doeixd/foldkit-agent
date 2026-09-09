@@ -219,6 +219,48 @@ Input is typed as the **encoded** side of the capability's schema, because that
 is what dispatch decodes. A payload of `Schema.NumberFromString` is sent as a
 string and reaches `update` as a number.
 
+### Completion
+
+Dispatching a Message and completing an operation are not always the same event.
+A capability can say which Messages finish its work:
+
+```ts
+RequestedDeleteTodo: {
+  description: 'Delete a todo',
+  completion: {
+    success: Message.DeletedTodo,
+    failure: Message.FailedDeleteTodo,
+    correlate: (request, result) => request.id === result.id,
+    timeout: Duration.seconds(10),
+  },
+}
+```
+
+`dispatch` then waits, and the result carries
+`completion: { status: 'completed' | 'failed', message }`. Without a contract,
+validated dispatch remains the boundary and the field is absent.
+
+This needs a host that can see Messages, not only receive them:
+
+```ts
+host: {
+  model: currentModel,
+  dispatch: sendToRuntime,
+  observe: onMessage, // required by a contract that declares completion
+}
+```
+
+A contract declaring completion is refused at `bind` when the host cannot
+observe, rather than silently reporting every call as complete.
+
+Waiting always has a deadline; it defaults to 30 seconds.
+`AgentCompletionTimeoutError` means the wait ended, **not** that anything was
+undone -- the Message reached `update`. The same is true of cancelling while a
+completion is pending.
+
+Give `correlate` whenever two invocations of a capability can be in flight at
+once. Without it the first matching Message wins, whichever invocation caused it.
+
 An invocation whose signal is already aborted is refused before the Model is
 read, and one aborted while decoding or `authorize` is pending never constructs
 or dispatches its Message. Both fail with `AgentCancelledError`.
