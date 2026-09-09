@@ -7,19 +7,22 @@ import type { AnyMessage, Completion, InvocationContext, VariantConfig } from '.
 type Fields = Schema.Struct.Fields
 type Cases = Record<string, Fields>
 
-/** The callable constructor for one variant of a Message union. */
-type ConstructorFor<C extends Cases, Tag extends keyof C & string> = MessageUnion<C>[Tag] &
-  ((input: any) => AnyMessage)
+/**
+ * The callable constructor for one variant of a Message union.
+ *
+ * Extracted with `infer` rather than `Parameters<...>` of an intersection: an
+ * intersection with `(input: any) => AnyMessage` resolves to that last
+ * signature and silently widens every payload to `any`.
+ */
+type ConstructorFor<C extends Cases, Tag extends keyof C & string> = MessageUnion<C>[Tag]
 
 /** The payload an internal Message constructor accepts, e.g. `{ id: string }`. */
-export type MessageInputOf<C extends Cases, Tag extends keyof C & string> = Parameters<
-  ConstructorFor<C, Tag>
->[0]
+export type MessageInputOf<C extends Cases, Tag extends keyof C & string> =
+  ConstructorFor<C, Tag> extends (value: infer Input) => any ? Input : never
 
 /** The Message value a constructor produces, e.g. `{ _tag: 'RequestedDeleteTodo', id: string }`. */
-export type MessageOf<C extends Cases, Tag extends keyof C & string> = ReturnType<
-  ConstructorFor<C, Tag>
->
+export type MessageOf<C extends Cases, Tag extends keyof C & string> =
+  ConstructorFor<C, Tag> extends (value: any) => infer Message ? Message : never
 
 /** A variant that exposes its internal Message payload directly. */
 type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
@@ -46,24 +49,22 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
   ) => MessageInput
 }
 
-type ExternalInputOf<Config> = Config extends {
-  readonly input: Schema.Codec<infer A, any, any, any>
-}
-  ? A
-  : never
-
 /**
  * Constrains each key of the supplied variants object.
  *
- * Keys must be tags of the union, and a variant that declares `input` must also
- * declare `toMessage`. Each variant's external input type is inferred from its
- * own `input` Schema.
+ * Keys must be tags of the union. A variant either exposes its Message payload
+ * directly, or supplies both `input` and `toMessage`; an object with `input`
+ * alone matches neither member and is rejected.
+ *
+ * This is a union rather than a conditional on `V[Tag]`, because a conditional
+ * would be circular inside a reverse mapped type and would silently collapse to
+ * the direct branch.
  */
 type ValidateVariants<C extends Cases, V, Model, Principal> = {
   readonly [Tag in keyof V]: Tag extends keyof C & string
-    ? V[Tag] extends { readonly input: unknown }
-      ? MappedVariant<MessageInputOf<C, Tag>, ExternalInputOf<V[Tag]>, Model, Principal>
-      : DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
+    ?
+        | DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
+        | MappedVariant<MessageInputOf<C, Tag>, any, Model, Principal>
     : Readonly<{ 'Not a tag of this Message union': Tag }>
 }
 
@@ -119,12 +120,12 @@ const payloadSchemaOf = (constructor: unknown): { schema: Schema.Struct<Fields>;
  */
 export const expose = <
   const C extends Cases,
-  const V extends Record<string, unknown>,
-  Model = unknown,
-  Principal = unknown,
+  const V extends { readonly [Tag in keyof V]: unknown },
+  Model = any,
+  Principal = any,
 >(
   message: MessageUnion<C>,
-  variants: V & ValidateVariants<C, V, Model, Principal>,
+  variants: ValidateVariants<C, V, Model, Principal>,
 ): ExposedMessages<Model, Principal> => {
   const union = message as unknown as Record<string, unknown>
 

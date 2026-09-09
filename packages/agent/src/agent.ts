@@ -15,6 +15,7 @@ export {
   type MessageInputOf,
   type MessageOf,
 } from './expose.js'
+export { forModel, type BoundAgent } from './forModel.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'
 export { resource, type Resource } from './resource.js'
 export { bind, type AgentHost, type AgentRuntime } from './runtime.js'

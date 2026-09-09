@@ -84,9 +84,9 @@ const isEffect = (value: unknown): value is Effect.Effect<any, any, any> =>
  * })
  * ```
  */
-export const bind = <Model, Context_, Principal>(options: {
+export const bind = <Model, Context_, Principal, Message extends AnyMessage = AnyMessage>(options: {
   readonly definition: Definition<Model, Context_, Principal>
-  readonly host: AgentHost<Model>
+  readonly host: AgentHost<Model, Message>
 }): AgentRuntime<Model, Context_, Principal> => {
   const { definition, host } = options
 
@@ -144,7 +144,8 @@ export const bind = <Model, Context_, Principal>(options: {
       const context: InvocationContext<Model, Principal> = { model, principal, invocation }
       const message = variant.construct(decoded, context)
 
-      const sent = host.dispatch(message)
+      // `construct` always produces a member of this application's Message union.
+      const sent = host.dispatch(message as Message)
       if (isEffect(sent)) {
         yield* Effect.orDie(sent)
       } else if (sent instanceof Promise) {
