@@ -90,6 +90,13 @@ A session is created by `initialize` and identified by `Mcp-Session-Id`
 afterwards. An unknown or expired session answers 404, which is the client's
 signal to re-initialize; `DELETE` terminates one.
 
+A session id is not a bearer token. A session belongs to the principal that
+initialized it, and another principal presenting the id is answered exactly as
+an unknown session — so the id's existence does not leak, and that caller
+re-initializes into a session of its own. Where a principal carries fields that
+differ between requests of the same caller, give `principalId` to say what
+identity means.
+
 `GET` opens an SSE stream for server notifications. Each event carries an id, so
 a client that reconnects with `Last-Event-ID` is sent what it missed and nothing
 it already saw. An event goes to exactly one stream, never broadcast across
