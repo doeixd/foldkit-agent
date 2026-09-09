@@ -100,6 +100,14 @@ describe('compiling a contract into actions', () => {
     expect(named('create_todo').requiresAuth).toBe(true)
   })
 
+  it('never claims to be read-only', () => {
+    // Feeds plan-mode classification. Claiming read-only would have plan mode
+    // run a capability for real, so every entry says write.
+    for (const entry of Object.values(actionsFor())) {
+      expect(entry.readOnly).toBe(false)
+    }
+  })
+
   it('never invents an action for an unexposed Message', () => {
     expect(Object.keys(actionsFor())).not.toContain('deleted_todo')
     expect(Object.keys(actionsFor())).not.toContain('received_todos')

@@ -36,6 +36,15 @@ export interface ActionEntry {
   readonly http: { readonly method: 'POST' }
   /** Defaults to true in the framework; stated so it is not left to a default. */
   readonly requiresAuth: boolean
+  /**
+   * Always false. A capability dispatches a Message into `update`, so it is a
+   * write however little it changes.
+   *
+   * This feeds plan-mode classification, where the dangerous direction is
+   * claiming read-only: plan mode would then run it for real. A resource read
+   * would be the read-only case, and resources are not exposed as actions yet.
+   */
+  readonly readOnly: false
 }
 
 /**
@@ -110,6 +119,7 @@ export const actions = (options: ActionsOptions): Record<string, ActionEntry> =>
       schema: describedSchema(variant.inputSchema),
       http: { method: 'POST' },
       requiresAuth: true,
+      readOnly: false,
 
       run: async (args: unknown, context?: ActionRunContext): Promise<ActionResult> => {
         const agent = await options.resolveRuntime(context ?? {})
