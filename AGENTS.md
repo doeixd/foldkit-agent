@@ -93,6 +93,10 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
   `onExcessProperty: 'error'`. Use `Schema.Record(Schema.String, Schema.Never)`.
   Run a scratch probe against the installed version before relying on semantics
   inferred from a name.
+- **Run the probe from the package, not the repo root.** A scratch probe run
+  from the root resolves a different, v3-era `effect` than the pinned rc the
+  package actually compiles against, so it answers a question about the wrong
+  library and looks authoritative doing it. `cd packages/<name>` first.
 - **Check the output, not just that the call returned.** `defineAction` accepts
   four different schema forms without complaint; three of them advertise a tool
   with no parameters at all. An API that takes your input and quietly produces an
