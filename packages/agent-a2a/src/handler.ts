@@ -91,6 +91,7 @@ export const handler = (options: HandlerOptions): Handler => {
   }
 
   const agentMessage = (body: string, taskId: string, contextId: string): Message => ({
+    kind: 'message',
     role: 'agent',
     parts: [text(body)],
     messageId: newId(),
@@ -104,7 +105,7 @@ export const handler = (options: HandlerOptions): Handler => {
       return failure(
         id,
         code.INVALID_PARAMS,
-        'message/send needs params as { message } with a role, a messageId, and parts',
+        'message/send needs params as { message } with kind "message", a role, a messageId, and parts',
       )
     }
 
@@ -142,6 +143,7 @@ export const handler = (options: HandlerOptions): Handler => {
         return success(
           id,
           remember({
+            kind: 'task',
             id: taskId,
             contextId,
             status: {
@@ -161,6 +163,7 @@ export const handler = (options: HandlerOptions): Handler => {
       return success(
         id,
         remember({
+          kind: 'task',
           id: taskId,
           contextId,
           status: {
@@ -181,6 +184,7 @@ export const handler = (options: HandlerOptions): Handler => {
       return success(
         id,
         remember({
+          kind: 'task',
           id: taskId,
           contextId,
           status: {
@@ -232,6 +236,7 @@ export const handler = (options: HandlerOptions): Handler => {
         return success(
           id,
           remember({
+            kind: 'task',
             id: taskId as string,
             contextId: task?.contextId ?? newId(),
             status: { state: 'canceled', timestamp: clock().toISOString() },

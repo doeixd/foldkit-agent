@@ -79,6 +79,7 @@ const request = (method: string, params?: Record<string, unknown>) => ({
 const sendSkill = (skill: string, input: unknown) =>
   request('message/send', {
     message: {
+      kind: 'message',
       role: 'user',
       messageId: 'client-1',
       parts: [{ kind: 'data', data: { skill, input } }],
@@ -201,7 +202,12 @@ describe('message/send', () => {
     const served = makeHandler()
     const response = await served.handle(
       request('message/send', {
-        message: { role: 'user', messageId: 'client-1', parts: [{ kind: 'text', text: 'hi' }] },
+        message: {
+          kind: 'message',
+          role: 'user',
+          messageId: 'client-1',
+          parts: [{ kind: 'text', text: 'hi' }],
+        },
       }),
     )
 
@@ -213,24 +219,45 @@ describe('message/send', () => {
     ['params that are not an object', 'message/send'],
     ['no message', {}],
     ['a message that is not an object', { message: 'create a todo' }],
-    ['a message with no parts', { message: { role: 'user', messageId: 'client-1' } }],
+    [
+      'a message with no parts',
+      { message: { kind: 'message', role: 'user', messageId: 'client-1' } },
+    ],
     [
       'parts that are not an array',
-      { message: { role: 'user', messageId: 'client-1', parts: {} } },
+      { message: { kind: 'message', role: 'user', messageId: 'client-1', parts: {} } },
     ],
-    ['a null part', { message: { role: 'user', messageId: 'client-1', parts: [null] } }],
+    [
+      'a null part',
+      { message: { kind: 'message', role: 'user', messageId: 'client-1', parts: [null] } },
+    ],
     [
       'a data part with no data',
-      { message: { role: 'user', messageId: 'client-1', parts: [{ kind: 'data' }] } },
+      {
+        message: {
+          kind: 'message',
+          role: 'user',
+          messageId: 'client-1',
+          parts: [{ kind: 'data' }],
+        },
+      },
     ],
     [
       'a data part whose data is not an object',
-      { message: { role: 'user', messageId: 'client-1', parts: [{ kind: 'data', data: null }] } },
+      {
+        message: {
+          kind: 'message',
+          role: 'user',
+          messageId: 'client-1',
+          parts: [{ kind: 'data', data: null }],
+        },
+      },
     ],
     [
       'no messageId',
       {
         message: {
+          kind: 'message',
           role: 'user',
           parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
         },
@@ -240,6 +267,17 @@ describe('message/send', () => {
       'no role',
       {
         message: {
+          kind: 'message',
+          messageId: 'client-1',
+          parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
+        },
+      },
+    ],
+    [
+      'no kind, which the spec requires so Task and Message stay distinguishable',
+      {
+        message: {
+          role: 'user',
           messageId: 'client-1',
           parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
         },
@@ -249,6 +287,7 @@ describe('message/send', () => {
       'a role this protocol has no meaning for',
       {
         message: {
+          kind: 'message',
           role: 'system',
           messageId: 'client-1',
           parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
@@ -281,6 +320,7 @@ describe('message/send', () => {
       await served.handle(
         request('message/send', {
           message: {
+            kind: 'message',
             role: 'user',
             messageId: 'client-1',
             contextId: 'conversation-7',

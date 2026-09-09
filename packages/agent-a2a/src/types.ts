@@ -71,7 +71,12 @@ export const failure = (id: Id | null, errorCode: number, message: string): Fail
   error: { code: errorCode, message },
 })
 
-/** Terminal states end a task; `working` is the only one that does not. */
+/**
+ * The subset of A2A 0.3.0 task states this adapter produces.
+ *
+ * `input-required`, `auth-required` and `unknown` are spec states no dispatch
+ * here can reach, so they are left out rather than declared and never used.
+ */
 export type TaskState = 'submitted' | 'working' | 'completed' | 'failed' | 'canceled' | 'rejected'
 
 export interface TaskStatus {
@@ -97,7 +102,12 @@ export const PartSchema = Schema.Union([
 
 export type Part = typeof PartSchema.Type
 
+/**
+ * `kind` is required by the spec, not decoration: `Task | Message` is a union a
+ * client discriminates on, so a message without it is not a Message.
+ */
 export const MessageSchema = Schema.Struct({
+  kind: Schema.Literal('message'),
   role: Schema.Literals(['user', 'agent']),
   parts: Schema.Array(PartSchema),
   messageId: Schema.String,
@@ -111,6 +121,7 @@ export type Message = typeof MessageSchema.Type
 export const SendParamsSchema = Schema.Struct({ message: MessageSchema })
 
 export interface Task {
+  readonly kind: 'task'
   readonly id: string
   readonly contextId: string
   readonly status: TaskStatus

@@ -20,6 +20,8 @@ export interface AgentCard {
   readonly description: string
   /** Where this agent accepts A2A requests. */
   readonly url: string
+  /** The transport bound to `url`. This adapter speaks JSON-RPC and nothing else. */
+  readonly preferredTransport: 'JSONRPC'
   readonly version: string
   readonly capabilities: {
     readonly streaming: boolean
@@ -32,7 +34,7 @@ export interface AgentCard {
   readonly security?: ReadonlyArray<Record<string, ReadonlyArray<string>>> | undefined
 }
 
-export const A2A_VERSION = '1.0'
+export const A2A_VERSION = '0.3.0'
 
 export interface AgentCardOptions {
   readonly name: string
@@ -57,6 +59,7 @@ export const agentCard = (definition: Definition, options: AgentCardOptions): Ag
   name: options.name,
   description: options.description,
   url: options.url,
+  preferredTransport: 'JSONRPC',
   version: options.version ?? '0.1.0',
   // Streaming and push notifications are not implemented; saying otherwise
   // would have clients wait for events that never arrive.
