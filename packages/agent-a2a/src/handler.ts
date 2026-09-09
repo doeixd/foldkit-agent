@@ -1,0 +1,265 @@
+import { Effect } from 'effect'
+import {
+  type AgentRuntime,
+  type Id,
+  type Message,
+  type Request,
+  type Response,
+  type Task,
+  type TaskState,
+  code,
+  failure,
+  success,
+  text,
+} from './types.js'
+
+export interface HandlerOptions {
+  readonly agent: AgentRuntime
+  /** Tasks kept for `tasks/get`. Defaults to 200. */
+  readonly capacity?: number | undefined
+  /** Injected for tests. */
+  readonly newId?: (() => string) | undefined
+  readonly clock?: (() => Date) | undefined
+}
+
+export interface Handler {
+  readonly handle: (message: unknown) => Promise<Response | undefined>
+  readonly close: () => void
+}
+
+const randomId = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `a2a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+
+/**
+ * How a refused or finished dispatch reads as a task state.
+ *
+ * `rejected` is for a request the agent declined outright -- an unknown skill,
+ * bad input, a caller who may not. `failed` is for work that was accepted and
+ * did not succeed, which is a different thing to a client deciding what to do
+ * next.
+ */
+const stateFor = (failureTag: string): TaskState => {
+  switch (failureTag) {
+    case 'AgentCancelledError':
+      return 'canceled'
+    case 'AgentCompletionTimeoutError':
+      return 'failed'
+    default:
+      return 'rejected'
+  }
+}
+
+/** The capability and input a client asked for, carried in a data part. */
+const skillFrom = (
+  message: Message | undefined,
+): { readonly skill: string; readonly input: unknown } | undefined => {
+  const part = message?.parts.find(candidate => candidate.kind === 'data')
+  const skill = part?.data?.['skill']
+  return typeof skill === 'string' ? { skill, input: part?.data?.['input'] ?? {} } : undefined
+}
+
+/**
+ * Serves a contract as an A2A agent, with no transport attached.
+ *
+ * One exposed capability is one skill. A capability with no completion contract
+ * finishes at validated dispatch, so its task is `completed` immediately; one
+ * that declares completion finishes when its Message arrives.
+ */
+export const handler = (options: HandlerOptions): Handler => {
+  const { agent } = options
+  const capacity = Math.max(1, options.capacity ?? 200)
+  const newId = options.newId ?? randomId
+  const clock = options.clock ?? (() => new Date())
+
+  const tasks = new Map<string, Task>()
+  const running = new Map<string, AbortController>()
+
+  const remember = (task: Task): Task => {
+    tasks.set(task.id, task)
+    if (tasks.size > capacity) {
+      const oldest = tasks.keys().next().value
+      if (oldest !== undefined) tasks.delete(oldest)
+    }
+    return task
+  }
+
+  const agentMessage = (body: string, taskId: string, contextId: string): Message => ({
+    role: 'agent',
+    parts: [text(body)],
+    messageId: newId(),
+    taskId,
+    contextId,
+  })
+
+  const send = async (id: Id, params: Record<string, unknown>): Promise<Response> => {
+    const message = params['message'] as Message | undefined
+    const asked = skillFrom(message)
+
+    if (asked === undefined) {
+      return failure(
+        id,
+        code.INVALID_PARAMS,
+        'message/send needs a data part naming a skill, as { skill, input }',
+      )
+    }
+
+    const taskId = newId()
+    const contextId = message?.contextId ?? newId()
+    const history: ReadonlyArray<Message> = message === undefined ? [] : [message]
+
+    const controller = new AbortController()
+    running.set(taskId, controller)
+
+    try {
+      const outcome = await Effect.runPromise(
+        Effect.result(
+          agent.messages.dispatchUnknown(asked.skill, asked.input, {
+            id: taskId,
+            transport: 'a2a',
+            signal: controller.signal,
+          }),
+        ),
+      )
+
+      if (outcome._tag === 'Failure') {
+        const error = outcome.failure
+        return success(
+          id,
+          remember({
+            id: taskId,
+            contextId,
+            status: {
+              state: stateFor(error._tag),
+              timestamp: clock().toISOString(),
+              message: agentMessage(error.message, taskId, contextId),
+            },
+            history,
+          }),
+        )
+      }
+
+      const result = outcome.success
+      // A declared failure Message is work that ran and did not succeed.
+      const state: TaskState = result.completion?.status === 'failed' ? 'failed' : 'completed'
+
+      return success(
+        id,
+        remember({
+          id: taskId,
+          contextId,
+          status: {
+            state,
+            timestamp: clock().toISOString(),
+            message: agentMessage(
+              result.completion === undefined
+                ? `Dispatched ${result.tag}`
+                : `${result.completion.status === 'failed' ? 'Failed' : 'Completed'}: ${result.completion.message._tag}`,
+              taskId,
+              contextId,
+            ),
+          },
+          history,
+        }),
+      )
+    } catch {
+      return success(
+        id,
+        remember({
+          id: taskId,
+          contextId,
+          status: {
+            state: 'failed',
+            timestamp: clock().toISOString(),
+            message: agentMessage(`Skill "${asked.skill}" failed unexpectedly`, taskId, contextId),
+          },
+          history,
+        }),
+      )
+    } finally {
+      running.delete(taskId)
+    }
+  }
+
+  const handleRequest = async (request: Request): Promise<Response> => {
+    const { id, method } = request
+    const params = request.params ?? {}
+
+    switch (method) {
+      case 'message/send':
+        return send(id, params)
+
+      case 'tasks/get': {
+        const taskId = params['id']
+        const task = typeof taskId === 'string' ? tasks.get(taskId) : undefined
+        return task === undefined
+          ? failure(id, code.TASK_NOT_FOUND, 'No such task')
+          : success(id, task)
+      }
+
+      case 'tasks/cancel': {
+        const taskId = params['id']
+        if (typeof taskId !== 'string' || !tasks.has(taskId)) {
+          const inFlight = typeof taskId === 'string' ? running.get(taskId) : undefined
+          if (inFlight === undefined) return failure(id, code.TASK_NOT_FOUND, 'No such task')
+        }
+
+        running.get(taskId as string)?.abort()
+        const task = tasks.get(taskId as string)
+
+        // A task that already reached a terminal state stays there.
+        if (task !== undefined && task.status.state !== 'working') {
+          return success(id, task)
+        }
+
+        return success(
+          id,
+          remember({
+            id: taskId as string,
+            contextId: task?.contextId ?? newId(),
+            status: { state: 'canceled', timestamp: clock().toISOString() },
+            history: task?.history ?? [],
+          }),
+        )
+      }
+
+      // Streaming is declared unsupported on the card, so it is refused here
+      // rather than answered with something a client cannot consume.
+      case 'message/stream':
+        return failure(id, code.METHOD_NOT_FOUND, 'This agent does not support streaming')
+
+      default:
+        return failure(id, code.METHOD_NOT_FOUND, `Unknown method: ${method}`)
+    }
+  }
+
+  return {
+    handle: async (incoming: unknown): Promise<Response | undefined> => {
+      if (Array.isArray(incoming)) {
+        return failure(null, code.INVALID_REQUEST, 'Batched requests are not supported')
+      }
+
+      const message = incoming as Request
+      if (
+        typeof message !== 'object' ||
+        message === null ||
+        message.jsonrpc !== '2.0' ||
+        typeof message.method !== 'string'
+      ) {
+        return failure(null, code.INVALID_REQUEST, 'Not a JSON-RPC 2.0 message')
+      }
+
+      // A notification carries no id and expects no reply.
+      if (message.id === undefined) return undefined
+
+      return handleRequest(message)
+    },
+
+    close: () => {
+      for (const controller of running.values()) controller.abort()
+      running.clear()
+      tasks.clear()
+    },
+  }
+}

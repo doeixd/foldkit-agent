@@ -70,6 +70,24 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  packages/agent-a2a:
+    devDependencies:
+      '@foldkit/agent':
+        specifier: workspace:*
+        version: link:../agent
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+      foldkit:
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)
+      tsdown:
+        specifier: ^0.23.0
+        version: 0.23.0(tsx@4.23.13)(typescript@5.9.3)(unrun@0.3.1)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/agent-mcp:
     devDependencies:
       '@foldkit/agent':

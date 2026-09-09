@@ -31,7 +31,8 @@ implemented in this repository:
 | --- | --- |
 | [`@foldkit/agent`](./packages/agent) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
 | [`@foldkit/agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
-| [`@foldkit/agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio. |
+| [`@foldkit/agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
+| [`@foldkit/agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
 
 It is deliberately built on Foldkit's existing architecture rather than
 introducing a second application-action system.
@@ -1736,6 +1737,7 @@ WebMCP is particularly compelling because it can expose these capabilities direc
 packages/agent          @foldkit/agent
 packages/agent-webmcp   @foldkit/agent-webmcp
 packages/agent-mcp      @foldkit/agent-mcp
+packages/agent-a2a      @foldkit/agent-a2a
 examples/todo           a worked example, end to end
 ```
 
