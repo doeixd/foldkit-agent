@@ -21,7 +21,10 @@ registerPackageActions(
 ```
 
 One exposed capability becomes one entry, keyed by capability name, with its
-description, advertised parameters and schema taken from the contract.
+description, advertised parameters and schema taken from the contract. Each
+entry states `http: POST`, `requiresAuth: true`, and `readOnly: false` — a
+capability dispatches a Message, so it is a write, and claiming otherwise would
+let plan mode run it for real.
 
 Nothing is written to disk. A registry has no file to go stale, so a removed
 capability cannot leave behind an action that is still callable.
@@ -56,11 +59,13 @@ The subtlety is which conversion, and it fails silently:
 | `toStandardSchemaV1` | yes | **empty** |
 | `toStandardJSONSchemaV1` | no | full |
 | the two copied together | yes | **empty** |
-| `toStandardJSONSchemaV1` with `validate` attached in place | yes | full |
+| both, called in turn on the same schema | yes | full |
 
 All four are accepted without complaint, and three produce a tool an agent sees
 as taking no input. Copying fails because the conversion reads the Effect schema
-itself, so object identity has to survive. This package builds the last form.
+itself, so identity has to survive — and both helpers return that same schema,
+sharing one `~standard`, so calling them in turn leaves a single object carrying
+`jsonSchema` and `validate` alike. That is what this package does.
 
 ## Limits
 
