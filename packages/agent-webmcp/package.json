@@ -1,0 +1,32 @@
+{
+  "name": "@foldkit/agent-webmcp",
+  "version": "0.1.0",
+  "description": "WebMCP adapter for @foldkit/agent. Projects exposed Foldkit Messages into document.modelContext tools.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -b"
+  },
+  "peerDependencies": {
+    "@foldkit/agent": "workspace:^",
+    "effect": "^4.0.0-rc.112",
+    "foldkit": "^0.158.2"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@foldkit/agent": "workspace:*",
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.7.2"
+  }
+}
