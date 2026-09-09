@@ -1254,19 +1254,32 @@ The dependency direction matters:
 
 Foldkit remains the source of truth. Agent Native does **not** become a second application model.
 
-A proposed optional package could be:
+A prototype of this exists on the `prototype/agent-native` branch as
+`@foldkit/agent-native`. It is private and only partly verified against the
+framework, so it is not part of the published set:
 
 ```text
-@foldkit/agent-agent-native
+@foldkit/agent-native
 ```
 
 with an API such as:
 
 ```ts
-import { AgentNative } from "@foldkit/agent-agent-native"
+import { AgentNative } from "@foldkit/agent-native"
+import { registerPackageActions } from "@agent-native/core/server"
 
-AgentNative.bind({ agent: agentRuntime })
+registerPackageActions(
+  AgentNative.actions({
+    definition: AppAgent,
+    resolveRuntime: ctx => runtimeFor(ctx),
+  }),
+)
 ```
+
+Agent Native discovers actions from files, but it also exports
+`registerPackageActions` for packages to contribute them in memory. That is what
+the prototype builds on, so there is no generated file to outlive the capability
+it came from.
 
 The adapter would compile exposed Foldkit Messages into generated Agent Native Actions:
 
@@ -1377,7 +1390,7 @@ A sensible implementation order would be:
 
 1. keep `@foldkit/agent` tiny and independent;
 2. implement WebMCP directly as the first adapter;
-3. prototype `@foldkit/agent-agent-native` for remote MCP/A2A/auth/CLI infrastructure;
+3. prototype `@foldkit/agent-native` for remote MCP/A2A/auth/CLI infrastructure;
 4. only build native replacements where Agent Native is too tightly coupled to its own application architecture.
 
 # In-app agents
@@ -1738,6 +1751,7 @@ packages/agent          @foldkit/agent
 packages/agent-webmcp   @foldkit/agent-webmcp
 packages/agent-mcp      @foldkit/agent-mcp
 packages/agent-a2a      @foldkit/agent-a2a
+packages/agent-native   @foldkit/agent-native (prototype, unpublished)
 examples/todo           a worked example, end to end
 ```
 
