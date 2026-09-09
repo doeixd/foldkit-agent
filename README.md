@@ -31,6 +31,7 @@ implemented in this repository:
 | --- | --- |
 | [`@foldkit/agent`](./packages/agent) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
 | [`@foldkit/agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
+| [`@foldkit/agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio. |
 
 It is deliberately built on Foldkit's existing architecture rather than
 introducing a second application-action system.
@@ -203,8 +204,11 @@ pnpm add @foldkit/agent @foldkit/agent-webmcp
 `foldkit` and `effect` are peer dependencies. Foldkit `0.158.2` peer-depends on
 `effect@4.0.0-rc.112`, so the snippets here use Effect 4 names.
 
-An external MCP adapter (`@foldkit/agent-mcp`) is still proposed rather than
-implemented; the [section below](#external-mcp-adapter) describes its shape.
+External MCP:
+
+```bash
+pnpm add @foldkit/agent @foldkit/agent-mcp
+```
 
 # Quick start
 
@@ -1158,28 +1162,28 @@ That lets the browser API change without forcing the Foldkit agent contract to c
 
 # External MCP adapter
 
-Proposed, not implemented. The contract is protocol-neutral, so this adapter
-reads the same descriptors the WebMCP one does.
-
 ```text
 @foldkit/agent-mcp
 ```
+
+The contract is protocol-neutral, so this adapter reads the same descriptors the
+WebMCP one does. The protocol mapping is a transport-free handler; `stdio`
+attaches it to a process. Sessions and authentication over Streamable HTTP are
+not implemented yet.
 
 Conceptually:
 
 ```ts
 import { AgentMcp } from "@foldkit/agent-mcp"
 
-const server = AgentMcp.make({ agent: agentRuntime })
+AgentMcp.stdio({ agent: agentRuntime })
 ```
 
-or:
+or, with no transport attached:
 
 ```ts
-AgentMcp.serve({
-  agent: agentRuntime,
-  path: "/mcp",
-})
+const served = AgentMcp.handler({ agent: agentRuntime, onNotification: send })
+await served.handle(message)
 ```
 
 The exact server API should follow Foldkit's eventual server conventions.
@@ -1732,6 +1736,7 @@ WebMCP is particularly compelling because it can expose these capabilities direc
 ```text
 packages/agent          @foldkit/agent
 packages/agent-webmcp   @foldkit/agent-webmcp
+packages/agent-mcp      @foldkit/agent-mcp
 examples/todo           a worked example, end to end
 ```
 
