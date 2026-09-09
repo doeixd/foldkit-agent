@@ -333,6 +333,60 @@ describe('resources', () => {
     expect(error.code).toBe(-32002)
   })
 
+  describe('a declared resource named context', () => {
+    const declaredContext = TodoAgent.resource('context', {
+      description: 'The application own context',
+      schema: Schema.String,
+      read: () => 'resource-value',
+    })
+
+    const serve = async (withProjection: boolean) => {
+      const served = AgentMcp.handler({
+        agent: TodoAgent.bind({
+          definition: TodoAgent.define({
+            ...(withProjection
+              ? { context: Agent.pick(Schema.Struct({ todos: Schema.Array(Todo) }), ['todos']) }
+              : {}),
+            messages: TodoAgent.expose(Message, { RequestedCreateTodo: 'Create a todo' }),
+            resources: [declaredContext],
+          }),
+          host: { model: () => model, dispatch: () => {}, principal: () => principal },
+        }),
+      })
+      await served.handle(request(0, 'initialize'))
+      return served
+    }
+
+    for (const withProjection of [false, true]) {
+      const label = withProjection ? 'with a Model projection' : 'without a Model projection'
+
+      it(`lists app://context once ${label}`, async () => {
+        const served = await serve(withProjection)
+        const resources = ok(await served.handle(request(1, 'resources/list')))[
+          'resources'
+        ] as Array<{ uri: string; description?: string }>
+
+        expect(resources).toEqual([
+          {
+            uri: 'app://context',
+            name: 'context',
+            description: 'The application own context',
+            mimeType: 'application/json',
+          },
+        ])
+      })
+
+      it(`reads the declared resource ${label}`, async () => {
+        const served = await serve(withProjection)
+        const contents = ok(
+          await served.handle(request(1, 'resources/read', { uri: 'app://context' })),
+        )['contents'] as Array<{ text: string }>
+
+        expect(JSON.parse(contents[0]!.text)).toBe('resource-value')
+      })
+    }
+  })
+
   it('rejects a uri that is not app://', async () => {
     const served = await initialized()
     expect(

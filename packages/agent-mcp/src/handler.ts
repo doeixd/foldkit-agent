@@ -76,6 +76,16 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
   /** One controller per in-flight request, so `notifications/cancelled` can reach it. */
   const inFlight = new Map<Id, AbortController>()
 
+  /**
+   * A declared resource named `context` takes `app://context`, and the Model
+   * projection yields it. The contract is the application's own API; the
+   * projection is a convenience the adapter adds, so it is the one that gives
+   * way. `resources/list` omits the projection whenever this holds, so the
+   * listing and the read agree.
+   */
+  const contextIsDeclared = agent.definition.resources.some(r => r.name === 'context')
+  const projectsContext = agent.definition.context !== undefined && !contextIsDeclared
+
   const listTools = async () => {
     const available = await Effect.runPromise(agent.messages.available)
     return available.map(capability => ({
@@ -168,7 +178,7 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
     }
     const name = uri.slice('app://'.length)
 
-    if (name === 'context') {
+    if (name === 'context' && !contextIsDeclared) {
       const context = await Effect.runPromise(agent.context)
       return context === undefined
         ? failure(id, code.REQUEST_FAILED, 'This contract projects no context')
@@ -230,18 +240,17 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
           mimeType: 'application/json',
         }))
         return success(id, {
-          resources:
-            agent.definition.context === undefined
-              ? resources
-              : [
-                  {
-                    uri: 'app://context',
-                    name: 'context',
-                    description: 'The Model state projected for agents',
-                    mimeType: 'application/json',
-                  },
-                  ...resources,
-                ],
+          resources: !projectsContext
+            ? resources
+            : [
+                {
+                  uri: 'app://context',
+                  name: 'context',
+                  description: 'The Model state projected for agents',
+                  mimeType: 'application/json',
+                },
+                ...resources,
+              ],
         })
       }
 
