@@ -4,6 +4,17 @@ import type { StandardSchemaV1 } from 'effect/StandardSchema'
 
 type AgentRuntime = Agent.AgentRuntime<any, any, any, any, any>
 
+/**
+ * The request context Agent Native hands an action.
+ *
+ * Declared locally: the prototype does not depend on the framework, and only
+ * these fields are used.
+ */
+export interface ActionRunContext {
+  readonly userEmail?: string | undefined
+  readonly orgId?: string | null | undefined
+}
+
 /** What an action reports back. `run` never decides anything itself. */
 export interface ActionResult {
   readonly ok: boolean
@@ -14,26 +25,17 @@ export interface ActionResult {
   readonly message: string
 }
 
-/**
- * One generated action.
- *
- * The shape Agent Native's `defineAction` takes: a description, a schema, and a
- * `run`. Everything here is derived; nothing is written by hand.
- */
-export interface Action {
-  readonly name: string
-  readonly description: string
-  /**
-   * The input schema as Standard Schema v1, carrying its JSON Schema.
-   *
-   * It has to be the JSON-Schema-carrying form. `defineAction` derives a tool's
-   * advertised `parameters` from `~standard.jsonSchema`, and a validation-only
-   * Standard Schema is accepted without complaint but advertises no parameters
-   * at all -- an agent would see a tool that takes no input.
-   */
+/** One entry of the record `registerPackageActions` takes. */
+export interface ActionEntry {
+  readonly tool: {
+    readonly description: string
+    readonly parameters: Record<string, unknown>
+  }
+  readonly run: (args: unknown, context?: ActionRunContext) => Promise<ActionResult>
   readonly schema: StandardSchemaV1<unknown, unknown>
-  readonly jsonSchema: Record<string, unknown>
-  readonly run: (input: unknown) => Promise<ActionResult>
+  readonly http: { readonly method: 'POST' }
+  /** Defaults to true in the framework; stated so it is not left to a default. */
+  readonly requiresAuth: boolean
 }
 
 /**
@@ -44,10 +46,10 @@ export interface Action {
  * - `toStandardSchemaV1` carries `validate` but no `jsonSchema`, and
  *   `defineAction` accepts it while advertising a tool that takes **no input**.
  * - `toStandardJSONSchemaV1` carries `jsonSchema`, which is what the advertised
- *   `parameters` are derived from, but no `validate`.
+ *   parameters are derived from, but no `validate`.
  *
- * Copying the two together into a new object also fails: the conversion reads
- * the Effect schema itself, so identity has to be preserved. `validate` is
+ * Copying the two into a new object also advertises nothing: the conversion
+ * reads the Effect schema itself, so identity has to survive. `validate` is
  * therefore attached to the described schema in place.
  */
 const describedSchema = (
@@ -66,75 +68,79 @@ const describedSchema = (
 }
 
 export interface ActionsOptions {
-  readonly agent: AgentRuntime
-  /** Included in the invocation, so the audit log can tell these apart. */
+  readonly definition: Agent.Definition<any, any, any, any, any>
+
+  /**
+   * Resolves the Runtime for one request.
+   *
+   * Called per invocation, because which Model a caller means depends on who is
+   * calling. The Runtime it returns must already be bound for that caller: when
+   * a contract declares `authorize`, `Agent.bind` requires a `principal`
+   * provider, so the identity mapping stays with the application instead of
+   * being guessed here from `userEmail`.
+   */
+  readonly resolveRuntime: (context: ActionRunContext) => AgentRuntime | Promise<AgentRuntime>
+
+  /** Recorded on the invocation, so an audit log can tell these apart. */
   readonly transport?: string | undefined
 }
 
 /**
- * Compiles the exposed capabilities into Agent Native actions.
+ * Compiles the exposed capabilities into a package action registry.
  *
- * `run` only dispatches. Application behaviour stays in `update`, which is the
- * whole point of generating these rather than writing a second action layer.
+ * Hand the result to `registerPackageActions` from `@agent-native/core/server`,
+ * which merges it into the registry every surface reads. Nothing is written to
+ * disk, so no generated action can outlive the capability it came from.
  *
- * Prototype: validated against a stub with the documented `defineAction` shape,
- * not against the framework itself.
+ * `run` only dispatches. Application behaviour stays in `update`, and the action
+ * adds no authority of its own: availability, authorization and input
+ * validation all still happen in the contract.
+ *
+ * @example
+ * ```ts
+ * registerPackageActions(
+ *   AgentNative.actions({
+ *     definition: AppAgent,
+ *     resolveRuntime: ctx => runtimeFor(ctx),
+ *   }),
+ * )
+ * ```
  */
-export const actions = (options: ActionsOptions): ReadonlyArray<Action> => {
-  const { agent } = options
+export const actions = (options: ActionsOptions): Record<string, ActionEntry> => {
   const transport = options.transport ?? 'agent-native'
+  const entries: Record<string, ActionEntry> = {}
 
-  return agent.definition.messages.variants.map(variant => ({
-    name: variant.name,
-    description: variant.description,
-    schema: describedSchema(variant.inputSchema),
-    jsonSchema: variant.inputJsonSchema,
+  for (const variant of options.definition.messages.variants) {
+    entries[variant.name] = {
+      tool: { description: variant.description, parameters: variant.inputJsonSchema },
+      schema: describedSchema(variant.inputSchema),
+      http: { method: 'POST' },
+      requiresAuth: true,
 
-    run: async (input: unknown): Promise<ActionResult> => {
-      const outcome = await Effect.runPromise(
-        Effect.result(agent.messages.dispatchUnknown(variant.name, input, { transport })),
-      )
+      run: async (args: unknown, context?: ActionRunContext): Promise<ActionResult> => {
+        const agent = await options.resolveRuntime(context ?? {})
 
-      if (outcome._tag === 'Failure') {
-        return { ok: false, message: outcome.failure.message }
-      }
+        const outcome = await Effect.runPromise(
+          Effect.result(agent.messages.dispatchUnknown(variant.name, args, { transport })),
+        )
 
-      const result = outcome.success
-      return {
-        ok: result.completion?.status !== 'failed',
-        tag: result.tag,
-        ...(result.completion === undefined ? {} : { completion: result.completion.status }),
-        message:
-          result.completion === undefined
-            ? `Dispatched ${result.tag}`
-            : `${result.completion.status === 'completed' ? 'Completed' : 'Failed'}: ${result.completion.message._tag}`,
-      }
-    },
-  }))
+        if (outcome._tag === 'Failure') {
+          return { ok: false, message: outcome.failure.message }
+        }
+
+        const result = outcome.success
+        return {
+          ok: result.completion?.status !== 'failed',
+          tag: result.tag,
+          ...(result.completion === undefined ? {} : { completion: result.completion.status }),
+          message:
+            result.completion === undefined
+              ? `Dispatched ${result.tag}`
+              : `${result.completion.status === 'completed' ? 'Completed' : 'Failed'}: ${result.completion.message._tag}`,
+        }
+      },
+    }
+  }
+
+  return entries
 }
-
-/** The subset of `defineAction` this prototype relies on. */
-export interface DefineAction {
-  (definition: {
-    readonly description: string
-    readonly schema: unknown
-    readonly run: (input: unknown) => Promise<unknown>
-  }): unknown
-}
-
-/**
- * Registers every capability through a `defineAction`.
- *
- * Kept separate from {@link actions} so the compilation can be tested without
- * the framework present.
- */
-export const register = (
-  options: ActionsOptions & { readonly defineAction: DefineAction },
-): ReadonlyArray<unknown> =>
-  actions(options).map(action =>
-    options.defineAction({
-      description: action.description,
-      schema: action.schema,
-      run: action.run,
-    }),
-  )

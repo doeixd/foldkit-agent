@@ -10,23 +10,27 @@ describes. Read the limits at the bottom before relying on it.
 
 ```ts
 import { AgentNative } from '@foldkit/agent-native'
-import { defineAction } from 'agent-native'
+import { registerPackageActions } from '@agent-native/core/server'
 
-AgentNative.register({ agent: agentRuntime, defineAction })
+registerPackageActions(
+  AgentNative.actions({
+    definition: AppAgent,
+    resolveRuntime: ctx => runtimeFor(ctx),
+  }),
+)
 ```
 
-One exposed capability becomes one action, with its description and schema taken
-from the contract. Or take the actions and register them yourself:
+One exposed capability becomes one entry, keyed by capability name, with its
+description, advertised parameters and schema taken from the contract.
 
-```ts
-for (const action of AgentNative.actions({ agent: agentRuntime })) {
-  action.name // 'delete_todo'
-  action.description // 'Delete the selected todo'
-  action.schema // Standard Schema v1
-  action.jsonSchema // the same schema as JSON Schema
-  await action.run({ id: 'todo-1' })
-}
-```
+Nothing is written to disk. A registry has no file to go stale, so a removed
+capability cannot leave behind an action that is still callable.
+
+`resolveRuntime` is called **per invocation**, not once at registration, because
+which Model a caller means depends on who is calling. The Runtime it returns must
+already be bound for that caller: when a contract declares `authorize`,
+`Agent.bind` requires a `principal` provider, so the identity mapping stays with
+the application rather than being guessed from `userEmail`.
 
 ## The dependency direction
 
@@ -42,21 +46,32 @@ tests assert that an action refuses exactly what the contract refuses.
 ## The schema bridge
 
 The framework's examples use Zod, but `defineAction` types its `schema` field as
-`StandardSchemaV1` from `@standard-schema/spec` and validates through it. Effect
-Schema converts to one, so there is no conversion layer and no Zod dependency.
+`StandardSchemaV1` and validates through it. Effect Schema converts to one, so
+there is no conversion layer and no Zod dependency.
 
-`action.jsonSchema` is there for a consumer that would rather build its own
-validator.
+The subtlety is which conversion, and it fails silently:
+
+| | `validate` | advertised parameters |
+| --- | --- | --- |
+| `toStandardSchemaV1` | yes | **empty** |
+| `toStandardJSONSchemaV1` | no | full |
+| the two copied together | yes | **empty** |
+| `toStandardJSONSchemaV1` with `validate` attached in place | yes | full |
+
+All four are accepted without complaint, and three produce a tool an agent sees
+as taking no input. Copying fails because the conversion reads the Effect schema
+itself, so object identity has to survive. This package builds the last form.
 
 ## Limits
 
 - **Never run against the framework.** Everything here is verified against a
   stub.
-- **`register` is close, but not the real extension point.** Beside file-based
-  discovery, `@agent-native/core/server` exports `registerPackageActions`, which
-  is how a published package contributes actions: they merge into the same
-  registry every surface reads, and app-local actions win a name collision. That
-  is what this should build on, so there is no generated file to go stale.
+- **Only partly verified.** Against the published `@agent-native/core@0.177.1`:
+  the imports resolve, `registerPackageActions` accepts what this produces, and
+  `defineAction` accepts an Effect-derived Standard Schema and derives its
+  parameters from it. What is **not** verified is whether every surface — in-app
+  assistant, MCP, A2A, HTTP, CLI — reads the package registry, and whether
+  app-local actions win a collision in a running app.
 - Agent Native assumes Postgres, Nitro and React. None of that is exercised.
 - No HTTP method configuration, no `useActionQuery`, no UI, no deep links.
 - The private package flag is deliberate: this should not be published until it

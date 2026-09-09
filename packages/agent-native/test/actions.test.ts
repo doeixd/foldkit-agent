@@ -1,5 +1,5 @@
 import { Agent } from '@foldkit/agent'
-import { AgentNative, type DefineAction } from '@foldkit/agent-native'
+import { AgentNative } from '@foldkit/agent-native'
 import { Duration, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -64,10 +64,11 @@ const makeAgent = () => {
   })
 }
 
-const actionsFor = () => AgentNative.actions({ agent: makeAgent() })
+/** Resolved per invocation, as it would be from a request context. */
+const actionsFor = () => AgentNative.actions({ definition, resolveRuntime: () => makeAgent() })
 
 const named = (name: string) => {
-  const action = actionsFor().find(candidate => candidate.name === name)
+  const action = actionsFor()[name]
   if (action === undefined) throw new Error(`No action named ${name}`)
   return action
 }
@@ -80,16 +81,28 @@ beforeEach(() => {
 
 describe('compiling a contract into actions', () => {
   it('produces one action per exposed capability', () => {
-    expect(actionsFor().map(action => action.name)).toEqual(['create_todo', 'delete_todo'])
+    expect(Object.keys(actionsFor())).toEqual(['create_todo', 'delete_todo'])
   })
 
   it('carries the description from the contract', () => {
-    expect(named('create_todo').description).toBe('Create a todo')
+    expect(named('create_todo').tool.description).toBe('Create a todo')
+  })
+
+  it('advertises the derived parameters, which is what an agent reads', () => {
+    expect(named('create_todo').tool.parameters).toMatchObject({
+      type: 'object',
+      required: ['title'],
+    })
+  })
+
+  it('declares its HTTP method and that it needs an authenticated caller', () => {
+    expect(named('create_todo').http).toEqual({ method: 'POST' })
+    expect(named('create_todo').requiresAuth).toBe(true)
   })
 
   it('never invents an action for an unexposed Message', () => {
-    expect(actionsFor().map(action => action.name)).not.toContain('deleted_todo')
-    expect(actionsFor().map(action => action.name)).not.toContain('received_todos')
+    expect(Object.keys(actionsFor())).not.toContain('deleted_todo')
+    expect(Object.keys(actionsFor())).not.toContain('received_todos')
   })
 })
 
@@ -135,13 +148,6 @@ describe('the schema bridge', () => {
     // actually reads it is milestone 1's job -- these tests cannot see it.
     expect(typeof standard.jsonSchema.input).toBe('function')
     expect(standard.jsonSchema.input({ target: 'draft-2020-12' })).toMatchObject({
-      type: 'object',
-      required: ['title'],
-    })
-  })
-
-  it('also offers the JSON Schema, for a consumer that builds its own validator', () => {
-    expect(named('create_todo').jsonSchema).toMatchObject({
       type: 'object',
       required: ['title'],
     })
@@ -205,37 +211,47 @@ describe('run', () => {
   })
 })
 
-describe('register', () => {
-  /** Stands in for the framework, with the shape its docs describe. */
-  const stub = () => {
-    const defined: Array<{ description: string; schema: unknown; run: unknown }> = []
-    const defineAction: DefineAction = definition => {
-      defined.push(definition as never)
-      return definition
+describe('the registry', () => {
+  it('is keyed by capability name, as registerPackageActions expects', () => {
+    const registry = actionsFor()
+
+    expect(Object.keys(registry).sort()).toEqual(['create_todo', 'delete_todo'])
+    for (const entry of Object.values(registry)) {
+      expect(typeof entry.run).toBe('function')
+      expect(entry.tool.parameters).toBeDefined()
     }
-    return { defined, defineAction }
-  }
-
-  it('defines one action per capability', () => {
-    const { defined, defineAction } = stub()
-    AgentNative.register({ agent: makeAgent(), defineAction })
-
-    expect(defined.map(action => action.description)).toEqual([
-      'Create a todo',
-      'Delete the selected todo',
-    ])
   })
 
-  it('hands the framework a schema and a run it can call', async () => {
-    const { defined, defineAction } = stub()
-    AgentNative.register({ agent: makeAgent(), defineAction })
+  it('resolves a Runtime per invocation, not once at registration', async () => {
+    let resolved = 0
+    const registry = AgentNative.actions({
+      definition,
+      resolveRuntime: () => {
+        resolved += 1
+        return makeAgent()
+      },
+    })
 
-    // The framework validates with this, so it has to arrive intact.
-    const schema = defined[0]?.schema as { '~standard': { version: number; vendor: string } }
-    expect(schema['~standard']).toMatchObject({ version: 1, vendor: 'effect' })
+    expect(resolved).toBe(0)
+    await registry['create_todo']!.run({ title: 'a' })
+    await registry['create_todo']!.run({ title: 'b' })
 
-    const run = defined[0]?.run as (input: unknown) => Promise<{ ok: boolean }>
-    expect(await run({ title: 'x' })).toMatchObject({ ok: true })
-    expect(dispatched).toHaveLength(1)
+    // Which Model a caller means depends on who is calling.
+    expect(resolved).toBe(2)
+  })
+
+  it('passes the request context through to the resolver', async () => {
+    const seen: Array<unknown> = []
+    const registry = AgentNative.actions({
+      definition,
+      resolveRuntime: context => {
+        seen.push(context)
+        return makeAgent()
+      },
+    })
+
+    await registry['create_todo']!.run({ title: 'x' }, { userEmail: 'alice@example.com' })
+
+    expect(seen).toEqual([{ userEmail: 'alice@example.com' }])
   })
 })

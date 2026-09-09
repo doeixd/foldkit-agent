@@ -1,7 +1,7 @@
 export {
   actions,
-  register,
-  type Action,
+  type ActionEntry,
   type ActionResult,
+  type ActionRunContext,
   type ActionsOptions,
 } from './actions.js'
