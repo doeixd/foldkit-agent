@@ -4,6 +4,16 @@
   "description": "WebMCP adapter for @foldkit/agent. Projects exposed Foldkit Messages into document.modelContext tools.",
   "type": "module",
   "license": "MIT",
+  "author": "Patrick Glenn <doeixd@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doeixd/foldkit-agent.git",
+    "directory": "packages/agent-webmcp"
+  },
+  "homepage": "https://github.com/doeixd/foldkit-agent/tree/main/packages/agent-webmcp#readme",
+  "bugs": {
+    "url": "https://github.com/doeixd/foldkit-agent/issues"
+  },
   "sideEffects": false,
   "exports": {
     ".": {
@@ -11,7 +21,11 @@
       "import": "./dist/index.mjs"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -b"
