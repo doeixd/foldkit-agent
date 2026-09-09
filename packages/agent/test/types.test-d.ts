@@ -261,3 +261,113 @@ unnamedVariantRuntime.messages.dispatch('set', { value: '42' })
 
 // @ts-expect-error no name override was declared, so set_value is not a capability.
 unnamedVariantRuntime.messages.dispatch('set_value', { value: '42' })
+
+// A completion contract types `correlate`'s request from the capability input.
+const Deletion = defineMessageUnion({
+  RequestedDeleteTodo: { id: Schema.String },
+  DeletedTodo: { id: Schema.String },
+  FailedDeleteTodo: { id: Schema.String, reason: Schema.String },
+  Unrelated: { count: Schema.Number },
+})
+
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: {
+    description: 'Delete a todo',
+    completion: {
+      success: Deletion.DeletedTodo,
+      failure: Deletion.FailedDeleteTodo,
+      correlate: (request, result) => request.id === result.id,
+    },
+  },
+})
+
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: {
+    description: 'Delete a todo',
+    completion: {
+      success: Deletion.DeletedTodo,
+      // @ts-expect-error the capability input has `id`, not `todoId`.
+      correlate: request => request.todoId === '',
+    },
+  },
+})
+
+// `Agent.variant` also types `result` from the Messages the contract names.
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: Agent.variant({
+    description: 'Delete a todo',
+    input: Schema.Struct({ todoId: Schema.String }),
+    toMessage: input => ({ id: input.todoId }),
+    completion: {
+      success: Deletion.DeletedTodo,
+      failure: Deletion.FailedDeleteTodo,
+      correlate: (request, result) => request.todoId === result.id,
+    },
+  }),
+})
+
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: Agent.variant({
+    description: 'Delete a todo',
+    input: Schema.Struct({ todoId: Schema.String }),
+    toMessage: input => ({ id: input.todoId }),
+    completion: {
+      success: Deletion.DeletedTodo,
+      // @ts-expect-error the external input declares `todoId`, not `id`.
+      correlate: request => request.id === '',
+    },
+  }),
+})
+
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: Agent.variant({
+    description: 'Delete a todo',
+    input: Schema.Struct({ todoId: Schema.String }),
+    toMessage: input => ({ id: input.todoId }),
+    completion: {
+      success: Deletion.DeletedTodo,
+      failure: Deletion.FailedDeleteTodo,
+      // @ts-expect-error `reason` is on the failure Message only, not on both.
+      correlate: (_, result) => result.reason === '',
+    },
+  }),
+})
+
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: Agent.variant({
+    description: 'Delete a todo',
+    input: Schema.Struct({ todoId: Schema.String }),
+    toMessage: input => ({ id: input.todoId }),
+    completion: {
+      success: Deletion.DeletedTodo,
+      // @ts-expect-error `count` is on a Message this contract never names.
+      correlate: (_, result) => result.count === 1,
+    },
+  }),
+})
+
+// Several success Messages widen `result` to their union, and no further.
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: Agent.variant({
+    description: 'Delete a todo',
+    input: Schema.Struct({ todoId: Schema.String }),
+    toMessage: input => ({ id: input.todoId }),
+    completion: {
+      success: [Deletion.DeletedTodo, Deletion.FailedDeleteTodo],
+      correlate: (request, result) => request.todoId === result.id,
+    },
+  }),
+})
+
+Agent.expose(Deletion, {
+  RequestedDeleteTodo: Agent.variant({
+    description: 'Delete a todo',
+    input: Schema.Struct({ todoId: Schema.String }),
+    toMessage: input => ({ id: input.todoId }),
+    completion: {
+      success: [Deletion.DeletedTodo, Deletion.FailedDeleteTodo],
+      // @ts-expect-error `reason` is missing from one of the named Messages.
+      correlate: (_, result) => result.reason === '',
+    },
+  }),
+})

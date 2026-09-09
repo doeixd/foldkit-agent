@@ -35,21 +35,30 @@ export type MessageConstructor<Message extends AnyMessage = AnyMessage> = (
 ) => Message
 
 /**
- * Optional description of when a dispatched Message is considered complete.
+ * Describes when a dispatched Message is considered complete.
  *
  * Dispatching a Message and completing an operation are not always the same
  * event: `RequestedDeleteTodo` leads to a Command, which later produces
  * `DeletedTodo` or `FailedDeleteTodo`.
  *
- * Reserved for a later version: the contract is recorded and exposed through
- * introspection, but validated dispatch remains the completion boundary.
+ * `Request` is the decoded capability input, and `correlate` sees it beside the
+ * Message that completed the operation -- either a success or a failure one, so
+ * the two are separate parameters rather than one widened `Result`.
  */
-export interface Completion<Request = unknown, Result = unknown> {
-  readonly success: MessageConstructor | ReadonlyArray<MessageConstructor>
-  readonly failure?: MessageConstructor | ReadonlyArray<MessageConstructor> | undefined
-  readonly correlate?: ((request: Request, result: Result) => boolean) | undefined
+export interface Completion<
+  Request = unknown,
+  Success extends AnyMessage = AnyMessage,
+  Failure extends AnyMessage = AnyMessage,
+> {
+  readonly success: MessageConstructor<Success> | ReadonlyArray<MessageConstructor<Success>>
+  readonly failure?:
+    MessageConstructor<Failure> | ReadonlyArray<MessageConstructor<Failure>> | undefined
+  readonly correlate?: ((request: Request, result: Success | Failure) => boolean) | undefined
   readonly timeout?: Duration.Input | undefined
 }
+
+/** A completion contract with its authoring types erased, as adapters see it. */
+export type AnyCompletion = Completion<any, AnyMessage, AnyMessage>
 
 /** Configuration for one exposed Message variant. */
 export interface VariantConfig<
@@ -57,6 +66,9 @@ export interface VariantConfig<
   ExternalInput = MessageInput,
   Model = unknown,
   Principal = unknown,
+  CompletionRequest = ExternalInput,
+  CompletionSuccess extends AnyMessage = AnyMessage,
+  CompletionFailure extends AnyMessage = AnyMessage,
 > {
   /** Optional protocol-facing capability name. The internal Message tag never changes. */
   readonly name?: string | undefined
@@ -82,8 +94,9 @@ export interface VariantConfig<
       ) => boolean | Effect.Effect<boolean, AuthorizationError>)
     | undefined
 
-  /** Optional completion contract. Recorded but not executed in this version. */
-  readonly completion?: Completion | undefined
+  /** Optional completion contract. Dispatch then waits for a completing Message. */
+  readonly completion?:
+    Completion<CompletionRequest, CompletionSuccess, CompletionFailure> | undefined
 }
 
 /**
@@ -104,7 +117,7 @@ export interface MessageDescriptor {
   /** True when the variant declares an `authorize` hook that runs before dispatch. */
   readonly requiresAuthorization: boolean
   /** The declared completion contract, if any. */
-  readonly completion?: Completion | undefined
+  readonly completion?: AnyCompletion | undefined
 }
 
 /** Protocol-neutral description of one read-only resource. */

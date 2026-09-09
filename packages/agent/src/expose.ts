@@ -1,9 +1,16 @@
+import type { Duration } from 'effect'
 import { Schema } from 'effect'
 import type { MessageUnion } from 'foldkit/message'
 import { toJsonSchema } from './jsonSchema.js'
 import { type CompiledCompletion, compileCompletion } from './completion.js'
 import { type SnakeCase, assertValidName, defaultName } from './naming.js'
-import type { AnyMessage, Completion, InvocationContext, VariantConfig } from './types.js'
+import type {
+  AnyCompletion,
+  AnyMessage,
+  InvocationContext,
+  MessageConstructor,
+  VariantConfig,
+} from './types.js'
 
 type Fields = Schema.Struct.Fields
 
@@ -36,7 +43,10 @@ type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
   MessageInput,
   any,
   Model,
-  Principal
+  Principal,
+  MessageInput,
+  any,
+  any
 > & {
   readonly input?: undefined
   readonly toMessage?: undefined
@@ -47,7 +57,10 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
   MessageInput,
   ExternalInput,
   Model,
-  Principal
+  Principal,
+  MessageInput,
+  any,
+  any
 > & {
   readonly input: Schema.Codec<ExternalInput, any, never, never>
   readonly toMessage: (
@@ -66,6 +79,13 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
  * This is a union rather than a conditional on `V[Tag]`, because a conditional
  * would be circular inside a reverse mapped type and would silently collapse to
  * the direct branch.
+ *
+ * Both members must give `completion` the *same* type. A nested object literal
+ * whose contextual type differs between union members gets no contextual type at
+ * all, and `correlate`'s parameters then fail `noImplicitAny` -- so the inline
+ * form types `request` as the Message payload and leaves `result` open.
+ * `Agent.variant` is where a mapped input and the named Messages are both
+ * checked.
  */
 export type ValidateVariants<C extends Cases, Model, Principal> = {
   readonly [Tag in keyof C & string]?:
@@ -144,7 +164,7 @@ export interface ExposedVariant<Model = unknown, Principal = unknown> {
   readonly messageConstructor: unknown
   readonly available?: ((model: Model) => boolean) | undefined
   readonly authorize?: VariantConfig<any, any, Model, Principal>['authorize']
-  readonly completion?: Completion | undefined
+  readonly completion?: AnyCompletion | undefined
   /** The completion contract compiled to the tags and predicate the runtime matches on. */
   readonly compiledCompletion?: CompiledCompletion | undefined
 }
@@ -200,6 +220,32 @@ const closedEmptyObject = Schema.makeFilter((value: unknown) =>
     : 'Expected an empty object',
 )
 
+/** One completing Message constructor, or several. */
+type Constructors = MessageConstructor | ReadonlyArray<MessageConstructor>
+
+/** The Message type a constructor, or a list of them, produces. */
+type MessageOf<Of extends Constructors> =
+  Of extends ReadonlyArray<MessageConstructor<infer Message>>
+    ? Message
+    : Of extends MessageConstructor<infer Message>
+      ? Message
+      : never
+
+/**
+ * A completion contract whose `correlate` follows the contract itself.
+ *
+ * Spelled out rather than reusing `Completion`, because `success` and `failure`
+ * are inference sites here: `result` is the union of the Messages this contract
+ * actually names, and `request` the decoded input beside it.
+ */
+type VariantCompletion<Request, Success extends Constructors, Failure extends Constructors> = {
+  readonly success: Success
+  readonly failure?: Failure | undefined
+  readonly correlate?:
+    ((request: Request, result: MessageOf<Success> | MessageOf<Failure>) => boolean) | undefined
+  readonly timeout?: Duration.Input | undefined
+}
+
 /**
  * Types a variant that maps a distinct external input onto its Message.
  *
@@ -223,6 +269,8 @@ export const variant = <
   ExternalInput,
   Encoded,
   MessageInput,
+  Success extends Constructors = MessageConstructor,
+  Failure extends Constructors = never,
   const Name extends string | undefined = undefined,
   Model = any,
   Principal = any,
@@ -236,8 +284,12 @@ export const variant = <
     context: InvocationContext<Model, Principal>,
   ) => MessageInput
   readonly authorize?: VariantConfig<MessageInput, ExternalInput, Model, Principal>['authorize']
-  readonly completion?: Completion | undefined
-}): Omit<typeof config, 'name'> &
+  readonly completion?: VariantCompletion<ExternalInput, Success, Failure> | undefined
+}): Omit<typeof config, 'name' | 'completion'> &
+  // Erased on the way out: the contract was checked against this variant's own
+  // input above, and `expose`'s constraint types `completion` for the inline
+  // form, which is a different (internal) request type.
+  { readonly completion?: AnyCompletion | undefined } &
   // `NameFor` only reads a *required* `name`, so an omitted one must not leave
   // an optional `name?: string` behind: that would widen the capability's key.
   (undefined extends Name ? { readonly name?: undefined } : { readonly name: Name }) =>

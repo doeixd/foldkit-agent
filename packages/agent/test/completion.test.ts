@@ -1,6 +1,7 @@
 import { Duration, Effect } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import type { Completion } from '../src/types.js'
 import { type Message, type Model, Message as MessageUnion, emptyModel } from './todoApp.js'
 
 /**
@@ -34,7 +35,7 @@ const makeHost = (update?: (message: Message, emit: (message: Message) => void) 
   }
 }
 
-const contractOf = (completion: Agent.Completion) =>
+const contractOf = (completion: Completion<{ readonly id: string }, Message, Message>) =>
   Agent.define({
     messages: Agent.expose(MessageUnion, {
       RequestedDeleteTodo: { name: 'delete_todo', description: 'Delete a todo', completion },
@@ -192,8 +193,7 @@ describe('completion tracking', () => {
       definition: contractOf({
         success: MessageUnion.ReceivedTodos,
         correlate: (request, result) =>
-          (result as { todos: ReadonlyArray<{ id: string }> }).todos[0]?.id ===
-          (request as { id: string }).id,
+          result._tag === 'ReceivedTodos' && result.todos[0]?.id === request.id,
         timeout: Duration.seconds(1),
       }),
       host,
