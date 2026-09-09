@@ -26,6 +26,9 @@ import { AgentWebMcp } from '@foldkit/agent-webmcp'
 const registration = AgentWebMcp.register({ agent: agentRuntime })
 ```
 
+[examples/todo](../../examples/todo) registers a real contract and executes the
+resulting tools.
+
 `agent` is the `AgentRuntime` returned by `Agent.bind(...)`.
 
 Each currently available capability becomes one tool:

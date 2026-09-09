@@ -1732,6 +1732,7 @@ WebMCP is particularly compelling because it can expose these capabilities direc
 ```text
 packages/agent          @foldkit/agent
 packages/agent-webmcp   @foldkit/agent-webmcp
+examples/todo           a worked example, end to end
 ```
 
 ```bash
@@ -1739,7 +1740,12 @@ pnpm install
 pnpm test        # vitest
 pnpm typecheck   # tsc -b
 pnpm build       # tsdown
+pnpm demo        # run examples/todo
 ```
+
+[`examples/todo`](./examples/todo) is the shortest path to seeing this work: one
+state machine driven by a human and by an agent, exposed through WebMCP, with
+the host seam written out.
 
 **Build the state machine once. Let humans and agents speak the same Message language.**
 

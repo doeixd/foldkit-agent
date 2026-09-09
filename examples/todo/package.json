@@ -1,0 +1,19 @@
+{
+  "name": "@foldkit/agent-example-todo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "tsx src/main.ts",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@foldkit/agent": "workspace:*",
+    "@foldkit/agent-webmcp": "workspace:*"
+  },
+  "devDependencies": {
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "typescript": "^5.7.2"
+  }
+}

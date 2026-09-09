@@ -7,9 +7,12 @@ export default defineConfig({
       // Resolve the workspace package from source, so tests never depend on a
       // prior build of packages/agent.
       '@foldkit/agent': fileURLToPath(new URL('./packages/agent/src/index.ts', import.meta.url)),
+      '@foldkit/agent-webmcp': fileURLToPath(
+        new URL('./packages/agent-webmcp/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {
-    include: ['packages/*/test/**/*.test.ts'],
+    include: ['packages/*/test/**/*.test.ts', 'examples/*/test/**/*.test.ts'],
   },
 })

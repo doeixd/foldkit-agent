@@ -10,7 +10,8 @@ Message union -> Agent.expose    what an agent may do
 
 Everything else is an adapter. `update` remains the single source of truth.
 
-See the [proposal](../../README.md) for the design rationale.
+See the [proposal](../../README.md) for the design rationale, and
+[examples/todo](../../examples/todo) for a worked example.
 
 ## Install
 
