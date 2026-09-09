@@ -51,8 +51,6 @@ document.modelContext.registerTool({
 
 That makes Foldkit unusually well suited to browser-native agents: an exposed Message can become a WebMCP tool whose `execute` function validates input and dispatches directly into the **same live browser Runtime the user is already interacting with**.
 
----
-
 # Why
 
 Most applications accidentally define the same capability several times.
@@ -141,8 +139,6 @@ The agent is attached to the same page and the same state machine as the human. 
 
 That makes WebMCP a strong candidate for the **first production adapter** for this proposal.
 
----
-
 # The model
 
 Foldkit already gives us the important pieces:
@@ -179,8 +175,6 @@ Everything else is an adapter.
 
 The core package does **not** make MCP or WebMCP the source of truth. Foldkit remains the architecture.
 
----
-
 # Installation
 
 Proposed packages:
@@ -202,8 +196,6 @@ pnpm add @foldkit/agent @foldkit/agent-mcp
 ```
 
 `foldkit` and `effect` remain peer dependencies.
-
----
 
 # Quick start
 
@@ -311,8 +303,6 @@ const Application = Runtime.makeApplication({
 
 From that one definition, protocol adapters can derive their tool surfaces automatically.
 
----
-
 # What gets generated
 
 For:
@@ -362,8 +352,6 @@ An external MCP adapter can expose the same contract through `tools/list` and `t
 
 There is no separately maintained tool input type or executor.
 
----
-
 # Why expose the Message union?
 
 The Message union is already Foldkit's closed vocabulary of application events.
@@ -404,8 +392,6 @@ Message
 ```
 
 Exposure is explicit and opt-in. Internal Messages remain internal.
-
----
 
 # Designing Messages for agents
 
@@ -459,8 +445,6 @@ The rule is not "user Message vs system Message." Ask:
 
 > Does this Message represent a coherent capability that another interaction surface could legitimately originate?
 
----
-
 # API reference
 
 ## `Agent.define`
@@ -486,8 +470,6 @@ Agent.define<Model, Message, Context, Resources>(options: {
 ```
 
 `Agent.define` contains no model-provider or MCP/WebMCP configuration. It describes the application's agent contract only.
-
----
 
 ## `Agent.context`
 
@@ -522,8 +504,6 @@ Effect Schema for the projected context. It provides runtime validation, documen
 Pure projection from the current Foldkit Model. It should not perform effects.
 
 Do not expose the entire Model by default. The projection is an information boundary.
-
----
 
 ## `Agent.expose`
 
@@ -566,8 +546,6 @@ For every selected variant, Foldkit can derive:
 - dispatch logic.
 
 There should be no production `exposeAll()` default. Exposure is a capability boundary.
-
----
 
 ## `Agent.VariantConfig`
 
@@ -810,8 +788,6 @@ interface Completion<Request, Result> {
 
 Without a completion contract, successful validated dispatch is the completion boundary.
 
----
-
 ## `Agent.resource`
 
 Defines read-only Model state that can be requested separately from the default context.
@@ -847,8 +823,6 @@ Current WebMCP producer APIs are tool-oriented rather than exposing the same MCP
 
 The core contract should not distort itself around either protocol.
 
----
-
 ## Introspection
 
 Because the agent contract is data, it should be inspectable and testable without an LLM.
@@ -877,8 +851,6 @@ Agent.contextSchema(
 
 Adapters can depend on this protocol-neutral description rather than inspecting application internals.
 
----
-
 ## Invocation context
 
 Adapters should normalize invocation metadata before dispatch.
@@ -900,8 +872,6 @@ interface Invocation {
 The optional `signal` gives adapters a common cancellation primitive.
 
 For WebMCP this maps naturally from the cancellation signal passed to a tool's `execute` function.
-
----
 
 # Runtime integration
 
@@ -969,8 +939,6 @@ interface AgentRuntime {
 ```
 
 Protocol adapters bind to this seam rather than reaching into `update` directly.
-
----
 
 # WebMCP adapter
 
@@ -1077,8 +1045,6 @@ WebMCP is still experimental and evolving. Foldkit core should not depend on it.
 
 That lets the browser API change without forcing the Foldkit agent contract to change with it.
 
----
-
 # External MCP adapter
 
 Proposed package:
@@ -1148,8 +1114,6 @@ Foldkit AgentRuntime
 
 The existing DevTools MCP demonstrates a related topology during development, but production agent access should not simply expose DevTools.
 
----
-
 # In-app agents
 
 An in-app chat agent can bind directly to the active Runtime:
@@ -1168,8 +1132,6 @@ Foldkit Runtime.dispatch
 ```
 
 The same `AppAgent` used by WebMCP and MCP can therefore power an application-native chat or command surface.
-
----
 
 # DevTools MCP vs `@foldkit/agent`
 
@@ -1217,8 +1179,6 @@ DevTools MCP
 
 Production agent support should never require exposing DevTools.
 
----
-
 # Security model
 
 The design follows four rules.
@@ -1256,8 +1216,6 @@ Agent authorization supplements, but does not replace, backend/application autho
 
 For WebMCP, browser/origin permissions and protocol controls such as `exposedTo` are additional transport-level restrictions. They complement the agent contract rather than replacing it.
 
----
-
 # Testing
 
 The contract should be testable without an LLM.
@@ -1292,8 +1250,6 @@ test("delete_todo derives its input Schema", () => {
 ```
 
 Agent-originated transitions need no special state-machine semantics. They are ordinary Foldkit Messages and can use the existing Story/Scene testing model.
-
----
 
 # Design principles
 
@@ -1338,8 +1294,6 @@ If a capability is meaningful enough to expose, it should exist as a semantic Me
 
 Adapters dispatch Messages. They do not reimplement application behavior.
 
----
-
 # Non-goals
 
 `@foldkit/agent` is not intended to:
@@ -1355,8 +1309,6 @@ Adapters dispatch Messages. They do not reimplement application behavior.
 - couple Foldkit core to an experimental browser API;
 - infer arbitrary capabilities from rendered DOM;
 - create a second `Action` architecture beside Foldkit.
-
----
 
 # Minimal v1
 
@@ -1398,8 +1350,6 @@ validate + Runtime.dispatch(...)
 ```
 
 External MCP can follow from the same contract.
-
----
 
 # Proposed v1 API
 
@@ -1451,8 +1401,6 @@ That is the entire idea:
 
 > **Model describes what an agent can see. The exposed Message union describes what an agent can do. `update` remains the single source of truth.**
 
----
-
 # Open questions
 
 ## Should `Agent.context` be required?
@@ -1482,8 +1430,6 @@ That should remain adapter policy. The current WebMCP producer API is tool-orien
 ## Should completion ship in v1?
 
 Probably not. Validated dispatch is already a useful and well-defined boundary. Completion tracking becomes important when external agents need synchronous outcomes from Command-driven workflows.
-
----
 
 # Summary
 
@@ -1517,8 +1463,6 @@ From there:
 WebMCP is particularly compelling because it can expose these capabilities directly from the page that already owns the Foldkit Runtime — no DOM automation and no external browser-session bridge required.
 
 **Build the state machine once. Let humans and agents speak the same Message language.**
-
----
 
 ## References
 
