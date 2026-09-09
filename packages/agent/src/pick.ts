@@ -19,8 +19,12 @@ export const pick = <F extends Fields, const Keys extends ReadonlyArray<keyof F 
   model: { readonly fields: F },
   keys: Keys,
 ): Context<Schema.Struct.Type<F>, Schema.Struct.Type<Pick<F, Keys[number]>>> => {
+  // Copied at definition time: the caller's array is theirs to mutate, and a
+  // later push must not silently widen what the projection exposes.
+  const selected = [...keys]
+
   const picked: Record<string, unknown> = {}
-  for (const key of keys) {
+  for (const key of selected) {
     if (!(key in model.fields)) {
       throw new Error(`Cannot pick "${key}": the Model has no such field`)
     }
@@ -31,7 +35,7 @@ export const pick = <F extends Fields, const Keys extends ReadonlyArray<keyof F 
     schema: Schema.Struct(picked as Pick<F, Keys[number]>) as never,
     select: source => {
       const projected: Record<string, unknown> = {}
-      for (const key of keys) {
+      for (const key of selected) {
         projected[key] = (source as Record<string, unknown>)[key]
       }
       return projected as Schema.Struct.Type<Pick<F, Keys[number]>>

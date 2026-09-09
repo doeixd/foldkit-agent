@@ -86,7 +86,7 @@ describe('optional invocation', () => {
   })
 
   it('keeps whatever an adapter supplies', () => {
-    const signal = AbortSignal.abort()
+    const signal = new AbortController().signal
     const result = dispatch({ id: 'adapter-id', transport: 'webmcp', signal })
 
     expect(result.invocation).toEqual({ id: 'adapter-id', transport: 'webmcp', signal })
@@ -276,5 +276,29 @@ describe('default capability names', () => {
       [Tag in keyof typeof expected]: SnakeCase<Tag>
     } = expected
     expect(checks).toEqual(expected)
+  })
+})
+
+describe('Agent.pick is fixed at definition time', () => {
+  it('ignores later mutation of the caller’s key array', () => {
+    const Sensitive = Schema.Struct({ shown: Schema.String, secret: Schema.String })
+    const keys: Array<'shown' | 'secret'> = ['shown']
+
+    const context = Agent.pick(Sensitive, keys)
+    keys.push('secret')
+
+    // Pushing a key must not widen a contract that was already declared.
+    expect(context.select({ shown: 'ok', secret: 'password' })).toEqual({ shown: 'ok' })
+  })
+
+  it('ignores keys being removed from that array', () => {
+    const Sensitive = Schema.Struct({ shown: Schema.String, secret: Schema.String })
+    const keys: Array<'shown' | 'secret'> = ['shown']
+
+    const context = Agent.pick(Sensitive, keys)
+    keys.length = 0
+
+    // The projection must keep matching the schema it was built with.
+    expect(context.select({ shown: 'ok', secret: 'password' })).toEqual({ shown: 'ok' })
   })
 })

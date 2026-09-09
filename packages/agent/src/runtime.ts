@@ -2,13 +2,14 @@ import { Effect, Schema } from 'effect'
 import type { Definition } from './define.js'
 import {
   AuthorizationError,
+  CancelledError,
   CapabilityUnavailableError,
   type DispatchError,
   InvalidInputError,
   ResourceError,
   UnknownCapabilityError,
 } from './errors.js'
-import type { AnyCapabilities, ExposedVariant } from './expose.js'
+import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedVariant } from './expose.js'
 import { resolveInvocation } from './invocation.js'
 import type {
   AnyMessage,
@@ -29,16 +30,41 @@ import { messages as describeMessages } from './introspect.js'
  * reads the current Model and `dispatch` sends a Message into the Runtime, for
  * example through a Foldkit port or the same reference `update` runs on.
  */
-export interface AgentHost<Model, Message extends AnyMessage = AnyMessage> {
+export interface AgentHost<Model, Message extends AnyMessage = AnyMessage, Principal = unknown> {
   /** Reads the current Model. Called once per invocation, before validation. */
   readonly model: () => Model
-  /** Sends a Message into the Foldkit Runtime. */
+  /**
+   * Sends a Message into the Foldkit Runtime.
+   *
+   * A real application host accepts its whole Message union, which is wider
+   * than the exposed subset; it may not be narrower.
+   */
   readonly dispatch: (message: Message) => void | Promise<void> | Effect.Effect<void>
-  /** Resolves the caller's identity for `authorize`. Defaults to `undefined`. */
-  readonly principal?: (invocation: Invocation) => unknown
+  /** Resolves the caller's identity for `authorize`. */
+  readonly principal?: (invocation: Invocation) => Principal
   /** Subscribes to Model changes so adapters can reconcile availability. */
   readonly subscribe?: (listener: () => void) => () => void
 }
+
+/**
+ * The Message type a host must accept.
+ *
+ * Every exposed capability constructs one of these, so a host that cannot
+ * receive them is not a host for this contract.
+ */
+export type MessagesOf<ByTag> = ByTag[keyof ByTag] extends { readonly message: infer Message }
+  ? Message
+  : AnyMessage
+
+/**
+ * What a host must supply for `authorize`.
+ *
+ * A contract whose hooks read a principal needs one; a contract that never
+ * mentions it may omit the provider.
+ */
+export type PrincipalOf<Principal> = unknown extends Principal
+  ? { readonly principal?: (invocation: Invocation) => Principal }
+  : { readonly principal: (invocation: Invocation) => Principal }
 
 /**
  * An `Agent.Definition` bound to a live Runtime.
@@ -58,7 +84,7 @@ export type MessageConstructorFor<Tag extends string> = (...args: never) => { re
 export interface Dispatch<ByName, ByTag> {
   <Tag extends keyof ByTag & string>(
     message: MessageConstructorFor<Tag>,
-    input: ByTag[Tag],
+    input: ByTag[Tag] extends { readonly input: infer Input } ? Input : never,
     invocation?: Partial<Invocation>,
   ): Effect.Effect<DispatchResult, DispatchError>
 
@@ -73,8 +99,8 @@ export interface AgentRuntime<
   Model = unknown,
   Context_ = unknown,
   Principal = unknown,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
 > {
   readonly definition: Definition<Model, Context_, Principal, ByName, ByTag>
 
@@ -127,25 +153,28 @@ export interface AgentRuntime<
  * })
  * ```
  */
-export interface BindOptions<
+export type BindOptions<
   Model,
   Context_,
   Principal,
   Message extends AnyMessage,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
-> {
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
+> = {
   readonly definition: Definition<Model, Context_, Principal, ByName, ByTag>
-  readonly host: AgentHost<Model, Message>
-}
+  /** The host must accept every Message the contract can construct. */
+  readonly host: AgentHost<Model, Message, Principal> & {
+    readonly dispatch: (message: MessagesOf<ByTag>) => void | Promise<void> | Effect.Effect<void>
+  }
+} & { readonly host: PrincipalOf<Principal> }
 
 export const bind = <
   Model,
   Context_,
   Principal,
   Message extends AnyMessage = AnyMessage,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
 >(
   options: BindOptions<Model, Context_, Principal, Message, ByName, ByTag>,
 ): AgentRuntime<Model, Context_, Principal, ByName, ByTag> => {
@@ -182,6 +211,10 @@ export const bind = <
     requested?: Partial<Invocation>,
   ) {
     {
+      // Read through a function so control flow analysis cannot narrow it away:
+      // the caller can abort while an await below is suspended.
+      const cancelled = (): boolean => invocation.signal?.aborted === true
+
       const found = resolve(target)
       // A resolved capability reports its own protocol name, whichever way it
       // was named; an unresolved one reports what the caller asked for.
@@ -194,6 +227,11 @@ export const bind = <
         return yield* UnknownCapabilityError.of(name)
       }
       const variant = found
+
+      // An invocation that is already cancelled never reaches the Model.
+      if (cancelled()) {
+        return yield* CancelledError.of(name)
+      }
 
       const model = host.model()
 
@@ -224,6 +262,12 @@ export const bind = <
         if (!allowed) {
           return yield* AuthorizationError.of(name, variant.tag)
         }
+      }
+
+      // Checked again after decoding and authorization, either of which can
+      // suspend. Nothing is constructed or dispatched once cancelled.
+      if (cancelled()) {
+        return yield* CancelledError.of(name)
       }
 
       const context: InvocationContext<Model, Principal> = { model, principal, invocation }

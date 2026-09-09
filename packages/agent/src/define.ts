@@ -1,5 +1,5 @@
 import type { Context } from './context.js'
-import type { AnyCapabilities, ExposedMessages } from './expose.js'
+import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedMessages } from './expose.js'
 import type { Resource } from './resource.js'
 
 /**
@@ -13,8 +13,8 @@ export interface Definition<
   Model = unknown,
   Context_ = unknown,
   Principal = unknown,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
 > {
   readonly context?: Context<Model, Context_> | undefined
   readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
@@ -34,8 +34,8 @@ export interface DefineOptions<
   Model,
   Context_,
   Principal,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
 > {
   readonly context?: Context<Model, Context_> | undefined
   readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
@@ -46,8 +46,8 @@ export const define = <
   Model = unknown,
   Context_ = unknown,
   Principal = unknown,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
 >(
   options: DefineOptions<Model, Context_, Principal, ByName, ByTag>,
 ): Definition<Model, Context_, Principal, ByName, ByTag> => {

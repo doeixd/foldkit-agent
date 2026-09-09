@@ -25,9 +25,11 @@ export type MessageInputOf<C extends Cases, Tag extends keyof C & string> =
 /**
  * A variant that exposes its internal Message payload directly.
  *
- * `authorize` is pinned to the same signature as the mapped variant's. The two
- * members are otherwise indistinguishable to contextual typing, and a callback
- * parameter that differs between them cannot be inferred at the call site.
+ * `authorize` is pinned to the same request type as the mapped variant's. The
+ * two members are otherwise indistinguishable to contextual typing, and a
+ * callback parameter that differs between them makes `principal`, `model` and
+ * `transport` uninferable at the call site. `input` is the field that pays for
+ * that; `Agent.variant` types it where it matters.
  */
 type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
   MessageInput,
@@ -74,11 +76,18 @@ export type ValidateVariants<C extends Cases, Model, Principal> = {
 /** The tags of the union that this variants object exposes. */
 type ExposedTags<C extends Cases, V> = Extract<keyof V, keyof C & string>
 
-/** What an agent supplies for a variant: its external input, or the Message payload. */
+/**
+ * What an agent puts on the wire for a variant.
+ *
+ * Dispatch decodes, so this is the schema's **encoded** side, not its decoded
+ * one. A payload of `Schema.NumberFromString` is sent as a string and reaches
+ * `update` as a number; typing the call site with the decoded type would reject
+ * the input that actually works.
+ */
 type ExternalInputFor<C extends Cases, V, Tag extends keyof C & string> = V[Tag &
-  keyof V] extends { readonly input: Schema.Codec<infer External, any, any, any> }
-  ? External
-  : MessageInputOf<C, Tag>
+  keyof V] extends { readonly input: Schema.Codec<any, infer Encoded, any, any> }
+  ? Encoded
+  : Schema.Struct.Encoded<C[Tag]>
 
 /** The protocol-facing name of a variant: its override, or the normalized tag. */
 type NameFor<Config, Tag extends string> = Config extends { readonly name: infer Name extends string }
@@ -90,13 +99,35 @@ export type CapabilitiesByName<C extends Cases, V> = {
   readonly [Tag in ExposedTags<C, V> as NameFor<V[Tag], Tag>]: ExternalInputFor<C, V, Tag>
 }
 
-/** Capability input types keyed by Message tag, for dispatching by constructor. */
+/**
+ * Capability types keyed by Message tag.
+ *
+ * Each entry carries the agent-facing input and the Message the capability
+ * constructs, so a host can be required to accept what the contract produces.
+ */
 export type CapabilitiesByTag<C extends Cases, V> = {
-  readonly [Tag in ExposedTags<C, V>]: ExternalInputFor<C, V, Tag>
+  readonly [Tag in ExposedTags<C, V>]: {
+    readonly input: ExternalInputFor<C, V, Tag>
+    readonly message: MessageFor<C, Tag>
+  }
 }
 
-/** The default maps: any name, unknown input. Adapters work against these. */
-export type AnyCapabilities = Record<string, unknown>
+/** The Message a capability constructs. */
+type MessageFor<C extends Cases, Tag extends keyof C & string> = ConstructorFor<
+  C,
+  Tag
+> extends (value: any) => infer Message
+  ? Message
+  : AnyMessage
+
+/** The default name map: any name, unknown input. Adapters work against this. */
+export type AnyCapabilitiesByName = Record<string, unknown>
+
+/** The default tag map: any tag, unknown input, any Message. */
+export type AnyCapabilitiesByTag = Record<
+  string,
+  { readonly input: unknown; readonly message: AnyMessage }
+>
 
 /** One compiled capability: everything an adapter needs, and nothing application-specific. */
 export interface ExposedVariant<Model = unknown, Principal = unknown> {
@@ -126,8 +157,8 @@ export interface ExposedVariant<Model = unknown, Principal = unknown> {
 export interface ExposedMessages<
   Model = unknown,
   Principal = unknown,
-  ByName = AnyCapabilities,
-  ByTag = AnyCapabilities,
+  ByName = AnyCapabilitiesByName,
+  ByTag = AnyCapabilitiesByTag,
 > {
   readonly variants: ReadonlyArray<ExposedVariant<Model, Principal>>
   /** Type-only witnesses. Never populated at runtime. */
@@ -149,6 +180,38 @@ const isEmptyStruct = (schema: unknown): boolean => {
   const fields = (schema as { fields?: Record<string, unknown> }).fields
   return fields !== undefined && Object.keys(fields).length === 0
 }
+
+/**
+ * Types a variant that maps a distinct external input onto its Message.
+ *
+ * Written inline, `toMessage` and `authorize` receive `any`: their input comes
+ * from the `input` codec beside them, which TypeScript has not finished
+ * inferring while it types the object. Passing the config through a generic
+ * function infers it first, so the callbacks are checked.
+ *
+ * @example
+ * ```ts
+ * Agent.expose(Message, {
+ *   RequestedDeleteTodo: Agent.variant({
+ *     description: 'Delete a todo',
+ *     input: Schema.Struct({ id: Schema.String }),
+ *     toMessage: ({ id }, { invocation }) => ({ id, requestId: invocation.id }),
+ *   }),
+ * })
+ * ```
+ */
+export const variant = <ExternalInput, MessageInput, Model = any, Principal = any>(config: {
+  readonly name?: string | undefined
+  readonly description: string
+  readonly available?: ((model: Model) => boolean) | undefined
+  readonly input: Schema.Codec<ExternalInput, any, never, never>
+  readonly toMessage: (
+    input: ExternalInput,
+    context: InvocationContext<Model, Principal>,
+  ) => MessageInput
+  readonly authorize?: VariantConfig<MessageInput, ExternalInput, Model, Principal>['authorize']
+  readonly completion?: Completion | undefined
+}): typeof config => config
 
 /** Strips the `_tag` literal so only the agent-facing payload fields remain. */
 const payloadSchemaOf = (

@@ -84,6 +84,19 @@ export class AuthorizationError extends Schema.TaggedError<AuthorizationError>()
   }
 }
 
+/** The invocation was cancelled before its Message was dispatched. */
+export class CancelledError extends Schema.TaggedError<CancelledError>()('AgentCancelledError', {
+  capability: Schema.String,
+  message: Schema.String,
+}) {
+  static of(capability: string): CancelledError {
+    return new CancelledError({
+      capability,
+      message: `Invocation of "${capability}" was cancelled`,
+    })
+  }
+}
+
 /** A named resource does not exist or cannot be read. */
 export class ResourceError extends Schema.TaggedError<ResourceError>()('AgentResourceError', {
   resource: Schema.String,
@@ -103,3 +116,4 @@ export type DispatchError =
   | CapabilityUnavailableError
   | InvalidInputError
   | AuthorizationError
+  | CancelledError

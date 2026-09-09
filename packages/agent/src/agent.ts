@@ -2,13 +2,20 @@ export { context, type Context, type ContextOptions } from './context.js'
 export { define, type DefineOptions, type Definition } from './define.js'
 export {
   AuthorizationError,
+  CancelledError,
   CapabilityUnavailableError,
   type DispatchError,
   InvalidInputError,
   ResourceError,
   UnknownCapabilityError,
 } from './errors.js'
-export { expose, type ExposedMessages, type ExposedVariant, type MessageInputOf } from './expose.js'
+export {
+  expose,
+  variant,
+  type ExposedMessages,
+  type ExposedVariant,
+  type MessageInputOf,
+} from './expose.js'
 export { forModel, type BoundAgent } from './forModel.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'
 export { newInvocationId } from './invocation.js'

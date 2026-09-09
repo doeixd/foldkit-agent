@@ -3,6 +3,7 @@
  * `@ts-expect-error` below must stay an error for the contract to hold.
  */
 import { Option, Schema } from 'effect'
+import { defineMessageUnion } from 'foldkit/message'
 import { Agent } from '../src/index.js'
 import { type Model, Message, Model as ModelSchema } from './todoApp.js'
 
@@ -137,3 +138,64 @@ typedRuntime.messages.dispatch('create_todo', { title: 42 })
 // The protocol path stays open for names that are only known at runtime.
 declare const fromTheWire: string
 typedRuntime.messages.dispatchUnknown(fromTheWire, JSON.parse('{}'))
+
+// Agent.variant infers a mapped variant's callbacks from its own input codec.
+Agent.expose(Message, {
+  RequestedRenameTodo: Agent.variant({
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String, heading: Schema.String }),
+    toMessage: input => ({ id: input.id, title: input.heading }),
+    authorize: ({ input }) => input.id !== '',
+  }),
+})
+
+Agent.expose(Message, {
+  RequestedRenameTodo: Agent.variant({
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String }),
+    // @ts-expect-error heading is not on the declared input.
+    toMessage: input => ({ id: input.id, title: input.heading }),
+  }),
+})
+
+Agent.expose(Message, {
+  // @ts-expect-error toMessage must produce the RequestedRenameTodo payload.
+  RequestedRenameTodo: Agent.variant({
+    description: 'Rename a todo',
+    input: Schema.Struct({ id: Schema.String }),
+    toMessage: input => ({ id: input.id }),
+  }),
+})
+
+// Dispatch input is the encoded side of a transforming schema.
+const Transforming = defineMessageUnion({ Set: { value: Schema.NumberFromString } })
+const transformingRuntime = Agent.bind({
+  definition: Agent.define({ messages: Agent.expose(Transforming, { Set: 'Set a value' }) }),
+  host: { model: () => ({}), dispatch: () => {} },
+})
+transformingRuntime.messages.dispatch('set', { value: '42' })
+// @ts-expect-error the wire form is a string; the number is what fails at runtime.
+transformingRuntime.messages.dispatch('set', { value: 42 })
+
+// A host must accept the Messages the contract constructs.
+Agent.bind({
+  definition: Agent.define({ messages: Agent.expose(Message, { RequestedCreateTodo: 'Create' }) }),
+  // @ts-expect-error this host cannot receive RequestedCreateTodo.
+  host: { model: () => ({}), dispatch: (_: { _tag: 'Unrelated'; count: number }) => {} },
+})
+
+// A contract that reads a principal requires the host to supply one.
+const Guarded = Agent.forModel<{ readonly ok: boolean }, { readonly allowed: boolean }>()
+const guarded = Guarded.define({
+  messages: Guarded.expose(Message, {
+    RequestedCreateTodo: { description: 'Create', authorize: ({ principal }) => principal.allowed },
+  }),
+})
+// @ts-expect-error the principal provider returns the wrong shape.
+Guarded.bind({ definition: guarded, host: { model: () => ({ ok: true }), principal: () => ({ wrong: true }), dispatch: () => {} } })
+// @ts-expect-error the principal provider is missing entirely.
+Guarded.bind({ definition: guarded, host: { model: () => ({ ok: true }), dispatch: () => {} } })
+Guarded.bind({
+  definition: guarded,
+  host: { model: () => ({ ok: true }), principal: () => ({ allowed: true }), dispatch: () => {} },
+})

@@ -230,13 +230,18 @@ describe('two runtimes over one definition', () => {
 
     const a = TodoAgent.bind({
       definition,
-      host: { model: () => emptyModel, dispatch: (message: Message) => void first.push(message) },
+      host: {
+        model: () => emptyModel,
+        dispatch: (message: Message) => void first.push(message),
+        principal: () => ({ canWrite: true }),
+      },
     })
     const b = TodoAgent.bind({
       definition,
       host: {
         model: () => ({ ...emptyModel, selectedTodoId: Option.some('a') }),
         dispatch: (message: Message) => void second.push(message),
+        principal: () => ({ canWrite: true }),
       },
     })
 

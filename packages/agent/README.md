@@ -92,6 +92,10 @@ const agentRuntime = TodoAgent.bind({
 })
 ```
 
+The host must accept every Message the contract can construct -- a wider union
+is fine, a narrower one is a type error -- and a contract whose hooks read a
+principal must be given a `principal` provider of the matching type.
+
 ## API
 
 | Function | Purpose |
@@ -99,6 +103,7 @@ const agentRuntime = TodoAgent.bind({
 | `Agent.context({ schema, select })` | The information boundary: what an agent may see. |
 | `Agent.pick(Model, keys)` | The same, derived from a list of Model fields. |
 | `Agent.expose(Message, variants)` | The capability boundary: what an agent may do. |
+| `Agent.variant(config)` | A mapped variant whose callbacks are inferred from its `input`. |
 | `Agent.resource(name, options)` | A named read-only projection of Model state. |
 | `Agent.define({ context, messages, resources })` | The protocol-neutral contract. |
 | `Agent.bind({ definition, host })` | Binds the contract to a live Runtime. |
@@ -120,6 +125,23 @@ RequestedDeleteTodo: {
 
 `input` and `toMessage` must be supplied together; supplying `input` alone is a
 type error and a runtime error.
+
+Written inline, a mapped variant's `toMessage` and `authorize` receive `any`:
+their input comes from the `input` codec beside them, which TypeScript has not
+finished inferring while it types the object. `Agent.variant` infers it first,
+so those callbacks are checked:
+
+```ts
+RequestedDeleteTodo: Agent.variant({
+  description: 'Delete a todo',
+  input: Schema.Struct({ id: Schema.String }),
+  toMessage: ({ id }, { invocation }) => ({ id, requestId: invocation.id }),
+}),
+```
+
+`authorize` on a direct variant also receives `any` for `input`, which is the
+price of `principal`, `model` and `transport` being inferable. Annotate the
+parameter where the input matters.
 
 Without an explicit `name`, the tag is normalized: `RequestedDeleteTodo` becomes
 `requested_delete_todo`. Every capital starts a word, with no special case for
@@ -178,6 +200,14 @@ neither can be checked at compile time. That path is `dispatchUnknown`:
 agentRuntime.messages.dispatchUnknown(nameFromTheWire, payloadFromTheWire, invocation)
 ```
 
+Input is typed as the **encoded** side of the capability's schema, because that
+is what dispatch decodes. A payload of `Schema.NumberFromString` is sent as a
+string and reaches `update` as a number.
+
+An invocation whose signal is already aborted is refused before the Model is
+read, and one aborted while decoding or `authorize` is pending never constructs
+or dispatches its Message. Both fail with `AgentCancelledError`.
+
 Dispatch runs in a fixed order: resolve the capability, check `available`,
 decode input through its Effect Schema, run `authorize`, then construct and
 dispatch the Message. A failure at any step means no Message reaches `update`.
@@ -201,7 +231,8 @@ dispatch.pipe(
 ```
 
 `AgentUnknownCapabilityError`, `AgentCapabilityUnavailableError`,
-`AgentInvalidInputError`, `AgentAuthorizationError`, and `AgentResourceError`
+`AgentInvalidInputError`, `AgentAuthorizationError`, `AgentCancelledError`, and
+`AgentResourceError`
 for resource reads. Every `message` is written for the calling agent: it names
 the capability and never restates the underlying decode failure, which stays on
 the error's `cause` for the application.

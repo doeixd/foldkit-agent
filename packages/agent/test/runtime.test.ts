@@ -218,3 +218,117 @@ describe('AgentRuntime projections', () => {
     expect(calls).toBe(1)
   })
 })
+
+describe('cancellation', () => {
+  const cancellingAgent = (authorize: () => Effect.Effect<boolean>) => {
+    const dispatched: Array<Message> = []
+    const runtime = Agent.bind({
+      definition: Agent.define({
+        messages: Agent.expose(MessageUnion, {
+          RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo', authorize },
+        }),
+      }),
+      host: { model: () => emptyModel, dispatch: (message: Message) => void dispatched.push(message) },
+    })
+    return { runtime, dispatched }
+  }
+
+  it('refuses an invocation whose signal is already aborted', () => {
+    const { runtime, dispatched } = cancellingAgent(() => Effect.succeed(true))
+
+    const failure = failureOf(
+      runtime.messages.dispatch('create_todo', { title: 'x' }, {
+        id: 'i',
+        transport: 'webmcp',
+        signal: AbortSignal.abort(),
+      }),
+    )
+
+    expect(failure._tag).toBe('AgentCancelledError')
+    expect(dispatched).toEqual([])
+  })
+
+  it('does not dispatch when the caller aborts while authorization is pending', async () => {
+    let approve: (allowed: boolean) => void = () => {}
+    const pending = new Promise<boolean>(resolve => {
+      approve = resolve
+    })
+    const { runtime, dispatched } = cancellingAgent(() => Effect.promise(() => pending))
+
+    const controller = new AbortController()
+    const running = Effect.runPromise(
+      Effect.result(
+        runtime.messages.dispatch('create_todo', { title: 'x' }, {
+          id: 'i',
+          transport: 'webmcp',
+          signal: controller.signal,
+        }),
+      ),
+    )
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+    controller.abort()
+    approve(true)
+    const result = await running
+
+    expect(result._tag).toBe('Failure')
+    expect((result as { failure: { _tag: string } }).failure._tag).toBe('AgentCancelledError')
+    expect(dispatched).toEqual([])
+  })
+
+  it('dispatches normally when the signal is never aborted', async () => {
+    const { runtime, dispatched } = cancellingAgent(() => Effect.succeed(true))
+
+    await Effect.runPromise(
+      runtime.messages.dispatch('create_todo', { title: 'x' }, {
+        id: 'i',
+        transport: 'webmcp',
+        signal: new AbortController().signal,
+      }),
+    )
+
+    expect(dispatched).toEqual([{ _tag: 'RequestedCreateTodo', title: 'x' }])
+  })
+})
+
+describe('an already-cancelled invocation', () => {
+  it('touches neither the Model nor the authorization hook', () => {
+    let modelReads = 0
+    let authorizeCalls = 0
+
+    const runtime = Agent.bind({
+      definition: Agent.define({
+        messages: Agent.expose(MessageUnion, {
+          RequestedCreateTodo: {
+            name: 'create_todo',
+            description: 'Create a todo',
+            authorize: () => {
+              authorizeCalls += 1
+              return true
+            },
+          },
+        }),
+      }),
+      host: {
+        model: () => {
+          modelReads += 1
+          return emptyModel
+        },
+        dispatch: (_: Message) => {},
+      },
+    })
+
+    const failure = failureOf(
+      runtime.messages.dispatch('create_todo', { title: 'x' }, {
+        id: 'i',
+        transport: 'webmcp',
+        signal: AbortSignal.abort(),
+      }),
+    )
+
+    expect(failure._tag).toBe('AgentCancelledError')
+    // Refused before any of the work an invocation would otherwise cause.
+    expect(modelReads).toBe(0)
+    expect(authorizeCalls).toBe(0)
+  })
+})

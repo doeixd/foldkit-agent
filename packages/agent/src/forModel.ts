@@ -1,7 +1,8 @@
 import { type Context, type ContextOptions, context } from './context.js'
 import { type DefineOptions, type Definition, define } from './define.js'
 import {
-  type AnyCapabilities,
+  type AnyCapabilitiesByName,
+  type AnyCapabilitiesByTag,
   type CapabilitiesByName,
   type CapabilitiesByTag,
   type Cases,
@@ -33,15 +34,15 @@ export interface BoundAgent<Model, Principal> {
     options: ResourceOptions<Model, Value>,
   ) => Resource<Model, Value>
 
-  readonly define: <Context_, ByName = AnyCapabilities, ByTag = AnyCapabilities>(
+  readonly define: <Context_, ByName = AnyCapabilitiesByName, ByTag = AnyCapabilitiesByTag>(
     options: DefineOptions<Model, Context_, Principal, ByName, ByTag>,
   ) => Definition<Model, Context_, Principal, ByName, ByTag>
 
   readonly bind: <
     Context_,
     Message extends AnyMessage = AnyMessage,
-    ByName = AnyCapabilities,
-    ByTag = AnyCapabilities,
+    ByName = AnyCapabilitiesByName,
+    ByTag = AnyCapabilitiesByTag,
   >(
     options: BindOptions<Model, Context_, Principal, Message, ByName, ByTag>,
   ) => AgentRuntime<Model, Context_, Principal, ByName, ByTag>
