@@ -59,17 +59,13 @@ import { Option, Schema } from 'effect'
 const TodoAgent = Agent.forModel<Model>()
 
 const AppAgent = TodoAgent.define({
-  context: TodoAgent.context({
-    schema: Schema.Struct({
-      selectedTodoId: Schema.Option(Schema.String),
-      todos: Schema.Array(Todo),
-    }),
-    select: model => ({ selectedTodoId: model.selectedTodoId, todos: model.todos }),
-  }),
+  // Derives the context schema and the projection from one field list.
+  context: Agent.pick(Model, ['selectedTodoId', 'todos']),
 
   messages: TodoAgent.expose(Message, {
-    RequestedCreateTodo: { name: 'create_todo', description: 'Create a new todo' },
-    RequestedRenameTodo: { name: 'rename_todo', description: 'Rename an existing todo' },
+    // A variant that needs nothing but a description can be written as one.
+    RequestedCreateTodo: 'Create a new todo',
+    RequestedRenameTodo: 'Rename an existing todo',
     RequestedDeleteTodo: {
       name: 'delete_todo',
       description: 'Delete the selected todo',
@@ -100,6 +96,7 @@ const agentRuntime = TodoAgent.bind({
 | Function | Purpose |
 | --- | --- |
 | `Agent.context({ schema, select })` | The information boundary: what an agent may see. |
+| `Agent.pick(Model, keys)` | The same, derived from a list of Model fields. |
 | `Agent.expose(Message, variants)` | The capability boundary: what an agent may do. |
 | `Agent.resource(name, options)` | A named read-only projection of Model state. |
 | `Agent.define({ context, messages, resources })` | The protocol-neutral contract. |
@@ -143,13 +140,16 @@ expect(Agent.messages(AppAgent).map(message => message.name)).toEqual([
 ### Dispatch
 
 ```ts
-Effect.runPromise(
-  agentRuntime.messages.dispatch(
-    'delete_todo',
-    { id: 'todo-1' },
-    { id: crypto.randomUUID(), transport: 'webmcp' },
-  ),
+// An adapter supplies its own invocation metadata.
+agentRuntime.messages.dispatch(
+  'delete_todo',
+  { id: 'todo-1' },
+  { id: crypto.randomUUID(), transport: 'webmcp', signal },
 )
+
+// In-app callers can leave it out: the id is generated and the transport
+// defaults to 'in-app'.
+agentRuntime.messages.dispatch('delete_todo', { id: 'todo-1' })
 ```
 
 Dispatch runs in a fixed order: resolve the capability, check `available`,

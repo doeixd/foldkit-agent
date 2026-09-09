@@ -11,6 +11,8 @@ export {
 export { expose, type ExposedMessages, type ExposedVariant, type MessageInputOf } from './expose.js'
 export { forModel, type BoundAgent } from './forModel.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'
+export { newInvocationId } from './invocation.js'
+export { pick } from './pick.js'
 export { resource, type Resource, type ResourceOptions } from './resource.js'
 export { bind, type AgentHost, type AgentRuntime, type BindOptions } from './runtime.js'
 export type {

@@ -32,17 +32,11 @@ type Message = typeof Message.Type
 const TodoAgent = Agent.forModel<Model>()
 
 const AppAgent = TodoAgent.define({
-  context: TodoAgent.context({
-    schema: Schema.Struct({
-      selectedTodoId: Schema.Option(Schema.String),
-      todos: Schema.Array(Todo),
-    }),
-    select: model => ({ selectedTodoId: model.selectedTodoId, todos: model.todos }),
-  }),
+  context: Agent.pick(Model, ['selectedTodoId', 'todos']),
 
   messages: TodoAgent.expose(Message, {
-    RequestedCreateTodo: { name: 'create_todo', description: 'Create a new todo' },
-    RequestedRenameTodo: { name: 'rename_todo', description: 'Rename an existing todo' },
+    RequestedCreateTodo: 'Create a new todo',
+    RequestedRenameTodo: 'Rename an existing todo',
     RequestedDeleteTodo: {
       name: 'delete_todo',
       description: 'Delete the selected todo',

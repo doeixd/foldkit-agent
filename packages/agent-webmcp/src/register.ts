@@ -1,4 +1,4 @@
-import type { Agent } from '@foldkit/agent'
+import { Agent } from '@foldkit/agent'
 import { Effect } from 'effect'
 import {
   type ModelContext,
@@ -64,11 +64,6 @@ const describeFailure = (error: Agent.DispatchError): string => {
   }
 }
 
-const defaultInvocationId = (): string =>
-  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `webmcp-${Math.random().toString(36).slice(2)}`
-
 /**
  * Projects an agent contract into `document.modelContext.registerTool(...)`.
  *
@@ -98,7 +93,7 @@ export const register = <Model, Context_, Principal>(
   }
 
   const { agent } = options
-  const nextInvocationId = options.invocationId ?? defaultInvocationId
+  const nextInvocationId = options.invocationId ?? Agent.newInvocationId
 
   /** One AbortController per registered tool: aborting it unregisters that tool. */
   const controllers = new Map<string, AbortController>()

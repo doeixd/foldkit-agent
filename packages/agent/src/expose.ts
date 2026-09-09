@@ -22,10 +22,16 @@ type ConstructorFor<C extends Cases, Tag extends keyof C & string> = MessageUnio
 export type MessageInputOf<C extends Cases, Tag extends keyof C & string> =
   ConstructorFor<C, Tag> extends (value: infer Input) => any ? Input : never
 
-/** A variant that exposes its internal Message payload directly. */
+/**
+ * A variant that exposes its internal Message payload directly.
+ *
+ * `authorize` is pinned to the same signature as the mapped variant's. The two
+ * members are otherwise indistinguishable to contextual typing, and a callback
+ * parameter that differs between them cannot be inferred at the call site.
+ */
 type DirectVariant<MessageInput, Model, Principal> = VariantConfig<
   MessageInput,
-  MessageInput,
+  any,
   Model,
   Principal
 > & {
@@ -50,9 +56,9 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
 /**
  * Constrains each key of the supplied variants object.
  *
- * Keys must be tags of the union. A variant either exposes its Message payload
- * directly, or supplies both `input` and `toMessage`; an object with `input`
- * alone matches neither member and is rejected.
+ * Keys must be tags of the union. A variant is a bare description string, or
+ * exposes its Message payload directly, or supplies both `input` and
+ * `toMessage`; an object with `input` alone matches no member and is rejected.
  *
  * This is a union rather than a conditional on `V[Tag]`, because a conditional
  * would be circular inside a reverse mapped type and would silently collapse to
@@ -63,6 +69,7 @@ export type ValidateVariants<C extends Cases, V, Model, Principal> = {
     ?
         | DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
         | MappedVariant<MessageInputOf<C, Tag>, any, Model, Principal>
+        | string
     : Readonly<{ 'Not a tag of this Message union': Tag }>
 }
 
@@ -113,11 +120,17 @@ const payloadSchemaOf = (constructor: unknown): { schema: Schema.Struct<Fields>;
  * meaningful and safe for an agent to originate. There is deliberately no
  * `exposeAll()` — exposure is a capability boundary.
  *
+ * A variant that needs nothing but a description can be written as one.
+ *
  * @example
  * ```ts
  * const messages = Agent.expose(Message, {
- *   RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
- *   RequestedDeleteTodo: { name: 'delete_todo', description: 'Delete a todo' },
+ *   RequestedCreateTodo: 'Create a todo',
+ *   RequestedDeleteTodo: {
+ *     name: 'delete_todo',
+ *     description: 'Delete a todo',
+ *     available: model => Option.isSome(model.selectedTodoId),
+ *   },
  * })
  * ```
  */
@@ -133,7 +146,12 @@ export const expose = <
   const union = message as unknown as Record<string, unknown>
 
   const compiled = Object.keys(variants).map((tag): ExposedVariant<Model, Principal> => {
-    const config = (variants as Record<string, VariantConfig<any, any, Model, Principal>>)[tag]!
+    const declared = (variants as Record<string, string | VariantConfig<any, any, Model, Principal>>)[
+      tag
+    ]!
+    // A bare string is the description; every other field takes its default.
+    const config: VariantConfig<any, any, Model, Principal> =
+      typeof declared === 'string' ? { description: declared } : declared
     const constructor = union[tag]
 
     if (typeof constructor !== 'function') {

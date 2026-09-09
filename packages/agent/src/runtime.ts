@@ -9,6 +9,7 @@ import {
   UnknownCapabilityError,
 } from './errors.js'
 import type { ExposedVariant } from './expose.js'
+import { resolveInvocation } from './invocation.js'
 import type {
   AnyMessage,
   DispatchResult,
@@ -59,10 +60,16 @@ export interface AgentRuntime<Model = unknown, Context_ = unknown, Principal = u
     readonly list: Effect.Effect<ReadonlyArray<MessageDescriptor>>
     /** Only the capabilities whose `available(model)` currently holds. */
     readonly available: Effect.Effect<ReadonlyArray<MessageDescriptor>>
+    /**
+     * Validates input and dispatches the Message.
+     *
+     * `invocation` is optional: an adapter passes its own id, transport, and
+     * signal, while an in-app caller can omit it.
+     */
     readonly dispatch: (
       name: string,
       input: unknown,
-      invocation: Invocation,
+      invocation?: Partial<Invocation>,
     ) => Effect.Effect<DispatchResult, DispatchError>
   }
 
@@ -113,9 +120,10 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
   const dispatch = (
     name: string,
     input: unknown,
-    invocation: Invocation,
+    requested?: Partial<Invocation>,
   ): Effect.Effect<DispatchResult, DispatchError> =>
     Effect.gen(function* () {
+      const invocation = resolveInvocation(requested)
       const variant = byName.get(name)
       if (variant === undefined) {
         return yield* Effect.fail(new UnknownCapabilityError({ capability: name }))

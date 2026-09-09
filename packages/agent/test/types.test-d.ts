@@ -4,7 +4,7 @@
  */
 import { Option, Schema } from 'effect'
 import { Agent } from '../src/index.js'
-import { type Model, Message } from './todoApp.js'
+import { type Model, Message, Model as ModelSchema } from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model>()
 
@@ -56,3 +56,44 @@ TodoAgent.context({
   schema: Schema.Struct({ todos: Schema.Array(Schema.Unknown) }),
   select: model => ({ todos: model.todos }),
 })
+
+// The description shorthand is accepted wherever a variant config is.
+Agent.expose(Message, {
+  RequestedCreateTodo: 'Create a todo',
+  RequestedDeleteTodo: { description: 'Delete a todo' },
+})
+
+// The shorthand does not weaken the tag check.
+Agent.expose(Message, {
+  // @ts-expect-error NotAMessage is not a variant of this Message union.
+  NotAMessage: 'nope',
+})
+
+// A non-string, non-config value is still rejected.
+Agent.expose(Message, {
+  // @ts-expect-error a variant is a description or a config object, not a number.
+  RequestedCreateTodo: 42,
+})
+
+// With the Model fixed, an unannotated authorize still resolves its request.
+TodoAgent.expose(Message, {
+  RequestedDeleteTodo: {
+    description: 'Delete a todo',
+    authorize: ({ model, transport }) => transport === 'webmcp' && model.todos.length > 0,
+  },
+})
+
+// Agent.pick rejects a field the Model does not declare.
+// @ts-expect-error 'missing' is not a field of the Model.
+Agent.pick(ModelSchema, ['missing'])
+
+// Agent.pick types the projection from the picked keys.
+const picked = Agent.pick(ModelSchema, ['todos'])
+const projection: { readonly todos: ReadonlyArray<{ readonly id: string }> } = picked.select({
+  todos: [],
+  selectedTodoId: Option.none(),
+})
+void projection
+
+// @ts-expect-error selectedTodoId was not picked.
+void picked.select({ todos: [], selectedTodoId: Option.none() }).selectedTodoId
