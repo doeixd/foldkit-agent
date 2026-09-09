@@ -41,28 +41,22 @@ export interface ActionEntry {
 /**
  * A Standard Schema that both validates and advertises its shape.
  *
- * Neither Effect helper does both, and the difference is silent:
+ * Neither Effect helper does both alone, and the difference is silent:
+ * `toStandardSchemaV1` carries `validate` but no `jsonSchema`, and
+ * `defineAction` accepts it while advertising a tool that takes **no input**;
+ * `toStandardJSONSchemaV1` carries the `jsonSchema` those parameters come from
+ * but no `validate`.
  *
- * - `toStandardSchemaV1` carries `validate` but no `jsonSchema`, and
- *   `defineAction` accepts it while advertising a tool that takes **no input**.
- * - `toStandardJSONSchemaV1` carries `jsonSchema`, which is what the advertised
- *   parameters are derived from, but no `validate`.
- *
- * Copying the two into a new object also advertises nothing: the conversion
- * reads the Effect schema itself, so identity has to survive. `validate` is
- * therefore attached to the described schema in place.
+ * Both return the schema itself and share one `~standard`, so calling them in
+ * turn leaves a single object carrying both. Copying them into a new object
+ * would not work: the conversion reads the Effect schema, so identity matters.
  */
 const describedSchema = (
   schema: Parameters<typeof Schema.toStandardSchemaV1>[0],
 ): StandardSchemaV1<unknown, unknown> => {
   const described = Schema.toStandardJSONSchemaV1(schema as never)
-  const validating = Schema.toStandardSchemaV1(schema)
-
-  Object.defineProperty(described['~standard'], 'validate', {
-    value: validating['~standard'].validate,
-    enumerable: true,
-    configurable: true,
-  })
+  // Populates `validate` on the same `~standard` the line above just built.
+  Schema.toStandardSchemaV1(schema)
 
   return described as unknown as StandardSchemaV1<unknown, unknown>
 }
