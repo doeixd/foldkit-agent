@@ -56,7 +56,7 @@ export const compileCompletion = (
 }
 
 /** Subscribes to the host's Messages and resolves on the first that this invocation owns. */
-export interface CompletionWaiter {
+interface CompletionWaiter {
   readonly outcome: Effect.Effect<CompletionOutcome, CompletionTimeoutError>
   /**
    * Releases the subscription. Safe to call more than once.

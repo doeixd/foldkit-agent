@@ -62,7 +62,7 @@ export interface AgentHost<Model, Message extends AnyMessage = AnyMessage, Princ
  * Every exposed capability constructs one of these, so a host that cannot
  * receive them is not a host for this contract.
  */
-export type MessagesOf<ByTag> = ByTag[keyof ByTag] extends { readonly message: infer Message }
+type MessagesOf<ByTag> = ByTag[keyof ByTag] extends { readonly message: infer Message }
   ? Message
   : AnyMessage
 
@@ -72,7 +72,7 @@ export type MessagesOf<ByTag> = ByTag[keyof ByTag] extends { readonly message: i
  * A contract whose hooks read a principal needs one; a contract that never
  * mentions it may omit the provider.
  */
-export type PrincipalOf<Principal> = unknown extends Principal
+type PrincipalOf<Principal> = unknown extends Principal
   ? { readonly principal?: (invocation: Invocation) => Principal }
   : { readonly principal: (invocation: Invocation) => Principal }
 
@@ -82,7 +82,7 @@ export type PrincipalOf<Principal> = unknown extends Principal
  * Protocol adapters bind to this seam rather than reaching into `update`.
  */
 /** A Message constructor, used to name a capability by reference. */
-export type MessageConstructorFor<Tag extends string> = (...args: never) => { readonly _tag: Tag }
+type MessageConstructorFor<Tag extends string> = (...args: never) => { readonly _tag: Tag }
 
 /**
  * Names a capability and types its input.
