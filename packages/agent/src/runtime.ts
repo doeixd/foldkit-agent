@@ -326,6 +326,4 @@ export const bind = <
  * reaching here, so the read is defensive.
  */
 const describeTarget = (target: unknown): string =>
-  typeof target === 'function'
-    ? (messageTag(target) ?? 'an unexposed Message')
-    : String(target)
+  typeof target === 'function' ? (messageTag(target) ?? 'an unexposed Message') : String(target)
