@@ -46,7 +46,7 @@ const serve = () => {
     }
   })
 
-  AgentMcp.stdio({
+  const served = AgentMcp.stdio({
     agent: TodoAgent.bind({
       definition,
       host: {
@@ -59,7 +59,7 @@ const serve = () => {
     output,
   })
 
-  return { input, lines }
+  return { input, lines, served }
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -91,5 +91,37 @@ describe('stdio decoding', () => {
     expect(dispatched).toEqual([Message.RequestedCreateTodo({ title })])
     expect(lines).toHaveLength(2)
     expect(JSON.parse(lines[1]!)).toMatchObject({ id: 2 })
+  })
+})
+
+describe('stdio close', () => {
+  it('ignores input written after close', async () => {
+    const { input, lines, served } = serve()
+    input.write(line(1, 'initialize'))
+    await settle()
+
+    served.close()
+    input.write(callCreateTodo('after close'))
+    await settle()
+
+    expect(dispatched).toEqual([])
+    expect(lines).toHaveLength(1)
+  })
+
+  it('stays closed when the input ends and close is called again', async () => {
+    const { input, served } = serve()
+    input.write(line(1, 'initialize'))
+    await settle()
+
+    input.end()
+    await settle()
+    served.close()
+    served.close()
+
+    // The stream has ended, so deliver the chunk the way it would have arrived.
+    input.emit('data', Buffer.from(callCreateTodo('after end'), 'utf8'))
+    await settle()
+
+    expect(dispatched).toEqual([])
   })
 })

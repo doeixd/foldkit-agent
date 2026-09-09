@@ -2,7 +2,7 @@ import { Agent } from '@foldkit/agent'
 import { AgentMcp, type Notification, type Response } from '@foldkit/agent-mcp'
 import { Effect, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const Todo = Schema.Struct({ id: Schema.String, title: Schema.String })
 
@@ -443,6 +443,67 @@ describe('notifications/tools/list_changed', () => {
 
     expect(notifications).toEqual([])
     expect(listeners.size).toBe(0)
+  })
+
+  it('emits nothing for a change that is still being read when close lands', async () => {
+    const served = await initialized()
+    await served.handle(request(1, 'tools/list'))
+
+    // The subscription is already reading the availability set; close happens
+    // before that read resolves.
+    setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
+    served.close()
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    expect(notifications).toEqual([])
+  })
+
+  it('drops a debounced announcement that is still pending at close', async () => {
+    const served = await initialized(5)
+    await served.handle(request(1, 'tools/list'))
+
+    vi.useFakeTimers()
+    try {
+      setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
+      // A timer left armed keeps the event loop alive after the server is done.
+      expect(vi.getTimerCount()).toBe(1)
+      served.close()
+      expect(vi.getTimerCount()).toBe(0)
+      vi.advanceTimersByTime(25)
+    } finally {
+      vi.useRealTimers()
+    }
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    expect(notifications).toEqual([])
+  })
+
+  it('unsubscribes once when close is called twice', async () => {
+    let unsubscribes = 0
+    const served = AgentMcp.handler({
+      agent: TodoAgent.bind({
+        definition,
+        host: {
+          model: () => model,
+          dispatch: (message: Message) => void dispatched.push(message),
+          principal: () => principal,
+          subscribe: listener => {
+            listeners.add(listener)
+            return () => {
+              unsubscribes += 1
+              listeners.delete(listener)
+            }
+          },
+        },
+      }),
+      onNotification: (notification: Notification) => notifications.push(notification),
+    })
+    await served.handle(request(0, 'initialize'))
+
+    served.close()
+    served.close()
+
+    expect(unsubscribes).toBe(1)
   })
 })
 

@@ -31,7 +31,7 @@ export const stdio = <Model, Context_, Principal, ByName, ByTag>(
   const decoder = new TextDecoder('utf-8')
 
   let buffer = ''
-  input.on('data', (chunk: Buffer | string) => {
+  const onData = (chunk: Buffer | string): void => {
     buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true })
 
     let newline = buffer.indexOf('\n')
@@ -57,9 +57,18 @@ export const stdio = <Model, Context_, Principal, ByName, ByTag>(
         if (response !== undefined) write(response)
       })()
     }
-  })
+  }
 
-  input.on('end', () => served.close())
+  // Detaching is what stops dispatch: input arriving after close is never
+  // framed, so a closed server cannot accept new work.
+  const close = (): void => {
+    input.off('data', onData)
+    input.off('end', close)
+    served.close()
+  }
 
-  return served
+  input.on('data', onData)
+  input.on('end', close)
+
+  return { handle: served.handle, close }
 }

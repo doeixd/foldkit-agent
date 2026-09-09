@@ -106,6 +106,9 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
       // not become an unhandled rejection on a background subscription.
       return
     }
+    // A close can land while this read is suspended, and a notification emitted
+    // after it would reach a transport that has already gone away.
+    if (closed) return
     if (digest === advertised) return
 
     const first = advertised === undefined
@@ -308,8 +311,10 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
     },
 
     close: () => {
+      if (closed) return
       closed = true
       if (pending !== undefined) clearTimeout(pending)
+      pending = undefined
       for (const controller of inFlight.values()) controller.abort()
       inFlight.clear()
       unsubscribe()
