@@ -209,3 +209,55 @@ Guarded.bind({
   definition: guarded,
   host: { model: () => ({ ok: true }), principal: () => ({ allowed: true }), dispatch: () => {} },
 })
+
+// A capability declared through Agent.variant types exactly like a direct one:
+// the literal name survives, and dispatch takes the codec's encoded side.
+const Valued = defineMessageUnion({ Set: { value: Schema.Number } })
+const namedVariantRuntime = Agent.bind({
+  definition: Agent.define({
+    messages: Agent.expose(Valued, {
+      Set: Agent.variant({
+        name: 'set_value',
+        description: 'Set a value',
+        input: Schema.Struct({ value: Schema.NumberFromString }),
+        toMessage: input => ({ value: input.value }),
+      }),
+    }),
+  }),
+  host: { model: () => ({}), dispatch: () => {} },
+})
+
+namedVariantRuntime.messages.dispatch('set_value', { value: '42' })
+
+// @ts-expect-error the capability was renamed to set_value.
+namedVariantRuntime.messages.dispatch('set', { value: '42' })
+
+// @ts-expect-error the wire form is a string, not the decoded number.
+namedVariantRuntime.messages.dispatch('set_value', { value: 42 })
+
+// @ts-expect-error value is required.
+namedVariantRuntime.messages.dispatch('set_value', {})
+
+namedVariantRuntime.messages.dispatch(Valued.Set, { value: '42' })
+
+// @ts-expect-error a Message reference dispatches the encoded input too.
+namedVariantRuntime.messages.dispatch(Valued.Set, { value: 42 })
+
+// Without a name override the tag-derived name is still what dispatch accepts.
+const unnamedVariantRuntime = Agent.bind({
+  definition: Agent.define({
+    messages: Agent.expose(Valued, {
+      Set: Agent.variant({
+        description: 'Set a value',
+        input: Schema.Struct({ value: Schema.NumberFromString }),
+        toMessage: input => ({ value: input.value }),
+      }),
+    }),
+  }),
+  host: { model: () => ({}), dispatch: () => {} },
+})
+
+unnamedVariantRuntime.messages.dispatch('set', { value: '42' })
+
+// @ts-expect-error no name override was declared, so set_value is not a capability.
+unnamedVariantRuntime.messages.dispatch('set_value', { value: '42' })

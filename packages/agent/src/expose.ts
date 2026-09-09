@@ -219,18 +219,29 @@ const closedEmptyObject = Schema.makeFilter((value: unknown) =>
  * })
  * ```
  */
-export const variant = <ExternalInput, MessageInput, Model = any, Principal = any>(config: {
-  readonly name?: string | undefined
+export const variant = <
+  ExternalInput,
+  Encoded,
+  MessageInput,
+  const Name extends string | undefined = undefined,
+  Model = any,
+  Principal = any,
+>(config: {
+  readonly name?: Name
   readonly description: string
   readonly available?: ((model: Model) => boolean) | undefined
-  readonly input: Schema.Codec<ExternalInput, any, never, never>
+  readonly input: Schema.Codec<ExternalInput, Encoded, never, never>
   readonly toMessage: (
     input: ExternalInput,
     context: InvocationContext<Model, Principal>,
   ) => MessageInput
   readonly authorize?: VariantConfig<MessageInput, ExternalInput, Model, Principal>['authorize']
   readonly completion?: Completion | undefined
-}): typeof config => config
+}): Omit<typeof config, 'name'> &
+  // `NameFor` only reads a *required* `name`, so an omitted one must not leave
+  // an optional `name?: string` behind: that would widen the capability's key.
+  (undefined extends Name ? { readonly name?: undefined } : { readonly name: Name }) =>
+  config as never
 
 /** Strips the `_tag` literal so only the agent-facing payload fields remain. */
 const payloadSchemaOf = (
