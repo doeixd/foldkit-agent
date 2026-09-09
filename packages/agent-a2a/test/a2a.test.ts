@@ -208,6 +208,73 @@ describe('message/send', () => {
     expect(err(response).code).toBe(-32602)
   })
 
+  const malformed: ReadonlyArray<readonly [string, unknown]> = [
+    ['no params at all', undefined],
+    ['params that are not an object', 'message/send'],
+    ['no message', {}],
+    ['a message that is not an object', { message: 'create a todo' }],
+    ['a message with no parts', { message: { role: 'user', messageId: 'client-1' } }],
+    [
+      'parts that are not an array',
+      { message: { role: 'user', messageId: 'client-1', parts: {} } },
+    ],
+    ['a null part', { message: { role: 'user', messageId: 'client-1', parts: [null] } }],
+    [
+      'a data part with no data',
+      { message: { role: 'user', messageId: 'client-1', parts: [{ kind: 'data' }] } },
+    ],
+    [
+      'a data part whose data is not an object',
+      { message: { role: 'user', messageId: 'client-1', parts: [{ kind: 'data', data: null }] } },
+    ],
+    [
+      'no messageId',
+      {
+        message: {
+          role: 'user',
+          parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
+        },
+      },
+    ],
+    [
+      'no role',
+      {
+        message: {
+          messageId: 'client-1',
+          parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
+        },
+      },
+    ],
+    [
+      'a role this protocol has no meaning for',
+      {
+        message: {
+          role: 'system',
+          messageId: 'client-1',
+          parts: [{ kind: 'data', data: { skill: 'create_todo', input: { title: 'x' } } }],
+        },
+      },
+    ],
+  ]
+
+  it.each(malformed)('answers invalid-params for %s', async (_, params) => {
+    const served = makeHandler()
+    const response = await served.handle(request('message/send', params as never))
+
+    expect(err(response).code).toBe(-32602)
+    // A request that never validated must not reach the host.
+    expect(dispatched).toEqual([])
+  })
+
+  it('does not leak the reason a malformed message was refused', async () => {
+    const served = makeHandler()
+    const response = await served.handle(
+      request('message/send', { message: { parts: [null] } } as never),
+    )
+
+    expect(err(response).message).not.toMatch(/parts\[0\]|SchemaError|Union/)
+  })
+
   it('carries the client’s context id when given one', async () => {
     const served = makeHandler()
     const result = task(

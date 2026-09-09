@@ -1,10 +1,11 @@
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import {
   type AgentRuntime,
   type Id,
   type Message,
-  type Request,
+  RequestSchema,
   type Response,
+  SendParamsSchema,
   type Task,
   type TaskState,
   code,
@@ -53,12 +54,16 @@ const stateFor = (failureTag: string): TaskState => {
 
 /** The capability and input a client asked for, carried in a data part. */
 const skillFrom = (
-  message: Message | undefined,
+  message: Message,
 ): { readonly skill: string; readonly input: unknown } | undefined => {
-  const part = message?.parts.find(candidate => candidate.kind === 'data')
-  const skill = part?.data?.['skill']
-  return typeof skill === 'string' ? { skill, input: part?.data?.['input'] ?? {} } : undefined
+  const part = message.parts.find(candidate => candidate.kind === 'data')
+  if (part === undefined) return undefined
+  const skill = part.data['skill']
+  return typeof skill === 'string' ? { skill, input: part.data['input'] ?? {} } : undefined
 }
+
+const decodeRequest = Schema.decodeUnknownResult(RequestSchema)
+const decodeSendParams = Schema.decodeUnknownResult(SendParamsSchema)
 
 /**
  * Serves a contract as an A2A agent, with no transport attached.
@@ -93,8 +98,17 @@ export const handler = (options: HandlerOptions): Handler => {
     contextId,
   })
 
-  const send = async (id: Id, params: Record<string, unknown>): Promise<Response> => {
-    const message = params['message'] as Message | undefined
+  const send = async (id: Id, params: unknown): Promise<Response> => {
+    const decoded = decodeSendParams(params)
+    if (decoded._tag === 'Failure') {
+      return failure(
+        id,
+        code.INVALID_PARAMS,
+        'message/send needs params as { message } with a role, a messageId, and parts',
+      )
+    }
+
+    const { message } = decoded.success
     const asked = skillFrom(message)
 
     if (asked === undefined) {
@@ -106,8 +120,8 @@ export const handler = (options: HandlerOptions): Handler => {
     }
 
     const taskId = newId()
-    const contextId = message?.contextId ?? newId()
-    const history: ReadonlyArray<Message> = message === undefined ? [] : [message]
+    const contextId = message.contextId ?? newId()
+    const history: ReadonlyArray<Message> = [message]
 
     const controller = new AbortController()
     running.set(taskId, controller)
@@ -182,13 +196,15 @@ export const handler = (options: HandlerOptions): Handler => {
     }
   }
 
-  const handleRequest = async (request: Request): Promise<Response> => {
-    const { id, method } = request
-    const params = request.params ?? {}
+  const handleRequest = async (id: Id, method: string, raw: unknown): Promise<Response> => {
+    const params: Record<string, unknown> =
+      typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {}
 
     switch (method) {
       case 'message/send':
-        return send(id, params)
+        return send(id, raw)
 
       case 'tasks/get': {
         const taskId = params['id']
@@ -240,20 +256,16 @@ export const handler = (options: HandlerOptions): Handler => {
         return failure(null, code.INVALID_REQUEST, 'Batched requests are not supported')
       }
 
-      const message = incoming as Request
-      if (
-        typeof message !== 'object' ||
-        message === null ||
-        message.jsonrpc !== '2.0' ||
-        typeof message.method !== 'string'
-      ) {
+      const decoded = decodeRequest(incoming)
+      if (decoded._tag === 'Failure') {
         return failure(null, code.INVALID_REQUEST, 'Not a JSON-RPC 2.0 message')
       }
 
+      const request = decoded.success
       // A notification carries no id and expects no reply.
-      if (message.id === undefined) return undefined
+      if (request.id === undefined) return undefined
 
-      return handleRequest(message)
+      return handleRequest(request.id, request.method, request.params)
     },
 
     close: () => {

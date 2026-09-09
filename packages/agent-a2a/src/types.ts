@@ -1,3 +1,4 @@
+import { Schema } from 'effect'
 import type { Agent } from '@foldkit/agent'
 
 /**
@@ -23,8 +24,22 @@ export interface Request {
   readonly jsonrpc: '2.0'
   readonly id: Id
   readonly method: string
-  readonly params?: Record<string, unknown> | undefined
+  /** Unvalidated until a method decides what its own params must look like. */
+  readonly params?: unknown
 }
+
+/**
+ * The envelope, decoded before anything reads a field off it.
+ *
+ * `params` stays `unknown` here: what a method requires is the method's
+ * business, and deciding it here would answer bad params with the wrong code.
+ */
+export const RequestSchema = Schema.Struct({
+  jsonrpc: Schema.Literal('2.0'),
+  id: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
+  method: Schema.String,
+  params: Schema.optional(Schema.Unknown),
+})
 
 export interface Success {
   readonly jsonrpc: '2.0'
@@ -66,19 +81,34 @@ export interface TaskStatus {
   readonly message?: Message | undefined
 }
 
-export interface Part {
-  readonly kind: 'text' | 'data'
-  readonly text?: string | undefined
-  readonly data?: Record<string, unknown> | undefined
-}
+/**
+ * A part carries either text or data, and which one is not optional.
+ *
+ * A single struct with both fields optional would accept
+ * `{ kind: 'data' }` and leave every reader to re-check.
+ */
+export const PartSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('text'), text: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('data'),
+    data: Schema.Record(Schema.String, Schema.Unknown),
+  }),
+])
 
-export interface Message {
-  readonly role: 'user' | 'agent'
-  readonly parts: ReadonlyArray<Part>
-  readonly messageId: string
-  readonly taskId?: string | undefined
-  readonly contextId?: string | undefined
-}
+export type Part = typeof PartSchema.Type
+
+export const MessageSchema = Schema.Struct({
+  role: Schema.Literals(['user', 'agent']),
+  parts: Schema.Array(PartSchema),
+  messageId: Schema.String,
+  taskId: Schema.optional(Schema.String),
+  contextId: Schema.optional(Schema.String),
+})
+
+export type Message = typeof MessageSchema.Type
+
+/** What `message/send` requires of its params. */
+export const SendParamsSchema = Schema.Struct({ message: MessageSchema })
 
 export interface Task {
   readonly id: string
