@@ -58,8 +58,8 @@ import * as HttpEffect from 'effect/unstable/http/HttpEffect'
 
 const handler = HttpEffect.toWebHandler(
   AgentMcp.httpApp({
-    createAgent: ({ principal }) => bindAgentFor(principal),
     authenticate: request => verify(request.headers['authorization']),
+    createAgent: ({ principal }) => bindAgentFor(principal),
     allowedOrigins: ['https://app.example'],
   }),
 )
@@ -73,11 +73,12 @@ in something that is not Effect-based:
 
 ```ts
 const server = AgentMcp.httpHandler({
+  // The principal comes from here and nowhere else, and typing it here is what
+  // gives `createAgent` its principal.
+  authenticate: request => verify(request.headers['authorization']),
+
   // One runtime per session. No two principals ever share one.
   createAgent: ({ principal }) => bindAgentFor(principal),
-
-  // The principal comes from here and nowhere else.
-  authenticate: request => verify(request.headers['authorization']),
 
   // A request carrying an Origin that is not listed is refused.
   allowedOrigins: ['https://app.example'],

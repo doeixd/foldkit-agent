@@ -40,6 +40,7 @@ await served.handle({
   method: 'message/send',
   params: {
     message: {
+      kind: 'message',
       role: 'user',
       messageId: 'm-1',
       parts: [{ kind: 'data', data: { skill: 'delete_todo', input: { id: 'todo-1' } } }],
