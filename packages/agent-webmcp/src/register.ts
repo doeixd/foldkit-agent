@@ -17,9 +17,9 @@ export interface Registration {
   readonly registered: () => ReadonlyArray<string>
 }
 
-export interface RegisterOptions<Model, Context_, Principal> {
+export interface RegisterOptions<Model, Context_, Principal, ByName, ByTag> {
   /** The agent contract bound to a live Foldkit Runtime. */
-  readonly agent: Agent.AgentRuntime<Model, Context_, Principal>
+  readonly agent: Agent.AgentRuntime<Model, Context_, Principal, ByName, ByTag>
   /** Defaults to `document.modelContext`. */
   readonly modelContext?: ModelContext | undefined
   /** Unregisters everything when aborted. */
@@ -62,8 +62,8 @@ const textResult = (text: string, isError = false): ToolResult => ({
  * const registration = AgentWebMcp.register({ agent: agentRuntime })
  * ```
  */
-export const register = <Model, Context_, Principal>(
-  options: RegisterOptions<Model, Context_, Principal>,
+export const register = <Model, Context_, Principal, ByName, ByTag>(
+  options: RegisterOptions<Model, Context_, Principal, ByName, ByTag>,
 ): Registration => {
   const modelContext = options.modelContext ?? documentModelContext()
   if (modelContext === undefined) {
@@ -95,7 +95,8 @@ export const register = <Model, Context_, Principal>(
         // edge where Effect meets the browser, not a run inside a service.
         const result = await Effect.runPromise(
           Effect.result(
-            agent.messages.dispatch(name, input, {
+            // The tool name and payload both come off the wire.
+            agent.messages.dispatchUnknown(name, input, {
               id: nextInvocationId(),
               transport: 'webmcp',
               signal: context.signal,

@@ -9,7 +9,7 @@ import type { AgentSchema, MessageDescriptor, ResourceDescriptor } from './types
  * application internals.
  */
 export const messages = (
-  definition: Definition<any, any, any>,
+  definition: Definition<any, any, any, any, any>,
 ): ReadonlyArray<MessageDescriptor> =>
   definition.messages.variants.map(variant => ({
     name: variant.name,
@@ -23,7 +23,7 @@ export const messages = (
 
 /** Describes every read-only resource as protocol-neutral data. */
 export const resources = (
-  definition: Definition<any, any, any>,
+  definition: Definition<any, any, any, any, any>,
 ): ReadonlyArray<ResourceDescriptor> =>
   definition.resources.map(resource => ({
     name: resource.name,
@@ -33,7 +33,7 @@ export const resources = (
 
 /** The JSON Schema of the projected agent context, when the definition declares one. */
 export const contextSchema = (
-  definition: Definition<any, any, any>,
+  definition: Definition<any, any, any, any, any>,
 ): Record<string, unknown> | undefined =>
   definition.context === undefined ? undefined : toJsonSchema(definition.context.schema)
 

@@ -1,6 +1,14 @@
 import { type Context, type ContextOptions, context } from './context.js'
 import { type DefineOptions, type Definition, define } from './define.js'
-import { type Cases, type ExposedMessages, type ValidateVariants, expose } from './expose.js'
+import {
+  type AnyCapabilities,
+  type CapabilitiesByName,
+  type CapabilitiesByTag,
+  type Cases,
+  type ExposedMessages,
+  type ValidateVariants,
+  expose,
+} from './expose.js'
 import { type Resource, type ResourceOptions, resource } from './resource.js'
 import { type AgentRuntime, type BindOptions, bind } from './runtime.js'
 import type { AnyMessage } from './types.js'
@@ -15,23 +23,28 @@ import type { MessageUnion } from 'foldkit/message'
 export interface BoundAgent<Model, Principal> {
   readonly context: <Value>(options: ContextOptions<Model, Value>) => Context<Model, Value>
 
-  readonly expose: <const C extends Cases, const V extends { readonly [Tag in keyof V]: unknown }>(
+  readonly expose: <const C extends Cases, const V extends ValidateVariants<C, Model, Principal>>(
     message: MessageUnion<C>,
-    variants: ValidateVariants<C, V, Model, Principal>,
-  ) => ExposedMessages<Model, Principal>
+    variants: V,
+  ) => ExposedMessages<Model, Principal, CapabilitiesByName<C, V>, CapabilitiesByTag<C, V>>
 
   readonly resource: <Value>(
     name: string,
     options: ResourceOptions<Model, Value>,
   ) => Resource<Model, Value>
 
-  readonly define: <Context_>(
-    options: DefineOptions<Model, Context_, Principal>,
-  ) => Definition<Model, Context_, Principal>
+  readonly define: <Context_, ByName = AnyCapabilities, ByTag = AnyCapabilities>(
+    options: DefineOptions<Model, Context_, Principal, ByName, ByTag>,
+  ) => Definition<Model, Context_, Principal, ByName, ByTag>
 
-  readonly bind: <Context_, Message extends AnyMessage = AnyMessage>(
-    options: BindOptions<Model, Context_, Principal, Message>,
-  ) => AgentRuntime<Model, Context_, Principal>
+  readonly bind: <
+    Context_,
+    Message extends AnyMessage = AnyMessage,
+    ByName = AnyCapabilities,
+    ByTag = AnyCapabilities,
+  >(
+    options: BindOptions<Model, Context_, Principal, Message, ByName, ByTag>,
+  ) => AgentRuntime<Model, Context_, Principal, ByName, ByTag>
 }
 
 /**

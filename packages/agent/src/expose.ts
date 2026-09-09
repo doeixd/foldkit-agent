@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import type { MessageUnion } from 'foldkit/message'
 import { toJsonSchema } from './jsonSchema.js'
-import { assertValidName, defaultName } from './naming.js'
+import { type SnakeCase, assertValidName, defaultName } from './naming.js'
 import type { AnyMessage, Completion, InvocationContext, VariantConfig } from './types.js'
 
 type Fields = Schema.Struct.Fields
@@ -64,14 +64,39 @@ type MappedVariant<MessageInput, ExternalInput, Model, Principal> = VariantConfi
  * would be circular inside a reverse mapped type and would silently collapse to
  * the direct branch.
  */
-export type ValidateVariants<C extends Cases, V, Model, Principal> = {
-  readonly [Tag in keyof V]: Tag extends keyof C & string
-    ?
-        | DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
-        | MappedVariant<MessageInputOf<C, Tag>, any, Model, Principal>
-        | string
-    : Readonly<{ 'Not a tag of this Message union': Tag }>
+export type ValidateVariants<C extends Cases, Model, Principal> = {
+  readonly [Tag in keyof C & string]?:
+    | DirectVariant<MessageInputOf<C, Tag>, Model, Principal>
+    | MappedVariant<MessageInputOf<C, Tag>, any, Model, Principal>
+    | string
 }
+
+/** The tags of the union that this variants object exposes. */
+type ExposedTags<C extends Cases, V> = Extract<keyof V, keyof C & string>
+
+/** What an agent supplies for a variant: its external input, or the Message payload. */
+type ExternalInputFor<C extends Cases, V, Tag extends keyof C & string> = V[Tag &
+  keyof V] extends { readonly input: Schema.Codec<infer External, any, any, any> }
+  ? External
+  : MessageInputOf<C, Tag>
+
+/** The protocol-facing name of a variant: its override, or the normalized tag. */
+type NameFor<Config, Tag extends string> = Config extends { readonly name: infer Name extends string }
+  ? Name
+  : SnakeCase<Tag>
+
+/** Capability input types keyed by protocol name, for dispatching by name. */
+export type CapabilitiesByName<C extends Cases, V> = {
+  readonly [Tag in ExposedTags<C, V> as NameFor<V[Tag], Tag>]: ExternalInputFor<C, V, Tag>
+}
+
+/** Capability input types keyed by Message tag, for dispatching by constructor. */
+export type CapabilitiesByTag<C extends Cases, V> = {
+  readonly [Tag in ExposedTags<C, V>]: ExternalInputFor<C, V, Tag>
+}
+
+/** The default maps: any name, unknown input. Adapters work against these. */
+export type AnyCapabilities = Record<string, unknown>
 
 /** One compiled capability: everything an adapter needs, and nothing application-specific. */
 export interface ExposedVariant<Model = unknown, Principal = unknown> {
@@ -84,14 +109,29 @@ export interface ExposedVariant<Model = unknown, Principal = unknown> {
   readonly inputJsonSchema: Record<string, unknown>
   /** Constructs the internal Foldkit Message. */
   readonly construct: (input: unknown, context: InvocationContext<Model, Principal>) => AnyMessage
+  /** The union's own constructor, so a caller can name this capability by reference. */
+  readonly messageConstructor: unknown
   readonly available?: ((model: Model) => boolean) | undefined
   readonly authorize?: VariantConfig<any, any, Model, Principal>['authorize']
   readonly completion?: Completion | undefined
 }
 
-/** An agent-safe projection of a Foldkit Message union. */
-export interface ExposedMessages<Model = unknown, Principal = unknown> {
+/**
+ * An agent-safe projection of a Foldkit Message union.
+ *
+ * `ByName` and `ByTag` carry each capability's input type, so dispatching by
+ * name or by Message constructor stays checked. They default to the permissive
+ * maps, which is what a protocol adapter binds against.
+ */
+export interface ExposedMessages<
+  Model = unknown,
+  Principal = unknown,
+  ByName = AnyCapabilities,
+  ByTag = AnyCapabilities,
+> {
   readonly variants: ReadonlyArray<ExposedVariant<Model, Principal>>
+  /** Type-only witnesses. Never populated at runtime. */
+  readonly '~capabilities'?: { readonly byName: ByName; readonly byTag: ByTag }
 }
 
 /** True for a struct Schema with no fields, whose JSON Schema needs normalizing. */
@@ -136,13 +176,13 @@ const payloadSchemaOf = (constructor: unknown): { schema: Schema.Struct<Fields>;
  */
 export const expose = <
   const C extends Cases,
-  const V extends { readonly [Tag in keyof V]: unknown },
+  const V extends ValidateVariants<C, Model, Principal>,
   Model = any,
   Principal = any,
 >(
   message: MessageUnion<C>,
-  variants: ValidateVariants<C, V, Model, Principal>,
-): ExposedMessages<Model, Principal> => {
+  variants: V,
+): ExposedMessages<Model, Principal, CapabilitiesByName<C, V>, CapabilitiesByTag<C, V>> => {
   const union = message as unknown as Record<string, unknown>
 
   const compiled = Object.keys(variants).map((tag): ExposedVariant<Model, Principal> => {
@@ -182,6 +222,7 @@ export const expose = <
         emptyStructIsObject: external === undefined ? payload.empty : isEmptyStruct(external),
       }),
       construct,
+      messageConstructor: constructor,
       available: config.available,
       authorize: config.authorize,
       completion: config.completion,

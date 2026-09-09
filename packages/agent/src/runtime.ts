@@ -8,7 +8,7 @@ import {
   ResourceError,
   UnknownCapabilityError,
 } from './errors.js'
-import type { ExposedVariant } from './expose.js'
+import type { AnyCapabilities, ExposedVariant } from './expose.js'
 import { resolveInvocation } from './invocation.js'
 import type {
   AnyMessage,
@@ -45,8 +45,38 @@ export interface AgentHost<Model, Message extends AnyMessage = AnyMessage> {
  *
  * Protocol adapters bind to this seam rather than reaching into `update`.
  */
-export interface AgentRuntime<Model = unknown, Context_ = unknown, Principal = unknown> {
-  readonly definition: Definition<Model, Context_, Principal>
+/** A Message constructor, used to name a capability by reference. */
+export type MessageConstructorFor<Tag extends string> = (...args: never) => { readonly _tag: Tag }
+
+/**
+ * Names a capability and types its input.
+ *
+ * A capability can be named by its Message constructor, which infers the input
+ * from the union, or by its protocol name. Both are checked; adapters bind
+ * against the permissive default maps and pass a name from the wire.
+ */
+export interface Dispatch<ByName, ByTag> {
+  <Tag extends keyof ByTag & string>(
+    message: MessageConstructorFor<Tag>,
+    input: ByTag[Tag],
+    invocation?: Partial<Invocation>,
+  ): Effect.Effect<DispatchResult, DispatchError>
+
+  <Name extends keyof ByName & string>(
+    name: Name,
+    input: ByName[Name],
+    invocation?: Partial<Invocation>,
+  ): Effect.Effect<DispatchResult, DispatchError>
+}
+
+export interface AgentRuntime<
+  Model = unknown,
+  Context_ = unknown,
+  Principal = unknown,
+  ByName = AnyCapabilities,
+  ByTag = AnyCapabilities,
+> {
+  readonly definition: Definition<Model, Context_, Principal, ByName, ByTag>
 
   /** The projected agent context, or `undefined` when the definition declares none. */
   readonly context: Effect.Effect<Context_ | undefined>
@@ -66,7 +96,16 @@ export interface AgentRuntime<Model = unknown, Context_ = unknown, Principal = u
      * `invocation` is optional: an adapter passes its own id, transport, and
      * signal, while an in-app caller can omit it.
      */
-    readonly dispatch: (
+    readonly dispatch: Dispatch<ByName, ByTag>
+
+    /**
+     * Dispatches a capability named by a string that is not known statically.
+     *
+     * This is the protocol path: an adapter reads a tool name and an unvalidated
+     * payload off the wire, so neither can be checked at compile time. In-app
+     * callers should use `dispatch`, which checks both.
+     */
+    readonly dispatchUnknown: (
       name: string,
       input: unknown,
       invocation?: Partial<Invocation>,
@@ -88,22 +127,42 @@ export interface AgentRuntime<Model = unknown, Context_ = unknown, Principal = u
  * })
  * ```
  */
-export interface BindOptions<Model, Context_, Principal, Message extends AnyMessage> {
-  readonly definition: Definition<Model, Context_, Principal>
+export interface BindOptions<
+  Model,
+  Context_,
+  Principal,
+  Message extends AnyMessage,
+  ByName = AnyCapabilities,
+  ByTag = AnyCapabilities,
+> {
+  readonly definition: Definition<Model, Context_, Principal, ByName, ByTag>
   readonly host: AgentHost<Model, Message>
 }
 
-export const bind = <Model, Context_, Principal, Message extends AnyMessage = AnyMessage>(
-  options: BindOptions<Model, Context_, Principal, Message>,
-): AgentRuntime<Model, Context_, Principal> => {
+export const bind = <
+  Model,
+  Context_,
+  Principal,
+  Message extends AnyMessage = AnyMessage,
+  ByName = AnyCapabilities,
+  ByTag = AnyCapabilities,
+>(
+  options: BindOptions<Model, Context_, Principal, Message, ByName, ByTag>,
+): AgentRuntime<Model, Context_, Principal, ByName, ByTag> => {
   const { definition, host } = options
 
   // The contract is immutable, so every lookup table and descriptor is built
   // once here rather than on each invocation.
   const byName = new Map<string, ExposedVariant<Model, Principal>>()
+  const byConstructor = new Map<unknown, ExposedVariant<Model, Principal>>()
   for (const variant of definition.messages.variants) {
     byName.set(variant.name, variant)
+    byConstructor.set(variant.messageConstructor, variant)
   }
+
+  /** A capability is named by its protocol name or by its Message constructor. */
+  const resolve = (target: unknown): ExposedVariant<Model, Principal> | undefined =>
+    typeof target === 'function' ? byConstructor.get(target) : byName.get(String(target))
 
   const resourcesByName = new Map(
     definition.resources.map(resource => [resource.name, resource] as const),
@@ -118,19 +177,23 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
     variant.available === undefined || variant.available(model)
 
   const dispatch = Effect.fn('Agent.dispatch')(function* (
-    name: string,
+    target: unknown,
     input: unknown,
     requested?: Partial<Invocation>,
   ) {
     {
+      const found = resolve(target)
+      // A resolved capability reports its own protocol name, whichever way it
+      // was named; an unresolved one reports what the caller asked for.
+      const name = found?.name ?? describeTarget(target)
       const invocation = resolveInvocation(requested)
       yield* Effect.annotateCurrentSpan('agent.capability', name)
       yield* Effect.annotateCurrentSpan('agent.transport', invocation.transport)
       yield* Effect.annotateCurrentSpan('agent.invocation', invocation.id)
-      const variant = byName.get(name)
-      if (variant === undefined) {
+      if (found === undefined) {
         return yield* UnknownCapabilityError.of(name)
       }
+      const variant = found
 
       const model = host.model()
 
@@ -203,9 +266,23 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
           .filter(variant => isAvailable(variant, model))
           .map(variant => descriptorByName.get(variant.name)!)
       }),
-      dispatch,
+      dispatch: dispatch as Dispatch<ByName, ByTag>,
+      dispatchUnknown: dispatch,
     },
 
     subscribe: (listener: () => void) => host.subscribe?.(listener) ?? (() => {}),
   }
+}
+
+/**
+ * Names whatever the caller passed, for the "no such capability" message.
+ *
+ * A Message constructor is reported by its tag, which the types already prevent
+ * reaching here, so the read is defensive.
+ */
+const describeTarget = (target: unknown): string => {
+  if (typeof target !== 'function') return String(target)
+  const tag = (target as { fields?: { _tag?: { ast?: { literal?: unknown } } } }).fields?._tag?.ast
+    ?.literal
+  return typeof tag === 'string' ? tag : 'an unexposed Message'
 }

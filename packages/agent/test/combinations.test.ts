@@ -137,7 +137,7 @@ describe('input mapping + authorize', () => {
 
   it('rejects a field the external schema does not declare', () => {
     const failure = failureOf(
-      TodoAgent.bind({ definition, host }).messages.dispatch(
+      TodoAgent.bind({ definition, host }).messages.dispatchUnknown(
         'rename_todo',
         { id: 'a', title: 'Injected by the agent' },
         invocation,

@@ -1,6 +1,7 @@
 import { Effect, Option, Schema } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import { type SnakeCase, defaultName } from '../src/naming.js'
 import { type Message, type Model, Message as MessageUnion, Model as ModelSchema, emptyModel } from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model>()
@@ -174,5 +175,106 @@ describe('Agent.pick', () => {
     expect(Schema.toJsonSchemaDocument(picked.schema).schema).toEqual(
       Schema.toJsonSchemaDocument(written.schema).schema,
     )
+  })
+})
+
+describe('dispatch by Message reference', () => {
+  const dispatched: Array<Message> = []
+  const definition = TodoAgent.define({
+    messages: TodoAgent.expose(MessageUnion, {
+      RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
+      RequestedRenameTodo: {
+        name: 'rename_todo',
+        description: 'Rename a todo',
+        input: Schema.Struct({ id: Schema.String }),
+        toMessage: ({ id }) => ({ id, title: 'Untitled' }),
+      },
+      ClearedSelection: 'Clear the selection',
+    }),
+  })
+
+  const runtime = TodoAgent.bind({
+    definition,
+    host: { model: () => emptyModel, dispatch: (message: Message) => void dispatched.push(message) },
+  })
+
+  beforeEach(() => {
+    dispatched.length = 0
+  })
+
+  it('accepts the Message constructor in place of its name', () => {
+    const result = Effect.runSync(
+      runtime.messages.dispatch(MessageUnion.RequestedCreateTodo, { title: 'Write docs' }),
+    )
+
+    expect(result.name).toBe('create_todo')
+    expect(result.tag).toBe('RequestedCreateTodo')
+    expect(dispatched).toEqual([{ _tag: 'RequestedCreateTodo', title: 'Write docs' }])
+  })
+
+  it('reaches a capability whose name was never written down', () => {
+    Effect.runSync(runtime.messages.dispatch(MessageUnion.ClearedSelection, {}))
+
+    expect(dispatched).toEqual([{ _tag: 'ClearedSelection' }])
+  })
+
+  it('takes the external input when the variant declares one', () => {
+    Effect.runSync(runtime.messages.dispatch(MessageUnion.RequestedRenameTodo, { id: 'a' }))
+
+    expect(dispatched).toEqual([{ _tag: 'RequestedRenameTodo', id: 'a', title: 'Untitled' }])
+  })
+
+  it('agrees with dispatching by name', () => {
+    const byReference = Effect.runSync(
+      runtime.messages.dispatch(MessageUnion.RequestedCreateTodo, { title: 'x' }),
+    )
+    const byName = Effect.runSync(runtime.messages.dispatch('create_todo', { title: 'x' }))
+
+    expect(byReference.name).toBe(byName.name)
+    expect(byReference.tag).toBe(byName.tag)
+  })
+
+  it('reports a constructor the contract does not expose', () => {
+    const failure = Effect.runSync(
+      Effect.result(
+        // A caller reaching past the types gets the same refusal as a bad name.
+        runtime.messages.dispatch(MessageUnion.ReceivedTodos as never, {} as never),
+      ),
+    )
+
+    expect(failure._tag).toBe('Failure')
+    expect((failure as { failure: { message: string } }).failure.message).toBe(
+      'No such capability: ReceivedTodos',
+    )
+    expect(dispatched).toEqual([])
+  })
+})
+
+describe('default capability names', () => {
+  /**
+   * The runtime default and its type-level twin must agree exactly, or a
+   * capability's name would not be the one its type says it is. Both are
+   * asserted against the same table.
+   */
+  const expected = {
+    RequestedDeleteTodo: 'requested_delete_todo',
+    ClearedSelection: 'cleared_selection',
+    A: 'a',
+    Load2Todos: 'load2_todos',
+    LoadedHTTPCache: 'loaded_h_t_t_p_cache',
+  } as const
+
+  it('normalizes a tag the same way at runtime', () => {
+    for (const [tag, name] of Object.entries(expected)) {
+      expect(defaultName(tag)).toBe(name)
+    }
+  })
+
+  it('normalizes a tag the same way at the type level', () => {
+    // Each assignment fails to compile if SnakeCase disagrees with the table.
+    const checks: {
+      [Tag in keyof typeof expected]: SnakeCase<Tag>
+    } = expected
+    expect(checks).toEqual(expected)
   })
 })

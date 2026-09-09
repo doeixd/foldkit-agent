@@ -98,13 +98,15 @@ describe('AgentRuntime.messages.dispatch', () => {
   })
 
   it('rejects an unknown capability', () => {
-    const failure = failureOf(runtime.messages.dispatch('drop_database', {}, invocation()))
+    const failure = failureOf(runtime.messages.dispatchUnknown('drop_database', {}, invocation()))
     expect(failure._tag).toBe('AgentUnknownCapabilityError')
     expect(host.dispatched).toEqual([])
   })
 
   it('rejects input that fails the Schema boundary', () => {
-    const failure = failureOf(runtime.messages.dispatch('create_todo', { title: 42 }, invocation()))
+    const failure = failureOf(
+      runtime.messages.dispatchUnknown('create_todo', { title: 42 }, invocation()),
+    )
     expect(failure._tag).toBe('AgentInvalidInputError')
     expect(host.dispatched).toEqual([])
   })

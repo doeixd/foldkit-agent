@@ -176,9 +176,9 @@ describe('AgentWebMcp.register', () => {
       ...runtime,
       messages: {
         ...runtime.messages,
-        dispatch: (name: string, input: unknown, invocation: any) => {
+        dispatchUnknown: (name: string, input: unknown, invocation: any) => {
           seen.push(invocation.signal)
-          return runtime.messages.dispatch(name, input, invocation)
+          return runtime.messages.dispatchUnknown(name, input, invocation)
         },
       },
     }

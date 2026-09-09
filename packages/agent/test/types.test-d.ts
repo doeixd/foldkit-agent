@@ -97,3 +97,43 @@ void projection
 
 // @ts-expect-error selectedTodoId was not picked.
 void picked.select({ todos: [], selectedTodoId: Option.none() }).selectedTodoId
+
+// Dispatching by Message reference and by name are both checked.
+declare const model: Model
+const typedRuntime = TodoAgent.bind({
+  definition: TodoAgent.define({
+    messages: TodoAgent.expose(Message, {
+      RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
+      RequestedDeleteTodo: 'Delete a todo',
+    }),
+  }),
+  host: { model: () => model, dispatch: () => {} },
+})
+
+// A Message reference infers its payload.
+typedRuntime.messages.dispatch(Message.RequestedCreateTodo, { title: 'x' })
+
+// @ts-expect-error the payload of RequestedCreateTodo is { title }, not { id }.
+typedRuntime.messages.dispatch(Message.RequestedCreateTodo, { id: 'x' })
+
+// @ts-expect-error ReceivedTodos was never exposed.
+typedRuntime.messages.dispatch(Message.ReceivedTodos, { todos: [] })
+
+// An explicit name is part of the type.
+typedRuntime.messages.dispatch('create_todo', { title: 'x' })
+
+// So is a name derived from the tag.
+typedRuntime.messages.dispatch('requested_delete_todo', { id: 'x' })
+
+// @ts-expect-error the capability is named create_todo, not requested_create_todo.
+typedRuntime.messages.dispatch('requested_create_todo', { title: 'x' })
+
+// @ts-expect-error no such capability.
+typedRuntime.messages.dispatch('drop_database', {})
+
+// @ts-expect-error wrong payload for a named capability.
+typedRuntime.messages.dispatch('create_todo', { title: 42 })
+
+// The protocol path stays open for names that are only known at runtime.
+declare const fromTheWire: string
+typedRuntime.messages.dispatchUnknown(fromTheWire, JSON.parse('{}'))

@@ -32,14 +32,14 @@ const failureOf = <A, E>(effect: Effect.Effect<A, E>): E => {
 
 describe('agent failures', () => {
   it('carry a message written for the calling agent', () => {
-    expect(failureOf(runtime().messages.dispatch('nope', {})).message).toBe(
+    expect(failureOf(runtime().messages.dispatchUnknown('nope', {})).message).toBe(
       'No such capability: nope',
     )
-    expect(failureOf(runtime().messages.dispatch('delete_todo', { id: 'a' })).message).toBe(
+    expect(failureOf(runtime().messages.dispatchUnknown('delete_todo', { id: 'a' })).message).toBe(
       'Capability "delete_todo" is not available right now',
     )
     expect(
-      failureOf(runtime().messages.dispatch('create_todo', { title: 42 })).message,
+      failureOf(runtime().messages.dispatchUnknown('create_todo', { title: 42 })).message,
     ).toBe('Invalid input for "create_todo"')
     expect(failureOf(runtime().resources.read('todos')).message).toBe(
       'Cannot read resource "todos": no such resource',
@@ -47,7 +47,7 @@ describe('agent failures', () => {
   })
 
   it('never puts application internals in the message', () => {
-    const failure = failureOf(runtime().messages.dispatch('create_todo', { title: 42 }))
+    const failure = failureOf(runtime().messages.dispatchUnknown('create_todo', { title: 42 }))
 
     // The decode failure is kept on the error for the application...
     expect(failure).toHaveProperty('cause')
@@ -56,7 +56,7 @@ describe('agent failures', () => {
   })
 
   it('are Errors, so they behave in a stack trace', () => {
-    const failure = failureOf(runtime().messages.dispatch('nope', {}))
+    const failure = failureOf(runtime().messages.dispatchUnknown('nope', {}))
 
     expect(failure).toBeInstanceOf(Error)
     expect(failure._tag).toBe('AgentUnknownCapabilityError')
@@ -64,7 +64,7 @@ describe('agent failures', () => {
 
   it('encode to plain JSON, so an adapter can send one across a boundary', () => {
     const model = { ...emptyModel, selectedTodoId: Option.some('a') }
-    const failure = failureOf(runtime(model).messages.dispatch('delete_todo', { id: 'a' }))
+    const failure = failureOf(runtime(model).messages.dispatchUnknown('delete_todo', { id: 'a' }))
 
     expect(Schema.encodeUnknownSync(Agent.AuthorizationError)(failure)).toEqual({
       _tag: 'AgentAuthorizationError',
@@ -76,7 +76,7 @@ describe('agent failures', () => {
 
   it('can be caught by tag', () => {
     const recovered = Effect.runSync(
-      runtime().messages.dispatch('nope', {}).pipe(
+      runtime().messages.dispatchUnknown('nope', {}).pipe(
         Effect.catchTag('AgentUnknownCapabilityError', error =>
           Effect.succeed(`handled ${error.capability}`),
         ),
@@ -119,7 +119,7 @@ describe('tracing', () => {
   })
 
   it('annotates the span even when the capability is refused', async () => {
-    const spans = await spansOf(runtime().messages.dispatch('delete_todo', { id: 'a' }))
+    const spans = await spansOf(runtime().messages.dispatchUnknown('delete_todo', { id: 'a' }))
 
     const span = spans.find(candidate => candidate.name === 'Agent.dispatch')
     expect(span?.attributes.get('agent.capability')).toBe('delete_todo')

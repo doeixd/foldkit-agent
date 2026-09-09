@@ -120,6 +120,10 @@ RequestedDeleteTodo: {
 `input` and `toMessage` must be supplied together; supplying `input` alone is a
 type error and a runtime error.
 
+Without an explicit `name`, the tag is normalized: `RequestedDeleteTodo` becomes
+`requested_delete_todo`. Every capital starts a word, with no special case for
+runs of them, so a tag with an acronym is better given an explicit name.
+
 A capability `name` becomes a protocol-facing tool name, so it must match
 `[a-zA-Z0-9_-]{1,128}`. An invalid name fails at `Agent.expose`, rather than at
 registration where the client would reject it with no reference back to the
@@ -139,17 +143,38 @@ expect(Agent.messages(AppAgent).map(message => message.name)).toEqual([
 
 ### Dispatch
 
-```ts
-// An adapter supplies its own invocation metadata.
-agentRuntime.messages.dispatch(
-  'delete_todo',
-  { id: 'todo-1' },
-  { id: crypto.randomUUID(), transport: 'webmcp', signal },
-)
+A capability can be named by its Message constructor or by its protocol name.
+Both are checked, and both infer the input:
 
-// In-app callers can leave it out: the id is generated and the transport
-// defaults to 'in-app'.
+```ts
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id: 'todo-1' })
 agentRuntime.messages.dispatch('delete_todo', { id: 'todo-1' })
+
+// Errors, at compile time:
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { todoId: 'x' }) // wrong payload
+agentRuntime.messages.dispatch(Message.ReceivedTodos, { todos: [] })        // not exposed
+agentRuntime.messages.dispatch('delete_todoo', { id: 'todo-1' })            // no such capability
+```
+
+The reference form is worth preferring: it survives a rename of the capability,
+and it needs no name at all for a variant that never declared one.
+
+`invocation` is optional. In-app callers can omit it -- the id is generated and
+the transport defaults to `in-app` -- while an adapter passes its own:
+
+```ts
+agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id: 'todo-1' }, {
+  id: crypto.randomUUID(),
+  transport: 'webmcp',
+  signal,
+})
+```
+
+An adapter reads a tool name and an unvalidated payload off the wire, so
+neither can be checked at compile time. That path is `dispatchUnknown`:
+
+```ts
+agentRuntime.messages.dispatchUnknown(nameFromTheWire, payloadFromTheWire, invocation)
 ```
 
 Dispatch runs in a fixed order: resolve the capability, check `available`,
