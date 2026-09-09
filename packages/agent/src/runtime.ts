@@ -117,25 +117,26 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
   const isAvailable = (variant: ExposedVariant<Model, Principal>, model: Model): boolean =>
     variant.available === undefined || variant.available(model)
 
-  const dispatch = (
+  const dispatch = Effect.fn('Agent.dispatch')(function* (
     name: string,
     input: unknown,
     requested?: Partial<Invocation>,
-  ): Effect.Effect<DispatchResult, DispatchError> =>
-    Effect.gen(function* () {
+  ) {
+    {
       const invocation = resolveInvocation(requested)
+      yield* Effect.annotateCurrentSpan('agent.capability', name)
+      yield* Effect.annotateCurrentSpan('agent.transport', invocation.transport)
+      yield* Effect.annotateCurrentSpan('agent.invocation', invocation.id)
       const variant = byName.get(name)
       if (variant === undefined) {
-        return yield* Effect.fail(new UnknownCapabilityError({ capability: name }))
+        return yield* UnknownCapabilityError.of(name)
       }
 
       const model = host.model()
 
       // Availability gates discovery and invocation; authorization is separate.
       if (!isAvailable(variant, model)) {
-        return yield* Effect.fail(
-          new CapabilityUnavailableError({ capability: name, tag: variant.tag }),
-        )
+        return yield* CapabilityUnavailableError.of(name, variant.tag)
       }
 
       // Untrusted agent input crosses a Schema boundary before anything else.
@@ -144,7 +145,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
       // something looser than the contract the agent was handed.
       const decoded: unknown = yield* Effect.mapError(
         Schema.decodeUnknownEffect(variant.inputSchema, { onExcessProperty: 'error' })(input),
-        cause => new InvalidInputError({ capability: name, tag: variant.tag, cause }),
+        cause => InvalidInputError.of(name, variant.tag, cause),
       )
 
       const principal = host.principal?.(invocation) as Principal
@@ -158,9 +159,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
         })
         const allowed = Effect.isEffect(decision) ? yield* decision : decision
         if (!allowed) {
-          return yield* Effect.fail(
-            new AuthorizationError({ capability: name, tag: variant.tag }),
-          )
+          return yield* AuthorizationError.of(name, variant.tag)
         }
       }
 
@@ -176,7 +175,8 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
       }
 
       return { name, tag: variant.tag, message, invocation } satisfies DispatchResult
-    })
+    }
+  })
 
   return {
     definition,
@@ -190,7 +190,7 @@ export const bind = <Model, Context_, Principal, Message extends AnyMessage = An
         Effect.suspend(() => {
           const resource = resourcesByName.get(name)
           return resource === undefined
-            ? Effect.fail(new ResourceError({ resource: name, reason: 'no such resource' }))
+            ? ResourceError.of(name, 'no such resource')
             : Effect.sync(() => resource.read(host.model()))
         }),
     },

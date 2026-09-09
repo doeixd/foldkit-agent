@@ -1,47 +1,101 @@
-import { Data } from 'effect'
+import { Schema } from 'effect'
 
 /**
- * Raised when a capability name is not part of the agent contract.
+ * Agent failures are Schema-backed so they survive a protocol boundary.
  *
- * Adapters should surface this as a protocol-level "unknown tool" rather than
- * as an application failure.
+ * An adapter often has to report a failure to a caller in another process, so
+ * each error encodes to plain JSON. Every `message` is written for that
+ * audience: it names the capability but never exposes application internals.
  */
-export class UnknownCapabilityError extends Data.TaggedError('AgentUnknownCapabilityError')<{
-  readonly capability: string
-}> {}
+
+/** The capability name is not part of the agent contract. */
+export class UnknownCapabilityError extends Schema.TaggedError<UnknownCapabilityError>()(
+  'AgentUnknownCapabilityError',
+  {
+    capability: Schema.String,
+    message: Schema.String,
+  },
+) {
+  static of(capability: string): UnknownCapabilityError {
+    return new UnknownCapabilityError({
+      capability,
+      message: `No such capability: ${capability}`,
+    })
+  }
+}
 
 /**
- * Raised when a capability exists but its `available(model)` predicate is
- * currently false. Availability is discoverability, not authorization.
+ * The capability exists, but its `available(model)` predicate is currently
+ * false. Availability is discoverability, not authorization.
  */
-export class CapabilityUnavailableError extends Data.TaggedError('AgentCapabilityUnavailableError')<{
-  readonly capability: string
-  readonly tag: string
-}> {}
+export class CapabilityUnavailableError extends Schema.TaggedError<CapabilityUnavailableError>()(
+  'AgentCapabilityUnavailableError',
+  {
+    capability: Schema.String,
+    tag: Schema.String,
+    message: Schema.String,
+  },
+) {
+  static of(capability: string, tag: string): CapabilityUnavailableError {
+    return new CapabilityUnavailableError({
+      capability,
+      tag,
+      message: `Capability "${capability}" is not available right now`,
+    })
+  }
+}
 
-/** Raised when agent-supplied input fails the capability's Schema boundary. */
-export class InvalidInputError extends Data.TaggedError('AgentInvalidInputError')<{
-  readonly capability: string
-  readonly tag: string
-  readonly cause: unknown
-}> {}
+/** Agent-supplied input failed the capability's Schema boundary. */
+export class InvalidInputError extends Schema.TaggedError<InvalidInputError>()(
+  'AgentInvalidInputError',
+  {
+    capability: Schema.String,
+    tag: Schema.String,
+    message: Schema.String,
+    /** The decode failure. Kept for the application; never shown to the caller. */
+    cause: Schema.optional(Schema.Unknown),
+  },
+) {
+  static of(capability: string, tag: string, cause: unknown): InvalidInputError {
+    return new InvalidInputError({
+      capability,
+      tag,
+      cause,
+      message: `Invalid input for "${capability}"`,
+    })
+  }
+}
 
-/**
- * Raised when a capability's `authorize` hook denies the call.
- *
- * Denied calls never dispatch a Message.
- */
-export class AuthorizationError extends Data.TaggedError('AgentAuthorizationError')<{
-  readonly capability: string
-  readonly tag: string
-  readonly reason?: string | undefined
-}> {}
+/** A capability's `authorize` hook denied the call. Denied calls never dispatch. */
+export class AuthorizationError extends Schema.TaggedError<AuthorizationError>()(
+  'AgentAuthorizationError',
+  {
+    capability: Schema.String,
+    tag: Schema.String,
+    message: Schema.String,
+  },
+) {
+  static of(capability: string, tag: string, reason?: string): AuthorizationError {
+    return new AuthorizationError({
+      capability,
+      tag,
+      message: reason ?? `Not authorized to invoke "${capability}"`,
+    })
+  }
+}
 
-/** Raised when a named resource does not exist or cannot be read. */
-export class ResourceError extends Data.TaggedError('AgentResourceError')<{
-  readonly resource: string
-  readonly reason: string
-}> {}
+/** A named resource does not exist or cannot be read. */
+export class ResourceError extends Schema.TaggedError<ResourceError>()('AgentResourceError', {
+  resource: Schema.String,
+  message: Schema.String,
+}) {
+  static of(resource: string, reason: string): ResourceError {
+    return new ResourceError({
+      resource,
+      message: `Cannot read resource "${resource}": ${reason}`,
+    })
+  }
+}
 
 /** Every failure `AgentRuntime.messages.dispatch` can produce. */
 export type DispatchError =

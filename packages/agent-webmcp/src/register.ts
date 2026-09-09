@@ -45,26 +45,6 @@ const textResult = (text: string, isError = false): ToolResult => ({
 })
 
 /**
- * Renders a dispatch failure as a tool error the calling agent can act on.
- *
- * The switch is exhaustive with no default, so a new failure type in
- * `@foldkit/agent` surfaces here as a compile error rather than as an opaque
- * message.
- */
-const describeFailure = (error: Agent.DispatchError): string => {
-  switch (error._tag) {
-    case 'AgentUnknownCapabilityError':
-      return `No such capability: ${error.capability}`
-    case 'AgentCapabilityUnavailableError':
-      return `Capability "${error.capability}" is not available right now`
-    case 'AgentAuthorizationError':
-      return `Not authorized to invoke "${error.capability}"`
-    case 'AgentInvalidInputError':
-      return `Invalid input for "${error.capability}"`
-  }
-}
-
-/**
  * Projects an agent contract into `document.modelContext.registerTool(...)`.
  *
  * Each currently available capability becomes one tool: the capability name
@@ -111,6 +91,8 @@ export const register = <Model, Context_, Principal>(
       context: { readonly signal?: AbortSignal | undefined },
     ): Promise<ToolResult> => {
       try {
+        // WebMCP hands the page a promise-returning callback, so this is the
+        // edge where Effect meets the browser, not a run inside a service.
         const result = await Effect.runPromise(
           Effect.result(
             agent.messages.dispatch(name, input, {
@@ -121,8 +103,9 @@ export const register = <Model, Context_, Principal>(
           ),
         )
 
+        // Every agent failure carries a message written for this audience.
         return result._tag === 'Failure'
-          ? textResult(describeFailure(result.failure), true)
+          ? textResult(result.failure.message, true)
           : textResult(`Dispatched ${result.success.tag}`)
       } catch {
         // `Effect.result` captures expected failures but not defects, and a

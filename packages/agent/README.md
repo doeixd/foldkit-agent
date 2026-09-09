@@ -161,9 +161,26 @@ currently offer reports as unavailable rather than leaking whether the caller
 would have been permitted. Decoding rejects undeclared fields, matching the
 `additionalProperties: false` the derived JSON Schema advertises.
 
-Failures are tagged: `AgentUnknownCapabilityError`,
-`AgentCapabilityUnavailableError`, `AgentInvalidInputError`,
-`AgentAuthorizationError`, and `AgentResourceError` for resource reads.
+Failures are tagged and `Schema`-backed, so `Effect.catchTag` narrows them and
+an adapter can encode one to JSON and send it across a protocol boundary:
+
+```ts
+dispatch.pipe(
+  Effect.catchTag('AgentCapabilityUnavailableError', error =>
+    Effect.succeed(`${error.capability} is not available`),
+  ),
+)
+```
+
+`AgentUnknownCapabilityError`, `AgentCapabilityUnavailableError`,
+`AgentInvalidInputError`, `AgentAuthorizationError`, and `AgentResourceError`
+for resource reads. Every `message` is written for the calling agent: it names
+the capability and never restates the underlying decode failure, which stays on
+the error's `cause` for the application.
+
+Dispatch runs inside an `Agent.dispatch` span annotated with the capability,
+transport, and invocation id, so agent-originated transitions show up in
+tracing alongside the rest of the application.
 
 ## Differences from the proposal
 
