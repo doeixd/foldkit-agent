@@ -70,6 +70,74 @@ understands on one pass wins.
   assertion to make a test pass.
 - If a test cannot be made to fail, delete it or replace it with one that can.
 
+## Traps already hit here
+
+Every item below is a bug that shipped in this repository and was caught later
+by someone else. Check for them by name.
+
+**External APIs**
+
+- **Read the spec before writing the client, and again before writing its fake.**
+  The WebMCP adapter passed the registration signal on the tool descriptor
+  instead of in `registerTool`'s second argument, so unregistering did nothing.
+  The test fake took one argument and asserted on `descriptor.signal`, so it
+  confirmed the mistake instead of catching it. A fake authored from the same
+  assumption as the code tests nothing. Make it reject what the real thing
+  rejects.
+
+**Library behaviour**
+
+- **Probe, do not assume, what a library type means.** `Schema.Struct({})` is
+  not an empty-object schema: it accepts `{foo:1}`, `[]` and `"str"` even with
+  `onExcessProperty: 'error'`. Use `Schema.Record(Schema.String, Schema.Never)`.
+  Run a scratch probe against the installed version before relying on semantics
+  inferred from a name.
+- **Enforce what you advertise.** Deriving a JSON Schema that says
+  `additionalProperties: false` is not validation; the decoder has to agree.
+- **Type a boundary from the side the runtime consumes.** Dispatch decodes, so
+  its input type is the schema's *encoded* side. Typing it from the decoded side
+  accepted `{value: 42}` and rejected the `{value: '42'}` that works.
+
+**Types**
+
+- **An `any` inside a generic silently disables checking.** `Parameters<>` of an
+  intersection resolves to the last signature and widened every payload to
+  `any`. A conditional inside a reverse mapped type is circular and quietly
+  picks one branch, which let `input` without `toMessage` compile.
+- **Prove a type rejects, not just that it accepts.** Every constraint needs a
+  `@ts-expect-error` negative case in `types.test-d.ts`. Both bugs above passed
+  a suite full of positive cases.
+- **Tie generics to the definition they belong to.** A host's Message type
+  inferred independently of the contract let an incompatible host bind.
+
+**Async**
+
+- **Re-check invariants after every `await`.** A `disposed` flag read once
+  before two awaits still registered tools after disposal.
+- **Ask what else can run while you are suspended.** Moving bookkeeping after
+  an await fixed a false-success bug and introduced double registration;
+  overlapping passes had to be serialized.
+- **Guard fire-and-forget work.** An un-awaited reconcile turned a failure into
+  an unhandled rejection.
+- **`Effect.result` captures failures, not defects.** At an edge that must not
+  throw, catch as well.
+
+**Tests**
+
+- **A surviving mutation may mean redundancy, not coverage.** Three overlapping
+  disposal guards made each one individually unnecessary, so every mutation
+  survived and the race looked tested when it was not. Keep one guard per
+  distinct window, with a test per window.
+- **Verifying by hand is not coverage.** `Agent.pick`'s snapshot bug was
+  confirmed in a scratch script and shipped without a test.
+
+**Tooling**
+
+- **There is no formatter config.** Running `prettier` rewrites the whole file
+  to its defaults. Match the surrounding style by hand.
+- **Bulk edits replace every occurrence.** A scripted insert landed in two
+  functions and broke an unrelated one. Re-read the diff, not just the check.
+
 ## Repository
 
 - Workspace: pnpm, `packages/*`.
