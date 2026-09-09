@@ -1,2 +1,5 @@
 packages:
   - packages/*
+
+# tsdown requires Node 22+ (Promise.withResolvers).
+useNodeVersion: 22.21.1

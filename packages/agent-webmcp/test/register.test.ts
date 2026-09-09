@@ -206,15 +206,37 @@ describe('AgentWebMcp.register', () => {
   it('stops following the Model after unregister', async () => {
     const registration = AgentWebMcp.register({ agent: makeRuntime(), modelContext })
     await registration.refresh()
+    expect(listeners.size).toBe(1)
 
     registration.unregister()
 
     expect(registration.registered()).toEqual([])
     expect(modelContext.live()).toEqual([])
+    // The subscription itself must be released, not merely ignored.
+    expect(listeners.size).toBe(0)
 
     setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(registration.registered()).toEqual([])
+  })
+
+  it('does not subscribe when followModel is false', async () => {
+    const registration = AgentWebMcp.register({
+      agent: makeRuntime(),
+      modelContext,
+      followModel: false,
+    })
+    await registration.refresh()
+
+    expect(listeners.size).toBe(0)
+
+    setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    // Without followModel, availability changes only apply on an explicit refresh.
+    expect(registration.registered()).toEqual(['create_todo'])
+
+    await registration.refresh()
+    expect(registration.registered()).toEqual(['create_todo', 'delete_todo'])
   })
 
   it('unregisters when the registration signal aborts', async () => {
