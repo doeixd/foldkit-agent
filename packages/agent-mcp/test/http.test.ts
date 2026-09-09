@@ -165,6 +165,25 @@ describe('sessions', () => {
     expect(response.status).toBe(404)
   })
 
+  it('drops idle sessions when a new one initializes', async () => {
+    const server = makeServer({ sessionTtlMs: -1 })
+    const first = sessionOf(await server.handle(post(initialize)))
+    const second = sessionOf(await server.handle(post(initialize)))
+
+    expect(server.sessions()).toEqual([second])
+    expect(first).not.toBe(second)
+  })
+
+  it('closes the handler of a session expired by a new initialize', async () => {
+    const server = makeServer({ sessionTtlMs: -1 })
+    await server.handle(post(initialize))
+    expect(listeners.size).toBe(1)
+
+    await server.handle(post(initialize))
+
+    expect(listeners.size).toBe(1)
+  })
+
   it('answers 202 for a notification, which has no reply', async () => {
     const server = makeServer()
     const id = sessionOf(await server.handle(post(initialize)))

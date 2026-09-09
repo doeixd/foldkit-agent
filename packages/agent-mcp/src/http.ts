@@ -161,9 +161,11 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
   }
 
   const lookup = (request: HttpRequest): Session | undefined => {
+    // Expiry runs even without a session header, so the initialize that creates
+    // a new session also clears the idle ones it would otherwise accumulate.
+    expire()
     const id = request.headers['mcp-session-id']
     if (id === undefined) return undefined
-    expire()
     const session = sessions.get(id)
     if (session !== undefined) session.lastSeen = Date.now()
     return session
