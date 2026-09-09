@@ -40,7 +40,7 @@ export interface Completion<Request = unknown, Result = unknown> {
   readonly success: unknown | ReadonlyArray<unknown>
   readonly failure?: unknown | ReadonlyArray<unknown>
   readonly correlate?: ((request: Request, result: Result) => boolean) | undefined
-  readonly timeout?: Duration.DurationInput | undefined
+  readonly timeout?: Duration.Input | undefined
 }
 
 /** Configuration for one exposed Message variant. */
@@ -60,7 +60,7 @@ export interface VariantConfig<
   readonly available?: ((model: Model) => boolean) | undefined
 
   /** Optional external input Schema, when the internal payload has fields an agent should not supply. */
-  readonly input?: Schema.Codec<ExternalInput, any, unknown, unknown> | undefined
+  readonly input?: Schema.Codec<ExternalInput, any, never, never> | undefined
 
   /** Required when `input` is provided: maps external input onto the internal Message. */
   readonly toMessage?:
