@@ -1615,17 +1615,14 @@ Agent.define(...)
 Agent.bind(...)
 ```
 
-Shipped since, in the order the plan set out: automatic docs generation
-(`Agent.toMarkdown`, `Agent.toManifest`), async completion tracking, MCP over
-stdio and Streamable HTTP, an audit log, and A2A.
-
-Deferred still:
-
-- Model replay. The audit log records what was invoked and refused, which is
-  accountability, not a Model history to replay.
-
 Shipped rather than deferred, because they cost little: custom input mapping
-(`input` + `toMessage`) and named resources.
+(`input` + `toMessage`) and named resources. What the plan did defer has since
+landed as well -- automatic docs generation (`Agent.toMarkdown`,
+`Agent.toManifest`), async completion tracking, MCP over stdio and Streamable
+HTTP, an audit log, and A2A.
+
+Still deferred: Model replay. The audit log records what was invoked and what
+was refused, which is accountability, not a Model history to replay.
 
 The smallest useful production adapter is WebMCP:
 
