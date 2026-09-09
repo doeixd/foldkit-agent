@@ -151,10 +151,11 @@ export const handler = (options: HandlerOptions): Handler => {
     })
 
     try {
-      // The signal reaches the run, not just the invocation: the runtime checks
-      // it before dispatch but does not observe it while awaiting completion,
-      // so interrupting the fiber is what actually settles the wait and
-      // releases its listener.
+      // The signal reaches the run as well as the invocation. The runtime now
+      // races the completion wait against it, so the invocation settles on its
+      // own; interrupting the fiber additionally covers what the runtime cannot
+      // see -- an abort landing while Schema decoding or a suspending authorize
+      // hook is still in flight.
       const outcome = await Effect.runPromise(
         Effect.result(
           agent.messages.dispatchUnknown(asked.skill, asked.input, {

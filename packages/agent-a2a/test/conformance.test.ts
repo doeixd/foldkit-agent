@@ -285,6 +285,17 @@ describe('the Agent Card', () => {
   it('lists skills the spec would accept', () => {
     for (const skill of card().skills) conformsTo(skill, 'AgentSkill')
   })
+
+  it('adds one documented field beyond the spec, and no others', () => {
+    // AgentSkill leaves additionalProperties unset, so an extra key validates
+    // rather than failing. inputSchema is a deliberate extension, documented at
+    // its declaration; this pins the set so a second one cannot arrive unnoticed
+    // under the cover of that silence.
+    const declared = Object.keys(definition_('AgentSkill').properties ?? {})
+    for (const skill of card().skills) {
+      expect(Object.keys(skill).filter(key => !declared.includes(key))).toEqual(['inputSchema'])
+    }
+  })
 })
 
 describe('the method set', () => {

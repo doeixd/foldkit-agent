@@ -10,7 +10,23 @@ export interface AgentSkill {
   readonly name: string
   readonly description: string
   readonly tags: ReadonlyArray<string>
-  /** The JSON Schema for this skill's input, as the contract derived it. */
+  /**
+   * The JSON Schema for this skill's input, as the contract derived it.
+   *
+   * Deliberately beyond the spec. A 0.3.0 `AgentSkill` describes its input only
+   * in prose -- `inputModes` carries media types, not shapes -- so a caller has
+   * nothing to construct a valid request from, which is the one thing this
+   * contract already knows. The card validates because `AgentSkill` leaves
+   * `additionalProperties` unset, not because the field is sanctioned.
+   *
+   * The risk is a later spec claiming this name for something else: the card
+   * would not fail, it would quietly mean something a conforming client reads
+   * differently. The spec-legal alternative is an `AgentExtension` under
+   * `capabilities.extensions`, whose `params` would hold a skill-id-keyed map --
+   * worth moving to when a real client consumes this, or the moment A2A
+   * proposes a per-skill schema field. A conformance test pins the set of extra
+   * keys so a second one cannot appear unnoticed.
+   */
   readonly inputSchema: Record<string, unknown>
 }
 
