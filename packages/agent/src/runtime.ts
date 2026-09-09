@@ -11,7 +11,7 @@ import {
 } from './errors.js'
 import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedVariant } from './expose.js'
 import { resolveInvocation } from './invocation.js'
-import type { AuditSink } from './audit.js'
+import type { AuditDecision, AuditSink } from './audit.js'
 import { awaitCompletion } from './completion.js'
 import { messageTag } from './tag.js'
 import type {
@@ -243,17 +243,17 @@ export const bind = <
   ): Effect.Effect<DispatchResult, DispatchError> => {
     if (options.audit === undefined) return dispatchResolved(target, input, invocation)
 
-    // The resolver is application code: it may be expensive, and a stateful one
-    // can answer differently the second time. It runs once, during dispatch,
-    // and leaves what it returned here. A dispatch refused before it ran leaves
-    // the cell empty, which the record reports as no principal rather than
-    // inventing one after the fact.
-    const resolved: { principal?: unknown } = {}
-    const effect = dispatchResolved(target, input, invocation, resolved)
+    // What dispatch learned, left here for the record. The principal resolver is
+    // application code: it may be expensive, and a stateful one can answer
+    // differently the second time, so it runs once, during dispatch, and leaves
+    // what it returned here. `delivery` is the fact a refusal and a
+    // post-dispatch failure differ on, and only dispatch can observe it.
+    const progress: DispatchProgress = { delivery: 'none' }
+    const effect = dispatchResolved(target, input, invocation, progress)
 
     return Effect.onExit(effect, exit =>
       Effect.sync(() => {
-        const principal = resolved.principal
+        const principal = progress.principal
 
         if (exit._tag === 'Success') {
           const result = exit.value
@@ -273,11 +273,13 @@ export const bind = <
           { _tag?: string; capability?: string; tag?: string } | undefined
         record({
           invocation,
-          capability: error?.capability ?? describeTarget(target),
-          tag: error?.tag,
+          // A capability that resolved names itself even when the failure does
+          // not carry a name -- a completion timeout knows no Message tag.
+          capability: progress.capability ?? error?.capability ?? describeTarget(target),
+          tag: progress.tag ?? error?.tag,
           principal,
-          decision: 'refused',
-          outcome: error?._tag ?? 'AgentDefect',
+          decision: decisionOf(progress.delivery),
+          outcome: outcomeOf(exit.cause, error?._tag),
           input,
         })
       }),
@@ -313,7 +315,7 @@ export const bind = <
     target: unknown,
     input: unknown,
     invocation: Invocation,
-    resolved?: { principal?: unknown },
+    progress?: DispatchProgress,
   ) {
     {
       // Read through a function so control flow analysis cannot narrow it away:
@@ -331,6 +333,10 @@ export const bind = <
         return yield* UnknownCapabilityError.of(name)
       }
       const variant = found
+      if (progress !== undefined) {
+        progress.capability = name
+        progress.tag = variant.tag
+      }
 
       // An invocation that is already cancelled never reaches the Model.
       if (cancelled()) {
@@ -354,7 +360,7 @@ export const bind = <
       )
 
       const principal = host.principal?.(invocation) as Principal
-      if (resolved !== undefined) resolved.principal = principal
+      if (progress !== undefined) progress.principal = principal
 
       if (variant.authorize !== undefined) {
         const decision = variant.authorize({
@@ -397,12 +403,21 @@ export const bind = <
       // rejected Promise or a defecting Effect, which is how the subscription
       // used to leak.
       const send = Effect.suspend(() => {
+        // Marked before the call, not after: a host that raises leaves this at
+        // `attempted`, which is all anyone can honestly say about the Message.
+        if (progress !== undefined) progress.delivery = 'attempted'
         // `construct` always produces a member of this application's Message union.
         const sent = host.dispatch(message as Message)
         if (Effect.isEffect(sent)) return Effect.orDie(sent)
         if (sent instanceof Promise) return Effect.orDie(Effect.promise(() => sent))
         return Effect.void
-      })
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (progress !== undefined) progress.delivery = 'sent'
+          }),
+        ),
+      )
 
       if (waiter === undefined) {
         yield* send
@@ -489,6 +504,34 @@ const project = (
   Effect.catchCause(Schema.encodeUnknownEffect(schema)(value), cause =>
     Effect.die(new ProjectionError(projection, cause)),
   )
+
+/**
+ * What dispatch had managed to do when it exited, so the record can say what
+ * happened rather than assuming a failure means a refusal.
+ */
+interface DispatchProgress {
+  principal?: unknown
+  capability?: string
+  tag?: string
+  /** `attempted` means the host was called and raised: delivery is unknowable. */
+  delivery: 'none' | 'attempted' | 'sent'
+}
+
+const decisionOf = (delivery: DispatchProgress['delivery']): AuditDecision =>
+  delivery === 'sent' ? 'dispatched' : delivery === 'attempted' ? 'unknown' : 'refused'
+
+/**
+ * A failed exit reported in the same vocabulary a successful one uses.
+ *
+ * A timeout is `timeout`, not a refusal tag: the Message was dispatched and
+ * only the waiting stopped. Interruption reads the same way -- nothing was
+ * undone -- so neither may be recorded as a decision not to act.
+ */
+const outcomeOf = (cause: Cause.Cause<unknown>, tag: string | undefined): string => {
+  if (tag === 'AgentCompletionTimeoutError') return 'timeout'
+  if (tag !== undefined) return tag
+  return Cause.hasInterrupts(cause) ? 'interrupted' : 'AgentDefect'
+}
 
 /**
  * Names whatever the caller passed, for the "no such capability" message.

@@ -1,6 +1,7 @@
-import { Effect, Option } from 'effect'
+import { Duration, Effect, Option } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import type { AnyMessage, Completion } from '../src/types.js'
 import { type Message, type Model, Message as MessageUnion, emptyModel } from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model, { readonly user: string; readonly token: string }>()
@@ -412,5 +413,190 @@ describe('without an audit sink', () => {
     await run(runtime.messages.dispatch('create_todo', { title: 'x' }))
 
     expect(dispatched).toHaveLength(1)
+  })
+})
+
+/**
+ * A completion contract turns a dispatch into two facts: that the Message was
+ * sent, and what became of it. The record has to keep them apart -- a timeout
+ * is not a refusal, and nothing about it was undone.
+ */
+describe('a dispatch that was accepted but did not complete', () => {
+  const completingHost = (options: {
+    readonly complete?: (message: Message, emit: (message: Message) => void) => void
+    readonly throwOnDispatch?: boolean
+  }) => {
+    const listeners = new Set<(message: AnyMessage) => void>()
+    const emit = (message: Message): void => {
+      for (const listener of [...listeners]) listener(message)
+    }
+    return {
+      model: () => emptyModel,
+      dispatch: (message: Message) => {
+        if (options.throwOnDispatch === true) throw new Error('the Runtime port is closed')
+        dispatched.push(message)
+        options.complete?.(message, emit)
+      },
+      principal: () => principal,
+      observe: (listener: (message: AnyMessage) => void) => {
+        listeners.add(listener)
+        return () => void listeners.delete(listener)
+      },
+    }
+  }
+
+  const completingRuntime = (
+    audit: Agent.AuditSink,
+    host: ReturnType<typeof completingHost>,
+    completion: Completion<{ readonly id: string }, Message, Message>,
+  ) =>
+    Agent.bind({
+      definition: Agent.define({
+        messages: Agent.expose(MessageUnion, {
+          RequestedDeleteTodo: { name: 'delete_todo', description: 'Delete a todo', completion },
+        }),
+      }),
+      audit,
+      host,
+    })
+
+  const deleted = MessageUnion.ReceivedTodos({ todos: [] })
+
+  it('records a completion timeout as dispatched, not as a refusal', async () => {
+    const audit = Agent.auditLog()
+    const host = completingHost({})
+    const runtime = completingRuntime(audit, host, {
+      success: MessageUnion.ReceivedTodos,
+      timeout: Duration.millis(20),
+    })
+
+    const result = await run(runtime.messages.dispatch('delete_todo', { id: 'a' }))
+
+    expect(result._tag).toBe('Failure')
+    // The Message reached the host. Recording that as a refusal would say the
+    // opposite of what happened to the Model.
+    expect(dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'a' }])
+    expect(audit.entries()).toMatchObject([
+      {
+        capability: 'delete_todo',
+        tag: 'RequestedDeleteTodo',
+        decision: 'dispatched',
+        outcome: 'timeout',
+      },
+    ])
+  })
+
+  it('records a declared failure Message as dispatched and failed', async () => {
+    const audit = Agent.auditLog()
+    const host = completingHost({
+      complete: (_, emit) => emit(MessageUnion.FailedToLoadTodos({ message: 'nope' })),
+    })
+    const runtime = completingRuntime(audit, host, {
+      success: MessageUnion.ReceivedTodos,
+      failure: MessageUnion.FailedToLoadTodos,
+      timeout: Duration.millis(20),
+    })
+
+    await run(runtime.messages.dispatch('delete_todo', { id: 'a' }))
+
+    expect(audit.entries()).toMatchObject([{ decision: 'dispatched', outcome: 'failed' }])
+  })
+
+  it('records a completion that arrived as dispatched and completed', async () => {
+    const audit = Agent.auditLog()
+    const host = completingHost({ complete: (_, emit) => emit(deleted) })
+    const runtime = completingRuntime(audit, host, {
+      success: MessageUnion.ReceivedTodos,
+      timeout: Duration.millis(20),
+    })
+
+    await run(runtime.messages.dispatch('delete_todo', { id: 'a' }))
+
+    expect(audit.entries()).toMatchObject([{ decision: 'dispatched', outcome: 'completed' }])
+  })
+
+  it('records an interrupted wait as dispatched, because nothing was undone', async () => {
+    const audit = Agent.auditLog()
+    const host = completingHost({})
+    const runtime = completingRuntime(audit, host, {
+      success: MessageUnion.ReceivedTodos,
+      timeout: Duration.seconds(30),
+    })
+
+    // Interruption stops the waiting, never the Message that is already in the
+    // Runtime -- so the record may not read as a decision not to act.
+    await Effect.runPromise(
+      Effect.exit(
+        Effect.timeout(runtime.messages.dispatch('delete_todo', { id: 'a' }), Duration.millis(20)),
+      ),
+    )
+
+    expect(dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'a' }])
+    expect(audit.entries()).toMatchObject([{ decision: 'dispatched', outcome: 'interrupted' }])
+  })
+
+  it('claims neither delivery nor refusal when the host itself raised', async () => {
+    const audit = Agent.auditLog()
+    const host = completingHost({ throwOnDispatch: true })
+    const runtime = completingRuntime(audit, host, {
+      success: MessageUnion.ReceivedTodos,
+      timeout: Duration.millis(20),
+    })
+
+    const result = await Effect.runPromise(
+      Effect.exit(runtime.messages.dispatch('delete_todo', { id: 'a' })),
+    )
+
+    expect(result._tag).toBe('Failure')
+    expect(dispatched).toEqual([])
+    // Nothing here can tell whether the Runtime saw the Message, so the record
+    // says so rather than filing it beside a policy refusal.
+    expect(audit.entries()).toMatchObject([
+      { capability: 'delete_todo', tag: 'RequestedDeleteTodo', decision: 'unknown' },
+    ])
+  })
+})
+
+describe('every failure mode is recorded as what it was', () => {
+  it('records each refusal as refused, with the Message never dispatched', async () => {
+    const audit = Agent.auditLog()
+    const runtime = runtimeWith(audit)
+    const aborted = new AbortController()
+    aborted.abort()
+
+    await run(runtime.messages.dispatchUnknown('nope', {}))
+    await run(runtime.messages.dispatchUnknown('create_todo', { title: 42 }))
+    await run(runtime.messages.dispatch('delete_todo', { id: 'a' }))
+    await run(runtime.messages.dispatch('create_todo', { title: 'x' }, { signal: aborted.signal }))
+    model = { ...emptyModel, selectedTodoId: Option.some('a') }
+    principal = { user: 'mallory', token: 'secret-token' }
+    await run(runtime.messages.dispatch('delete_todo', { id: 'a' }))
+
+    expect(audit.entries().map(entry => [entry.decision, entry.outcome])).toEqual([
+      ['refused', 'AgentUnknownCapabilityError'],
+      ['refused', 'AgentInvalidInputError'],
+      ['refused', 'AgentCapabilityUnavailableError'],
+      ['refused', 'AgentCancelledError'],
+      ['refused', 'AgentAuthorizationError'],
+    ])
+    expect(dispatched).toEqual([])
+  })
+
+  it('names the capability of a refusal that carries no Message tag', async () => {
+    const audit = Agent.auditLog()
+    const aborted = new AbortController()
+    aborted.abort()
+
+    await run(
+      runtimeWith(audit).messages.dispatch(
+        'create_todo',
+        { title: 'x' },
+        { signal: aborted.signal },
+      ),
+    )
+
+    expect(audit.entries()).toMatchObject([
+      { capability: 'create_todo', tag: 'RequestedCreateTodo' },
+    ])
   })
 })

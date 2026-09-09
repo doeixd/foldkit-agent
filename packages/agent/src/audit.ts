@@ -1,5 +1,20 @@
 import type { Invocation, Transport } from './types.js'
 
+/**
+ * Whether the Message reached the Runtime -- the one fact a refusal and a
+ * post-dispatch failure differ on.
+ *
+ * - `refused`: the invocation was rejected before anything was sent. No
+ *   Message exists; the Model was not touched.
+ * - `dispatched`: the host accepted the Message. It ran. What `outcome` then
+ *   reports -- including a completion `timeout` -- happened afterwards and
+ *   undoes nothing.
+ * - `unknown`: the Message was handed to the host, which raised. Whether the
+ *   Runtime processed it cannot be told from here, and the record does not
+ *   claim either way.
+ */
+export type AuditDecision = 'dispatched' | 'refused' | 'unknown'
+
 /** What the runtime reports about one decision. A sink decides what to keep. */
 export interface AuditRecord {
   readonly invocation: Invocation
@@ -8,10 +23,12 @@ export interface AuditRecord {
   /** The internal Message tag, when the capability resolved to one. */
   readonly tag: string | undefined
   readonly principal: unknown
-  readonly decision: 'dispatched' | 'refused'
+  readonly decision: AuditDecision
   /**
-   * `dispatched`, a completion status, or the failure tag for a refusal --
-   * which is the entry worth reading.
+   * What became of it: `dispatched` when nothing further was awaited,
+   * `completed`, `failed` or `timeout` for a declared completion contract,
+   * `interrupted` when the caller stopped waiting, and otherwise the failure
+   * tag -- which is the entry worth reading.
    */
   readonly outcome: string
   /** Exactly what the caller sent, before any policy is applied. */
@@ -33,7 +50,7 @@ export interface AuditEntry {
   readonly tag?: string | undefined
   /** Whatever the `principal` projection returned. Omitted without one. */
   readonly principal?: unknown
-  readonly decision: 'dispatched' | 'refused'
+  readonly decision: AuditDecision
   readonly outcome: string
   /** Present only when `includeInput` is set, with redacted fields replaced. */
   readonly input?: Record<string, unknown> | undefined

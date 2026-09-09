@@ -20,6 +20,7 @@ export {
 export { forModel, type BoundAgent } from './forModel.js'
 export {
   auditLog,
+  type AuditDecision,
   type AuditEntry,
   type AuditLog,
   type AuditLogOptions,
