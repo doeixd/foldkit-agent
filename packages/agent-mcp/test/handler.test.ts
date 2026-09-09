@@ -603,3 +603,86 @@ describe('the stdio transport', () => {
     expect(JSON.parse(written[0]!)).toMatchObject({ id: 1 })
   })
 })
+
+describe('defects at the protocol boundary', () => {
+  const boom = (): never => {
+    throw new Error('private detail')
+  }
+
+  /** Everything an application callback can do wrong, in one contract. */
+  const faulty = (
+    part: 'context' | 'resource' | 'available',
+  ): ReturnType<typeof AgentMcp.handler> =>
+    AgentMcp.handler({
+      agent: TodoAgent.bind({
+        definition: TodoAgent.define({
+          context: {
+            schema: Schema.Struct({ todos: Schema.Array(Todo) }),
+            select: part === 'context' ? boom : (m: Model) => ({ todos: m.todos }),
+          },
+          messages: TodoAgent.expose(Message, {
+            RequestedCreateTodo: {
+              name: 'create_todo',
+              description: 'Create a todo',
+              ...(part === 'available' ? { available: boom } : {}),
+            },
+          }),
+          resources: [
+            TodoAgent.resource('todos', {
+              description: 'Current todos',
+              schema: Schema.Array(Todo),
+              read: part === 'resource' ? boom : (m: Model) => m.todos,
+            }),
+          ],
+        }),
+        host: {
+          model: () => model,
+          dispatch: (message: Message) => void dispatched.push(message),
+          principal: () => principal,
+          subscribe: listener => {
+            listeners.add(listener)
+            return () => listeners.delete(listener)
+          },
+        },
+      }),
+      onNotification: (notification: Notification) => notifications.push(notification),
+    })
+
+  const cases = [
+    { part: 'context' as const, method: 'resources/read', params: { uri: 'app://context' } },
+    { part: 'resource' as const, method: 'resources/read', params: { uri: 'app://todos' } },
+    { part: 'available' as const, method: 'tools/list', params: undefined },
+  ]
+
+  for (const { part, method, params } of cases) {
+    it(`answers with an internal error when the ${part} callback throws`, async () => {
+      const served = faulty(part)
+      await served.handle(request(0, 'initialize'))
+
+      const error = err(await served.handle(request(1, method, params)))
+
+      expect(error.code).toBe(-32603)
+      // The callback's own text may carry application internals.
+      expect(error.message).not.toMatch(/private detail/)
+      expect(error.message).toMatch(new RegExp(method))
+    })
+  }
+
+  it('does not let a throwing availability getter escape the subscription', async () => {
+    const served = faulty('available')
+    await served.handle(request(0, 'initialize'))
+
+    const rejections: Array<unknown> = []
+    const onRejection = (reason: unknown) => rejections.push(reason)
+    process.on('unhandledRejection', onRejection)
+    try {
+      setModel({ ...emptyModel, todos: [{ id: 'a', title: 'a' }] })
+      await new Promise(resolve => setTimeout(resolve, 10))
+    } finally {
+      process.off('unhandledRejection', onRejection)
+    }
+
+    expect(rejections).toEqual([])
+    served.close()
+  })
+})

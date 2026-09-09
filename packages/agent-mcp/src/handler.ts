@@ -98,7 +98,14 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
   const announceIfChanged = async (): Promise<void> => {
     if (closed || onNotification === undefined) return
 
-    const digest = JSON.stringify(await listTools())
+    let digest: string
+    try {
+      digest = JSON.stringify(await listTools())
+    } catch {
+      // Nothing to tell the client here, and a throwing availability getter must
+      // not become an unhandled rejection on a background subscription.
+      return
+    }
     if (digest === advertised) return
 
     const first = advertised === undefined
@@ -287,7 +294,17 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
         handleNotification(incoming)
         return undefined
       }
-      return handleRequest(incoming)
+      // The protocol boundary answers every request. `tools/call` contains its
+      // own defects so it can report them as a tool error; everything else --
+      // a throwing projection, resource read, or availability getter -- lands
+      // here as an internal error with no application detail in it.
+      return handleRequest(incoming).catch(() =>
+        failure(
+          incoming.id,
+          code.INTERNAL_ERROR,
+          `Handling ${incoming.method} failed unexpectedly`,
+        ),
+      )
     },
 
     close: () => {
