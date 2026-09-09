@@ -93,6 +93,10 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
   `onExcessProperty: 'error'`. Use `Schema.Record(Schema.String, Schema.Never)`.
   Run a scratch probe against the installed version before relying on semantics
   inferred from a name.
+- **Check the output, not just that the call returned.** `defineAction` accepts
+  four different schema forms without complaint; three of them advertise a tool
+  with no parameters at all. An API that takes your input and quietly produces an
+  empty result is worse than one that throws.
 - **Enforce what you advertise.** Deriving a JSON Schema that says
   `additionalProperties: false` is not validation; the decoder has to agree.
 - **Type a boundary from the side the runtime consumes.** Dispatch decodes, so

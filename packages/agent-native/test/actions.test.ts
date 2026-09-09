@@ -101,6 +101,15 @@ describe('the schema bridge', () => {
     expect(standard.vendor).toBe('effect')
   })
 
+  it('carries validation and advertisement together', () => {
+    // Agent Native needs both: `validate` to check input, `jsonSchema` to
+    // advertise parameters. Neither Effect helper provides both on its own.
+    const standard = named('create_todo').schema['~standard'] as unknown as Record<string, unknown>
+
+    expect(typeof standard['validate']).toBe('function')
+    expect(standard['jsonSchema']).toBeDefined()
+  })
+
   it('accepts input the contract accepts', async () => {
     const result = await named('create_todo').schema['~standard'].validate({ title: 'x' })
 
@@ -111,6 +120,24 @@ describe('the schema bridge', () => {
     const result = await named('create_todo').schema['~standard'].validate({ title: 42 })
 
     expect(result.issues?.length).toBeGreaterThan(0)
+  })
+
+  it('carries its JSON Schema, which is where advertised parameters come from', () => {
+    // defineAction reads ~standard.jsonSchema for the tool's parameters. A
+    // validation-only Standard Schema is accepted and advertises nothing, so an
+    // agent would see a tool that takes no input.
+    const standard = named('create_todo').schema['~standard'] as unknown as {
+      jsonSchema: { input: (options: { readonly target: string }) => Record<string, unknown> }
+    }
+
+    // A converter, not a document: this is what defineAction calls to build the
+    // tool's parameters, and it describes the input side. Whether the framework
+    // actually reads it is milestone 1's job -- these tests cannot see it.
+    expect(typeof standard.jsonSchema.input).toBe('function')
+    expect(standard.jsonSchema.input({ target: 'draft-2020-12' })).toMatchObject({
+      type: 'object',
+      required: ['title'],
+    })
   })
 
   it('also offers the JSON Schema, for a consumer that builds its own validator', () => {

@@ -24,15 +24,45 @@ export interface Action {
   readonly name: string
   readonly description: string
   /**
-   * The input schema as Standard Schema v1.
+   * The input schema as Standard Schema v1, carrying its JSON Schema.
    *
-   * Effect and Zod both implement it, so a consumer that accepts the standard
-   * needs no conversion. `jsonSchema` is there for one that wants to build its
-   * own validator instead.
+   * It has to be the JSON-Schema-carrying form. `defineAction` derives a tool's
+   * advertised `parameters` from `~standard.jsonSchema`, and a validation-only
+   * Standard Schema is accepted without complaint but advertises no parameters
+   * at all -- an agent would see a tool that takes no input.
    */
   readonly schema: StandardSchemaV1<unknown, unknown>
   readonly jsonSchema: Record<string, unknown>
   readonly run: (input: unknown) => Promise<ActionResult>
+}
+
+/**
+ * A Standard Schema that both validates and advertises its shape.
+ *
+ * Neither Effect helper does both, and the difference is silent:
+ *
+ * - `toStandardSchemaV1` carries `validate` but no `jsonSchema`, and
+ *   `defineAction` accepts it while advertising a tool that takes **no input**.
+ * - `toStandardJSONSchemaV1` carries `jsonSchema`, which is what the advertised
+ *   `parameters` are derived from, but no `validate`.
+ *
+ * Copying the two together into a new object also fails: the conversion reads
+ * the Effect schema itself, so identity has to be preserved. `validate` is
+ * therefore attached to the described schema in place.
+ */
+const describedSchema = (
+  schema: Parameters<typeof Schema.toStandardSchemaV1>[0],
+): StandardSchemaV1<unknown, unknown> => {
+  const described = Schema.toStandardJSONSchemaV1(schema as never)
+  const validating = Schema.toStandardSchemaV1(schema)
+
+  Object.defineProperty(described['~standard'], 'validate', {
+    value: validating['~standard'].validate,
+    enumerable: true,
+    configurable: true,
+  })
+
+  return described as unknown as StandardSchemaV1<unknown, unknown>
 }
 
 export interface ActionsOptions {
@@ -57,7 +87,7 @@ export const actions = (options: ActionsOptions): ReadonlyArray<Action> => {
   return agent.definition.messages.variants.map(variant => ({
     name: variant.name,
     description: variant.description,
-    schema: Schema.toStandardSchemaV1(variant.inputSchema) as StandardSchemaV1<unknown, unknown>,
+    schema: describedSchema(variant.inputSchema),
     jsonSchema: variant.inputJsonSchema,
 
     run: async (input: unknown): Promise<ActionResult> => {
