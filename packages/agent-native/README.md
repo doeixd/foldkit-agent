@@ -41,9 +41,9 @@ tests assert that an action refuses exactly what the contract refuses.
 
 ## The schema bridge
 
-`defineAction` takes Zod; the contract holds Effect Schema. Rather than convert
-between them, actions carry **Standard Schema v1**, which Effect and Zod both
-implement, so a consumer that accepts the standard needs no conversion at all.
+The framework's examples use Zod, but `defineAction` types its `schema` field as
+`StandardSchemaV1` from `@standard-schema/spec` and validates through it. Effect
+Schema converts to one, so there is no conversion layer and no Zod dependency.
 
 `action.jsonSchema` is there for a consumer that would rather build its own
 validator.
@@ -51,8 +51,10 @@ validator.
 ## Limits
 
 - **Never run against the framework.** Everything here is verified against a
-  stub. If `defineAction` requires Zod's own API rather than Standard Schema, a
-  wrapper is needed and this will not work as written.
+  stub.
+- **`register` is the wrong shape.** Actions are discovered from files —
+  `actions/<name>.ts` with a default export — so production is code generation,
+  not an imperative loop. `actions()` is still the right half.
 - Agent Native assumes Postgres, Nitro and React. None of that is exercised.
 - No HTTP method configuration, no `useActionQuery`, no UI, no deep links.
 - The private package flag is deliberate: this should not be published until it
