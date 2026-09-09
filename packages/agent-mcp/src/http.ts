@@ -2,12 +2,20 @@ import type { Agent } from '@foldkit/agent'
 import { type Handler, PROTOCOL_VERSION, handler } from './handler.js'
 import { type Notification, code, failure, isIncoming, isRequest } from './jsonRpc.js'
 
+/**
+ * The body of a POST whose JSON text could not be parsed.
+ *
+ * A transport passes this instead of the parsed value so the handler can answer
+ * with -32700 rather than the -32600 an absent body earns.
+ */
+export const UNPARSEABLE_BODY: unique symbol = Symbol.for('@foldkit/agent-mcp/UnparseableBody')
+
 /** A transport-neutral request, so this can sit behind any HTTP server. */
 export interface HttpRequest {
   readonly method: string
   /** Header names lowercased. */
   readonly headers: Readonly<Record<string, string | undefined>>
-  /** The parsed JSON body, for POST. */
+  /** The parsed JSON body, for POST, or `UNPARSEABLE_BODY` if it was not JSON. */
   readonly body?: unknown
 }
 
@@ -219,6 +227,9 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     }
 
     const message = request.body
+    if (message === UNPARSEABLE_BODY) {
+      return json(400, failure(null, code.PARSE_ERROR, 'Parse error'))
+    }
     if (!isIncoming(message)) {
       return json(400, failure(null, code.INVALID_REQUEST, 'Not a JSON-RPC 2.0 message'))
     }

@@ -192,7 +192,7 @@ describe('as a web handler', () => {
     expect(deleted.status).toBe(204)
   })
 
-  it('answers a body that is not JSON with a JSON-RPC error', async () => {
+  it('answers a body that is not JSON with a parse error', async () => {
     const handler = makeWebHandler()
     const response = await handler(
       new Request(url, {
@@ -203,7 +203,21 @@ describe('as a web handler', () => {
     )
 
     expect(response.status).toBe(400)
-    expect((await response.json()).error.code).toBe(-32600)
+    expect(await response.json()).toMatchObject({ id: null, error: { code: -32700 } })
+  })
+
+  it('answers valid JSON that is not a JSON-RPC message with an invalid request error', async () => {
+    const handler = makeWebHandler()
+    const response = await handler(
+      new Request(url, {
+        method: 'POST',
+        headers: { authorization: 'Bearer alice', 'content-type': 'application/json' },
+        body: JSON.stringify({ hello: 'there' }),
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ id: null, error: { code: -32600 } })
   })
 })
 

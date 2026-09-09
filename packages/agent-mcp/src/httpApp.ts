@@ -2,7 +2,7 @@ import { Effect, Queue, Stream } from 'effect'
 import * as HttpServerRequest from 'effect/unstable/http/HttpServerRequest'
 import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 import type { HttpHandler, HttpHandlerOptions, HttpRequest, SseEvent, SseStream } from './http.js'
-import { httpHandler } from './http.js'
+import { UNPARSEABLE_BODY, httpHandler } from './http.js'
 
 const encoder = new TextEncoder()
 
@@ -81,10 +81,12 @@ export const httpApp = <Model, Context_, Principal, ByName, ByTag>(
     const request = yield* HttpServerRequest.HttpServerRequest
 
     // A body that is absent or unparseable is not a reason to fail the request:
-    // the core answers it with the JSON-RPC error the client expects.
+    // the core answers it with the JSON-RPC error the client expects, and the
+    // sentinel keeps malformed JSON (-32700) apart from a valid but wrong-shaped
+    // value (-32600).
     const body =
       request.method === 'POST'
-        ? yield* Effect.orElseSucceed(request.json, () => undefined)
+        ? yield* Effect.orElseSucceed(request.json, () => UNPARSEABLE_BODY)
         : undefined
 
     const response = yield* Effect.promise(() => server.handle(toHttpRequest(request, body)))
