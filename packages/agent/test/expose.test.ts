@@ -196,3 +196,107 @@ describe('an externally declared empty input', () => {
     expect(decode([])).toBe('Failure')
   })
 })
+
+describe('an externally declared empty input that carries checks', () => {
+  const messages = Agent.expose(Message, {
+    RequestedDeleteTodo: {
+      name: 'delete_selected',
+      description: 'Delete whichever todo is selected',
+      input: Schema.Struct({}).check(Schema.makeFilter(() => 'the caller may never invoke this')),
+      toMessage: () => ({ id: 'from-the-model' }),
+    },
+  })
+  const variant = messages.variants[0]!
+
+  const decode = (input: unknown) =>
+    Effect.runSync(
+      Effect.result(
+        Schema.decodeUnknownEffect(variant.inputSchema, { onExcessProperty: 'error' })(input),
+      ),
+    )._tag
+
+  it("keeps the supplied schema's checks", () => {
+    expect(decode({})).toBe('Failure')
+  })
+
+  it('refuses input the declared schema rejects, before update', () => {
+    const dispatched: Array<unknown> = []
+    const runtime = Agent.bind({
+      definition: Agent.define({ messages }),
+      host: { model: () => emptyModel, dispatch: message => void dispatched.push(message) },
+    })
+
+    const result = Effect.runSync(
+      Effect.result(runtime.messages.dispatchUnknown('delete_selected', {})),
+    )
+
+    expect(result._tag).toBe('Failure')
+    expect(dispatched).toEqual([])
+  })
+})
+
+describe('an externally declared empty input that carries annotations', () => {
+  const messages = Agent.expose(Message, {
+    RequestedDeleteTodo: {
+      description: 'Delete whichever todo is selected',
+      input: Schema.Struct({}).annotate({ title: 'Nothing to supply' }),
+      toMessage: () => ({ id: 'from-the-model' }),
+    },
+  })
+
+  it("keeps the supplied schema's annotations", () => {
+    const ast = (messages.variants[0]!.inputSchema as { ast: { annotations?: unknown } }).ast
+    expect(ast.annotations).toMatchObject({ title: 'Nothing to supply' })
+  })
+})
+
+describe('an externally declared empty input whose check permits invocation', () => {
+  let seen = 0
+  const messages = Agent.expose(Message, {
+    RequestedDeleteTodo: {
+      name: 'delete_selected',
+      description: 'Delete whichever todo is selected',
+      input: Schema.Struct({}).check(
+        Schema.makeFilter(() => {
+          seen += 1
+          return undefined
+        }),
+      ),
+      toMessage: () => ({ id: 'from-the-model' }),
+    },
+  })
+
+  it('dispatches, having run the supplied check', () => {
+    const before = seen
+    const dispatched: Array<unknown> = []
+    const runtime = Agent.bind({
+      definition: Agent.define({ messages }),
+      host: { model: () => emptyModel, dispatch: message => void dispatched.push(message) },
+    })
+
+    Effect.runSync(runtime.messages.dispatchUnknown('delete_selected', {}))
+
+    expect(seen).toBe(before + 1)
+    expect(dispatched).toHaveLength(1)
+  })
+
+  it('still advertises and enforces a closed empty object', () => {
+    const variant = messages.variants[0]!
+    const decode = (input: unknown) =>
+      Effect.runSync(
+        Effect.result(
+          Schema.decodeUnknownEffect(variant.inputSchema, { onExcessProperty: 'error' })(input),
+        ),
+      )._tag
+
+    expect(variant.inputJsonSchema).toEqual({
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    })
+    expect(decode({ id: 'injected' })).toBe('Failure')
+    expect(decode([])).toBe('Failure')
+    expect(decode('str')).toBe('Failure')
+  })
+})

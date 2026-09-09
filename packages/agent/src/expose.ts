@@ -184,6 +184,23 @@ const isEmptyStruct = (schema: unknown): boolean => {
 }
 
 /**
+ * Rejects anything but a plain object with no properties.
+ *
+ * Appended to a supplied empty struct rather than replacing it: replacing it
+ * threw away the schema's own checks, annotations and decoding, while `Struct({})`
+ * on its own accepts `{ foo: 1 }`, `[]` and `"str"`. Adding the check closes that
+ * hole and keeps everything the caller declared.
+ */
+const closedEmptyObject = Schema.makeFilter((value: unknown) =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === 0
+    ? undefined
+    : 'Expected an empty object',
+)
+
+/**
  * Types a variant that maps a distinct external input onto its Message.
  *
  * Written inline, `toMessage` and `authorize` receive `any`: their input comes
@@ -288,7 +305,11 @@ export const expose = <
     // Schema derived for it makes the same promise, so enforce it the same way.
     const externalIsEmpty = external !== undefined && isEmptyStruct(external)
     const inputSchema = (
-      external === undefined ? payload.schema : externalIsEmpty ? EmptyPayload : external
+      external === undefined
+        ? payload.schema
+        : externalIsEmpty
+          ? (external as Schema.Codec<any, any, never, never>).check(closedEmptyObject)
+          : external
     ) as Schema.Codec<any, any, never, never>
 
     const make = constructor as (value: unknown) => AnyMessage
