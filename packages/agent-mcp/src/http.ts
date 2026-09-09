@@ -91,7 +91,7 @@ export interface HttpHandlerOptions<Model, Context_, Principal, ByName, ByTag> {
   /** Idle sessions are dropped after this long. Defaults to 30 minutes. */
   readonly sessionTtlMs?: number | undefined
 
-  /** Events kept per session for `Last-Event-ID` resumption. Defaults to 100. */
+  /** Events kept per stream for `Last-Event-ID` resumption. Defaults to 100. */
   readonly replayBuffer?: number | undefined
 
   readonly serverInfo?: { readonly name: string; readonly version: string } | undefined
@@ -167,14 +167,27 @@ interface Subscriber {
   readonly end: (() => void) | undefined
 }
 
+/**
+ * One logical SSE stream, which outlives the transport currently carrying it.
+ *
+ * A stream keeps its own history because resumption is per stream: a client
+ * that reconnects with `Last-Event-ID` may only be replayed the messages that
+ * would have been sent on the stream it lost, never those already delivered on
+ * another concurrent one.
+ */
+interface Stream {
+  readonly log: Array<SseEvent>
+  /** Absent while the transport is disconnected but the stream is resumable. */
+  subscriber: Subscriber | undefined
+}
+
 interface Session {
   readonly id: string
   /** The principal that initialized it. Only that principal may use it. */
   readonly owner: string
   readonly handler: Handler
-  readonly log: Array<SseEvent>
-  /** Every open stream. The spec allows more than one at a time. */
-  readonly streams: Set<Subscriber>
+  /** Every stream, oldest first. The spec allows more than one at a time. */
+  readonly streams: Array<Stream>
   nextEventId: number
   lastSeen: number
   terminated: boolean
@@ -202,9 +215,9 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     session.handler.close()
 
     // Copied, because a transport is free to unsubscribe from inside its own `end`.
-    for (const subscriber of [...session.streams]) {
+    for (const stream of [...session.streams]) {
       try {
-        subscriber.end?.()
+        stream.subscriber?.end?.()
       } catch {
         // Terminating a session must not fail because one client's transport did.
       }
@@ -218,17 +231,53 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     }
   }
 
-  /** Each message goes to exactly one stream, never broadcast across several. */
+  /**
+   * Each message goes to exactly one stream, never broadcast across several,
+   * and is logged on that stream alone so only it can replay the message.
+   *
+   * The newest connected stream carries it; with none connected the newest
+   * stream takes it anyway, so a client that reconnects to it is replayed what
+   * it missed while the transport was down. A session that has never had a
+   * stream at all opens one to hold the message until a client comes for it.
+   */
   const emit = (session: Session, notification: Notification): void => {
+    const target =
+      [...session.streams].reverse().find(stream => stream.subscriber !== undefined) ??
+      session.streams.at(-1) ??
+      open(session)
+
     const event: SseEvent = {
       id: String(session.nextEventId++),
       data: JSON.stringify(notification),
     }
-    session.log.push(event)
-    if (session.log.length > replayBuffer) session.log.shift()
+    target.log.push(event)
+    if (target.log.length > replayBuffer) target.log.shift()
+    target.subscriber?.send(event)
+  }
 
-    const newest = [...session.streams].at(-1)
-    newest?.send(event)
+  /** Starts a stream with no transport on it yet, forgetting the spent ones. */
+  const open = (session: Session): Stream => {
+    forget(session)
+    const stream: Stream = { log: [], subscriber: undefined }
+    session.streams.push(stream)
+    return stream
+  }
+
+  /**
+   * Bounds the histories a session holds, so a client that keeps reconnecting
+   * on a new stream does not make it hoard them. The oldest disconnected go
+   * first: they are the ones least likely to still be resumed.
+   */
+  const forget = (session: Session): void => {
+    let excess = session.streams.length - replayBuffer
+    if (excess <= 0) return
+    const kept = session.streams.filter(stream => {
+      if (excess <= 0 || stream.subscriber !== undefined) return true
+      excess--
+      return false
+    })
+    session.streams.length = 0
+    session.streams.push(...kept)
   }
 
   const originAllowed = (request: HttpRequest): boolean => {
@@ -293,11 +342,24 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
       const session = lookup(request, owner)
       if (session === undefined) return json(404, { error: 'Unknown session' })
 
+      // Resumption reattaches to the stream that issued the last event seen, so
+      // nothing another stream already delivered is replayed. An id no stream
+      // claims -- one aged out of the logs, or a cursor from before any event --
+      // identifies no stream, and is only unambiguous when the session has a
+      // single one; otherwise this GET is a new stream with nothing to replay.
       const lastEventId = request.headers['last-event-id']
-      const backlog =
+      const resumed =
         lastEventId === undefined
+          ? undefined
+          : (session.streams.find(candidate =>
+              candidate.log.some(event => event.id === lastEventId),
+            ) ?? (session.streams.length === 1 ? session.streams[0] : undefined))
+
+      const stream = resumed ?? open(session)
+      const backlog =
+        resumed === undefined
           ? []
-          : session.log.filter(event => Number(event.id) > Number(lastEventId))
+          : resumed.log.filter(event => Number(event.id) > Number(lastEventId))
 
       return {
         status: 200,
@@ -312,8 +374,10 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
               return () => {}
             }
             const subscriber: Subscriber = { send, end }
-            session.streams.add(subscriber)
-            return () => session.streams.delete(subscriber)
+            stream.subscriber = subscriber
+            return () => {
+              if (stream.subscriber === subscriber) stream.subscriber = undefined
+            }
           },
         },
       }
@@ -360,8 +424,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
           ...(options.serverInfo === undefined ? {} : { serverInfo: options.serverInfo }),
           onNotification: notification => emit(session, notification),
         }),
-        log: [],
-        streams: new Set(),
+        streams: [],
         nextEventId: 1,
         lastSeen: Date.now(),
         terminated: false,

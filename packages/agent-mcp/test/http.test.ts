@@ -2,7 +2,7 @@ import { Agent } from '@foldkit/agent'
 import { AgentMcp, type HttpRequest, type HttpResponse, type SseEvent } from '@foldkit/agent-mcp'
 import { Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const Message = defineMessageUnion({
   RequestedCreateTodo: { title: Schema.String },
@@ -561,6 +561,64 @@ describe('the SSE stream', () => {
     expect(resumed.stream?.backlog.map(event => event.id)).toEqual(['2', '3'])
   })
 
+  it('replays only the events of the stream that was interrupted', async () => {
+    const server = makeServer()
+    const id = sessionOf(await server.handle(post(initialize)))
+    await server.handle(
+      post({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { 'mcp-session-id': id }),
+    )
+    const change = async (selectedTodoId: Option.Option<string>) => {
+      setModel({ selectedTodoId })
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+
+    const first: Array<SseEvent> = []
+    const leaveFirst = (await open(server, id)).stream?.subscribe(event => first.push(event))
+    await change(Option.some('a'))
+
+    const second: Array<SseEvent> = []
+    const leaveSecond = (await open(server, id)).stream?.subscribe(event => second.push(event))
+    await change(Option.none())
+
+    // One event on each, and event ids are unique across the whole session.
+    expect([first.map(event => event.id), second.map(event => event.id)]).toEqual([['1'], ['2']])
+
+    // Both transports drop, and a further change lands on the newest stream.
+    leaveFirst?.()
+    leaveSecond?.()
+    await change(Option.some('b'))
+
+    const resumedFirst = await open(server, id, '1')
+    const resumedSecond = await open(server, id, '2')
+
+    // Event 3 belongs to the second stream, so only it may be replayed there.
+    expect(resumedFirst.stream?.backlog).toEqual([])
+    expect(resumedSecond.stream?.backlog.map(event => event.id)).toEqual(['3'])
+  })
+
+  it('forgets the oldest disconnected stream once a session holds too many', async () => {
+    const server = makeServer({ replayBuffer: 2 })
+    const id = sessionOf(await server.handle(post(initialize)))
+    await server.handle(
+      post({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { 'mcp-session-id': id }),
+    )
+
+    const seen: Array<SseEvent> = []
+    const leave = (await open(server, id)).stream?.subscribe(event => seen.push(event))
+    setModel({ selectedTodoId: Option.some('a') })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    leave?.()
+    setModel({ selectedTodoId: Option.none() })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect((await open(server, id, '1')).stream?.backlog.map(event => event.id)).toEqual(['2'])
+
+    // Three further streams push the first past what the session will keep.
+    for (const _ of [1, 2, 3]) await open(server, id)
+
+    expect((await open(server, id, '1')).stream?.backlog).toEqual([])
+  })
+
   it('replays nothing for a client that is not resuming', async () => {
     const server = makeServer()
     const id = sessionOf(await server.handle(post(initialize)))
@@ -569,10 +627,18 @@ describe('the SSE stream', () => {
   })
 
   describe('ending when the session is terminated', () => {
-    /** Subscribes and reports whether the stream has been closed. */
+    /**
+     * Subscribes and reports whether the stream has been closed.
+     *
+     * The stream is asserted, not optional: a response that carries none means
+     * the GET never opened one, and every `ended` assertion below would then
+     * hold vacuously against a stream that does not exist.
+     */
     const attach = (response: HttpResponse) => {
+      const stream = response.stream
+      if (stream === undefined) throw new Error('the GET opened no stream')
       const state = { ended: 0 }
-      const unsubscribe = response.stream?.subscribe(
+      const unsubscribe = stream.subscribe(
         () => {},
         () => void state.ended++,
       )
@@ -594,18 +660,25 @@ describe('the SSE stream', () => {
     })
 
     it('ends an open stream when the session expires', async () => {
-      const server = makeServer({ sessionTtlMs: 0 })
-      const id = sessionOf(await server.handle(post(initialize)))
-      const { state } = attach(await open(server, id))
+      // A real clock cannot express "idle later" without also making the session
+      // expirable during setup, where the GET's own expiry pass would drop it
+      // before the transport ever attached.
+      vi.useFakeTimers()
+      try {
+        const server = makeServer({ sessionTtlMs: 1000 })
+        const id = sessionOf(await server.handle(post(initialize)))
+        const { state } = attach(await open(server, id))
+        expect(state.ended).toBe(0)
 
-      // The clock has millisecond resolution, so wait for it to actually move.
-      const opened = Date.now()
-      while (Date.now() <= opened) await new Promise(resolve => setTimeout(resolve, 1))
-      // Any later request runs expiry, which drops the now-idle session.
-      await server.handle(post(initialize))
+        vi.setSystemTime(Date.now() + 5000)
+        // Any later request runs expiry, which drops the now-idle session.
+        await server.handle(post(initialize))
 
-      expect(server.sessions()).not.toContain(id)
-      expect(state.ended).toBe(1)
+        expect(server.sessions()).not.toContain(id)
+        expect(state.ended).toBe(1)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('ends an open stream when the server closes', async () => {
