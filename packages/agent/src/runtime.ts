@@ -11,6 +11,7 @@ import {
 } from './errors.js'
 import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedVariant } from './expose.js'
 import { resolveInvocation } from './invocation.js'
+import { messageTag } from './tag.js'
 import type {
   AnyMessage,
   DispatchResult,
@@ -324,9 +325,7 @@ export const bind = <
  * A Message constructor is reported by its tag, which the types already prevent
  * reaching here, so the read is defensive.
  */
-const describeTarget = (target: unknown): string => {
-  if (typeof target !== 'function') return String(target)
-  const tag = (target as { fields?: { _tag?: { ast?: { literal?: unknown } } } }).fields?._tag?.ast
-    ?.literal
-  return typeof tag === 'string' ? tag : 'an unexposed Message'
-}
+const describeTarget = (target: unknown): string =>
+  typeof target === 'function'
+    ? (messageTag(target) ?? 'an unexposed Message')
+    : String(target)

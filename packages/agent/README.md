@@ -109,6 +109,8 @@ principal must be given a `principal` provider of the matching type.
 | `Agent.bind({ definition, host })` | Binds the contract to a live Runtime. |
 | `Agent.forModel<Model>()` | The above, with `Model` fixed. |
 | `Agent.schema/messages/resources/contextSchema` | Introspection, as plain data. |
+| `Agent.toManifest(definition)` | The contract as `agent.json`, for committing and diffing. |
+| `Agent.toMarkdown(definition)` | The contract as documentation. |
 
 ### Variant configuration
 
@@ -163,6 +165,19 @@ expect(Agent.messages(AppAgent).map(message => message.name)).toEqual([
   'delete_todo',
 ])
 ```
+
+### Documenting a contract
+
+The contract is data, so its documentation is generated rather than written:
+
+```ts
+writeFileSync('agent.json', JSON.stringify(Agent.toManifest(AppAgent), null, 2))
+writeFileSync('AGENT.md', Agent.toMarkdown(AppAgent))
+```
+
+Both are reproducible for a given contract and read nothing from the Model, so a
+committed manifest makes a change to what an application exposes show up in
+review rather than only at runtime.
 
 ### Dispatch
 

@@ -17,6 +17,7 @@ export {
   type MessageInputOf,
 } from './expose.js'
 export { forModel, type BoundAgent } from './forModel.js'
+export { toManifest, toMarkdown, type Manifest } from './docs.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'
 export { newInvocationId } from './invocation.js'
 export { pick } from './pick.js'
