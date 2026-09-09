@@ -58,6 +58,17 @@ describe('what is recorded', () => {
     ])
   })
 
+  it('records each execution of a reused Effect under its own invocation id', async () => {
+    const audit = Agent.auditLog()
+    const operation = runtimeWith(audit).messages.dispatch('create_todo', { title: 'x' })
+
+    await run(operation)
+    await run(operation)
+
+    const [first, second] = audit.entries()
+    expect(second!.invocation).not.toEqual(first!.invocation)
+  })
+
   it('records a refusal, which is the interesting one', async () => {
     const audit = Agent.auditLog()
     principal = { user: 'mallory', token: 'secret-token' }

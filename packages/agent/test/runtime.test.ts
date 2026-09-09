@@ -165,6 +165,26 @@ describe('AgentRuntime.messages.dispatch', () => {
     )
     expect(result.invocation).toMatchObject({ id: 'invocation-1', transport: 'mcp' })
   })
+
+  it('gives each execution of a reused Effect its own default invocation id', () => {
+    const operation = runtime.messages.dispatch('create_todo', { title: 'x' })
+
+    const first = Effect.runSync(operation)
+    const second = Effect.runSync(operation)
+
+    expect(host.dispatched).toHaveLength(2)
+    expect(second.invocation.id).not.toEqual(first.invocation.id)
+  })
+
+  it('keeps a caller-supplied invocation id stable across executions', () => {
+    const operation = runtime.messages.dispatch('create_todo', { title: 'x' }, invocation())
+
+    const first = Effect.runSync(operation)
+    const second = Effect.runSync(operation)
+
+    expect(first.invocation.id).toEqual('invocation-1')
+    expect(second.invocation.id).toEqual('invocation-1')
+  })
 })
 
 describe('AgentRuntime projections', () => {

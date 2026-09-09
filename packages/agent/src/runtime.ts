@@ -223,8 +223,17 @@ export const bind = <
     target: unknown,
     input: unknown,
     requested?: Partial<Invocation>,
+  ): Effect.Effect<DispatchResult, DispatchError> =>
+    // Resolved per execution, not per construction: an Effect is a description
+    // and may be run repeatedly, and each run is a distinct invocation. A
+    // caller-supplied id still passes through unchanged.
+    Effect.suspend(() => withAudit(target, input, resolveInvocation(requested)))
+
+  const withAudit = (
+    target: unknown,
+    input: unknown,
+    invocation: Invocation,
   ): Effect.Effect<DispatchResult, DispatchError> => {
-    const invocation = resolveInvocation(requested)
     const effect = dispatchResolved(target, input, invocation)
 
     if (options.audit === undefined) return effect
