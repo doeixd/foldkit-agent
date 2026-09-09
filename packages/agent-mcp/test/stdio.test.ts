@@ -1,5 +1,5 @@
-import { Agent } from '@foldkit/agent'
-import { AgentMcp } from '@foldkit/agent-mcp'
+import { Agent } from 'foldkit-agent'
+import { AgentMcp } from 'foldkit-agent-mcp'
 import { PassThrough } from 'node:stream'
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'

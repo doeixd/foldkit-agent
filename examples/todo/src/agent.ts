@@ -1,4 +1,4 @@
-import { Agent } from '@foldkit/agent'
+import { Agent } from 'foldkit-agent'
 import { Option, Schema } from 'effect'
 import { Message, Model, Todo } from './app.js'
 

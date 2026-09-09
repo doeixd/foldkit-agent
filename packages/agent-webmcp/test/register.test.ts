@@ -1,4 +1,4 @@
-import { Agent } from '@foldkit/agent'
+import { Agent } from 'foldkit-agent'
 import { Effect, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'

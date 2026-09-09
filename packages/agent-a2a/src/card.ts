@@ -1,4 +1,4 @@
-import { Agent } from '@foldkit/agent'
+import { Agent } from 'foldkit-agent'
 import type { Definition } from './types.js'
 
 /** Where an A2A client looks for the card. */

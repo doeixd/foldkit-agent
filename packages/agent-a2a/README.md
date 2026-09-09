@@ -1,10 +1,10 @@
-# `@foldkit/agent-a2a`
+# `foldkit-agent-a2a`
 
-Serves a [`@foldkit/agent`](../agent) contract as an A2A agent, so another agent
+Serves a [`foldkit-agent`](../agent) contract as an A2A agent, so another agent
 can use the capabilities an application already exposes.
 
 ```bash
-pnpm add @foldkit/agent @foldkit/agent-a2a
+pnpm add foldkit-agent foldkit-agent-a2a
 ```
 
 ## The Agent Card
@@ -12,7 +12,7 @@ pnpm add @foldkit/agent @foldkit/agent-a2a
 One exposed capability is one skill:
 
 ```ts
-import { AgentA2a } from '@foldkit/agent-a2a'
+import { AgentA2a } from 'foldkit-agent-a2a'
 
 const card = AgentA2a.agentCard(AppAgent, {
   name: 'Todos',

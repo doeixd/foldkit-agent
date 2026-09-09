@@ -1,5 +1,5 @@
 /**
- * `@foldkit/agent-mcp` -- serves a Foldkit agent contract over MCP.
+ * `foldkit-agent-mcp` -- serves a Foldkit agent contract over MCP.
  *
  * The protocol mapping is a transport-free message handler, so it can be tested
  * by handing it JSON-RPC messages. `stdio` attaches it to a process.

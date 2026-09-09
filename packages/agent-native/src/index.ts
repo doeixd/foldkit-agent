@@ -1,5 +1,5 @@
 /**
- * `@foldkit/agent-native` -- PROTOTYPE.
+ * `foldkit-agent-native` -- PROTOTYPE.
  *
  * Compiles a Foldkit agent contract into a package action registry that
  * `registerPackageActions` accepts. Foldkit stays the source of truth: a

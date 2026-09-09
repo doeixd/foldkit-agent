@@ -7,7 +7,7 @@
     "composite": true,
     "noEmit": false,
     "paths": {
-      "@foldkit/agent": ["../agent/src/index.ts"]
+      "foldkit-agent": ["../agent/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],

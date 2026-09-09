@@ -1,6 +1,6 @@
-# `@foldkit/agent-native` — prototype
+# `foldkit-agent-native` — prototype
 
-Compiles a [`@foldkit/agent`](../agent) contract into Agent Native actions.
+Compiles a [`foldkit-agent`](../agent) contract into Agent Native actions.
 
 **This is a prototype.** It is not published, and it has never run against Agent
 Native itself — only against a stub with the shape the framework's documentation
@@ -9,7 +9,7 @@ describes. Read the limits at the bottom before relying on it.
 ## What it does
 
 ```ts
-import { AgentNative } from '@foldkit/agent-native'
+import { AgentNative } from 'foldkit-agent-native'
 import { registerPackageActions } from '@agent-native/core/server'
 
 registerPackageActions(

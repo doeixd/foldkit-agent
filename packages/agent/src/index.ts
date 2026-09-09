@@ -1,5 +1,5 @@
 /**
- * `@foldkit/agent` — a thin, Schema-first agent layer for Foldkit.
+ * `foldkit-agent` — a thin, Schema-first agent layer for Foldkit.
  *
  * Project a Foldkit application's Model and Message union into a deliberate,
  * protocol-neutral agent contract:

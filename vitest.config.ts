@@ -6,17 +6,17 @@ export default defineConfig({
     alias: {
       // Resolve the workspace package from source, so tests never depend on a
       // prior build of packages/agent.
-      '@foldkit/agent': fileURLToPath(new URL('./packages/agent/src/index.ts', import.meta.url)),
-      '@foldkit/agent-native': fileURLToPath(
+      'foldkit-agent': fileURLToPath(new URL('./packages/agent/src/index.ts', import.meta.url)),
+      'foldkit-agent-native': fileURLToPath(
         new URL('./packages/agent-native/src/index.ts', import.meta.url),
       ),
-      '@foldkit/agent-a2a': fileURLToPath(
+      'foldkit-agent-a2a': fileURLToPath(
         new URL('./packages/agent-a2a/src/index.ts', import.meta.url),
       ),
-      '@foldkit/agent-mcp': fileURLToPath(
+      'foldkit-agent-mcp': fileURLToPath(
         new URL('./packages/agent-mcp/src/index.ts', import.meta.url),
       ),
-      '@foldkit/agent-webmcp': fileURLToPath(
+      'foldkit-agent-webmcp': fileURLToPath(
         new URL('./packages/agent-webmcp/src/index.ts', import.meta.url),
       ),
     },

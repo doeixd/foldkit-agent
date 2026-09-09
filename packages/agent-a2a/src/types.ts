@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import type { Agent } from '@foldkit/agent'
+import type { Agent } from 'foldkit-agent'
 
 /**
  * The bound contract, with its capability maps left open.
@@ -14,7 +14,7 @@ export type Definition = Agent.Definition<any, any, any, any, any>
 /**
  * The JSON-RPC envelope A2A uses.
  *
- * Deliberately a local copy rather than shared with `@foldkit/agent-mcp`: two
+ * Deliberately a local copy rather than shared with `foldkit-agent-mcp`: two
  * protocols that happen to use the same envelope should not be coupled through
  * it.
  */

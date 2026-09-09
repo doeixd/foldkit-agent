@@ -1,4 +1,4 @@
-import type { Agent } from '@foldkit/agent'
+import type { Agent } from 'foldkit-agent'
 import { Effect, Schema } from 'effect'
 import type { StandardSchemaV1 } from 'effect/StandardSchema'
 

@@ -1,5 +1,5 @@
 /**
- * `@foldkit/agent-a2a` -- serves a Foldkit agent contract as an A2A agent.
+ * `foldkit-agent-a2a` -- serves a Foldkit agent contract as an A2A agent.
  *
  * One exposed capability is one skill on the Agent Card, and `message/send`
  * dispatches it as a task. The protocol mapping is transport-free, like the MCP

@@ -1,6 +1,6 @@
 # Todo example
 
-A worked example of `@foldkit/agent`: one state machine, driven by a human and
+A worked example of `foldkit-agent`: one state machine, driven by a human and
 by an agent, exposed to a browser agent through WebMCP.
 
 ```bash

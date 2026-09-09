@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   target: 'es2022',
-  deps: { neverBundle: ['effect', '@foldkit/agent', /^foldkit(\/.*)?$/] },
+  deps: { neverBundle: ['effect', 'foldkit-agent', /^foldkit(\/.*)?$/] },
 })

@@ -1,17 +1,17 @@
-# `@foldkit/agent-mcp`
+# `foldkit-agent-mcp`
 
-Serves a [`@foldkit/agent`](../agent) contract over the Model Context Protocol
+Serves a [`foldkit-agent`](../agent) contract over the Model Context Protocol
 (`2025-06-18`), so an MCP client can use the capabilities an application already
 exposes.
 
 ```bash
-pnpm add @foldkit/agent @foldkit/agent-mcp
+pnpm add foldkit-agent foldkit-agent-mcp
 ```
 
 ## Usage
 
 ```ts
-import { AgentMcp } from '@foldkit/agent-mcp'
+import { AgentMcp } from 'foldkit-agent-mcp'
 
 AgentMcp.stdio({ agent: agentRuntime })
 ```

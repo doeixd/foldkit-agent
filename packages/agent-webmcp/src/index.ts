@@ -1,5 +1,5 @@
 /**
- * `@foldkit/agent-webmcp` -- the browser-native adapter for `@foldkit/agent`.
+ * `foldkit-agent-webmcp` -- the browser-native adapter for `foldkit-agent`.
  *
  * WebMCP runs in the page itself, so an exposed Message becomes a tool whose
  * `execute` dispatches directly into the same live Foldkit Runtime the human is

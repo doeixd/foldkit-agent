@@ -1,4 +1,4 @@
-import type { Agent } from '@foldkit/agent'
+import type { Agent } from 'foldkit-agent'
 import { type Handler, PROTOCOL_VERSION, handler } from './handler.js'
 import { type Notification, code, failure, isIncoming, isRequest } from './jsonRpc.js'
 
@@ -8,7 +8,7 @@ import { type Notification, code, failure, isIncoming, isRequest } from './jsonR
  * A transport passes this instead of the parsed value so the handler can answer
  * with -32700 rather than the -32600 an absent body earns.
  */
-export const UNPARSEABLE_BODY: unique symbol = Symbol.for('@foldkit/agent-mcp/UnparseableBody')
+export const UNPARSEABLE_BODY: unique symbol = Symbol.for('foldkit-agent-mcp/UnparseableBody')
 
 /** A transport-neutral request, so this can sit behind any HTTP server. */
 export interface HttpRequest {

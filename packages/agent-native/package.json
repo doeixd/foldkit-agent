@@ -1,5 +1,5 @@
 {
-  "name": "@foldkit/agent-native",
+  "name": "foldkit-agent-native",
   "version": "0.0.0",
   "description": "Prototype: compiles a Foldkit agent contract into Agent Native actions.",
   "type": "module",
@@ -31,12 +31,12 @@
     "typecheck": "tsc -b"
   },
   "peerDependencies": {
-    "@foldkit/agent": "workspace:^",
+    "foldkit-agent": "workspace:^",
     "effect": "^4.0.0-rc.112",
     "foldkit": "^0.158.2"
   },
   "devDependencies": {
-    "@foldkit/agent": "workspace:*",
+    "foldkit-agent": "workspace:*",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
     "tsdown": "^0.23.0",

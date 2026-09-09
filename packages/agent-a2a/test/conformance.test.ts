@@ -8,9 +8,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { Agent } from '@foldkit/agent'
-import { AgentA2a } from '@foldkit/agent-a2a'
-import type { Response } from '@foldkit/agent-a2a'
+import { Agent } from 'foldkit-agent'
+import { AgentA2a } from 'foldkit-agent-a2a'
+import type { Response } from 'foldkit-agent-a2a'
 import { Duration, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'

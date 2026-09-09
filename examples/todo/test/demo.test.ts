@@ -1,4 +1,4 @@
-import { Agent } from '@foldkit/agent'
+import { Agent } from 'foldkit-agent'
 import { Effect, Option } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { AppAgent, bindAgent } from '../src/agent.js'

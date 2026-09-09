@@ -1,7 +1,7 @@
 {
-  "name": "@foldkit/agent-mcp",
+  "name": "foldkit-agent-mcp",
   "version": "0.1.0",
-  "description": "External MCP adapter for @foldkit/agent. Serves a Foldkit agent contract over the Model Context Protocol.",
+  "description": "External MCP adapter for foldkit-agent. Serves a Foldkit agent contract over the Model Context Protocol.",
   "type": "module",
   "license": "MIT",
   "author": "Patrick Glenn <doeixd@gmail.com>",
@@ -31,12 +31,12 @@
     "typecheck": "tsc -b"
   },
   "peerDependencies": {
-    "@foldkit/agent": "workspace:^",
+    "foldkit-agent": "workspace:^",
     "effect": "^4.0.0-rc.112",
     "foldkit": "^0.158.2"
   },
   "devDependencies": {
-    "@foldkit/agent": "workspace:*",
+    "foldkit-agent": "workspace:*",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
     "tsdown": "^0.23.0",

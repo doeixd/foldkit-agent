@@ -1,4 +1,4 @@
-import type { Agent } from '@foldkit/agent'
+import type { Agent } from 'foldkit-agent'
 import { type Message, type Model, initialModel, update } from './app.js'
 
 /**

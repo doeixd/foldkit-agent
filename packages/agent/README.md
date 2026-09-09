@@ -1,4 +1,4 @@
-# `@foldkit/agent`
+# `foldkit-agent`
 
 A thin, Schema-first agent layer for Foldkit. It adds two projections and
 nothing else:
@@ -16,10 +16,13 @@ See the [proposal](../../README.md) for the design rationale, and
 ## Install
 
 ```bash
-pnpm add @foldkit/agent
+pnpm add foldkit-agent
 ```
 
 `foldkit` and `effect` are peer dependencies.
+
+A community package, not affiliated with or endorsed by the Foldkit
+maintainers.
 
 ## Usage
 
@@ -54,7 +57,7 @@ const Message = defineMessageUnion({
 Bind the constructors to your Model, then declare the contract:
 
 ```ts
-import { Agent } from '@foldkit/agent'
+import { Agent } from 'foldkit-agent'
 import { Option, Schema } from 'effect'
 
 const TodoAgent = Agent.forModel<Model>()

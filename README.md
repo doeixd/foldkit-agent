@@ -1,4 +1,4 @@
-# `@foldkit/agent`
+# `foldkit-agent`
 
 > A thin, Schema-first agent layer for Foldkit.
 >
@@ -29,13 +29,17 @@ implemented in this repository:
 
 | Package | What it is |
 | --- | --- |
-| [`@foldkit/agent`](./packages/agent) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
-| [`@foldkit/agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
-| [`@foldkit/agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
-| [`@foldkit/agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
+| [`foldkit-agent`](./packages/agent) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
+| [`foldkit-agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
+| [`foldkit-agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
+| [`foldkit-agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
 
 It is deliberately built on Foldkit's existing architecture rather than
 introducing a second application-action system.
+
+These are community packages, published unscoped as Foldkit itself is. They are
+not affiliated with or endorsed by the Foldkit maintainers, and the names are
+theirs for the asking.
 
 One part of the original proposal cannot be built from outside Foldkit. As of
 `v0.158.2`, `Runtime.makeApplication` accepts no `agent` option and its runtime
@@ -143,7 +147,7 @@ browser agent
       ↓
 document.modelContext
       ↓
-@foldkit/agent-webmcp
+foldkit-agent-webmcp
       ↓
 current Foldkit Runtime
       ↓
@@ -166,7 +170,7 @@ Foldkit already gives us the important pieces:
 | `Command` | What effectful work follows |
 | `Schema` | Machine-readable runtime contract |
 
-`@foldkit/agent` adds two projections:
+`foldkit-agent` adds two projections:
 
 ```text
 Model
@@ -193,13 +197,13 @@ The core package does **not** make MCP or WebMCP the source of truth. Foldkit re
 # Installation
 
 ```bash
-pnpm add @foldkit/agent
+pnpm add foldkit-agent
 ```
 
 Browser-native WebMCP:
 
 ```bash
-pnpm add @foldkit/agent @foldkit/agent-webmcp
+pnpm add foldkit-agent foldkit-agent-webmcp
 ```
 
 `foldkit` and `effect` are peer dependencies. Foldkit `0.158.2` peer-depends on
@@ -208,7 +212,7 @@ pnpm add @foldkit/agent @foldkit/agent-webmcp
 External MCP:
 
 ```bash
-pnpm add @foldkit/agent @foldkit/agent-mcp
+pnpm add foldkit-agent foldkit-agent-mcp
 ```
 
 # Quick start
@@ -261,7 +265,7 @@ Model from a `select` or `available` callback alone, so fixing it once removes
 the annotation from every call site:
 
 ```ts
-import { Agent } from "@foldkit/agent"
+import { Agent } from "foldkit-agent"
 
 const TodoAgent = Agent.forModel<Model>()
 ```
@@ -1058,13 +1062,13 @@ transport, and invocation id.
 # WebMCP adapter
 
 ```text
-@foldkit/agent-webmcp
+foldkit-agent-webmcp
 ```
 
 Minimal usage:
 
 ```ts
-import { AgentWebMcp } from "@foldkit/agent-webmcp"
+import { AgentWebMcp } from "foldkit-agent-webmcp"
 
 const registration = AgentWebMcp.register({ agent: agentRuntime })
 ```
@@ -1152,10 +1156,10 @@ This is a particularly natural consequence of TEA: **tool availability itself be
 WebMCP is still experimental and evolving. Foldkit core should not depend on it.
 
 ```text
-@foldkit/agent
+foldkit-agent
   = stable application capability model
 
-@foldkit/agent-webmcp
+foldkit-agent-webmcp
   = current browser protocol interpretation
 ```
 
@@ -1164,7 +1168,7 @@ That lets the browser API change without forcing the Foldkit agent contract to c
 # External MCP adapter
 
 ```text
-@foldkit/agent-mcp
+foldkit-agent-mcp
 ```
 
 The contract is protocol-neutral, so this adapter reads the same descriptors the
@@ -1174,7 +1178,7 @@ WebMCP one does. The protocol mapping is a transport-free handler; `stdio` and
 Conceptually:
 
 ```ts
-import { AgentMcp } from "@foldkit/agent-mcp"
+import { AgentMcp } from "foldkit-agent-mcp"
 
 AgentMcp.stdio({ agent: agentRuntime })
 ```
@@ -1230,7 +1234,7 @@ The existing DevTools MCP demonstrates a related topology during development, bu
 
 # Optional Agent Native adapter: best of both worlds
 
-`@foldkit/agent` should remain independent of Agent Native, but it can optionally use Agent Native as a **runtime/protocol interpreter** for infrastructure that Agent Native already implements well.
+`foldkit-agent` should remain independent of Agent Native, but it can optionally use Agent Native as a **runtime/protocol interpreter** for infrastructure that Agent Native already implements well.
 
 The dependency direction matters:
 
@@ -1239,7 +1243,7 @@ The dependency direction matters:
                      │
              Model + Message
                      │
-              @foldkit/agent
+              foldkit-agent
                      │
               Agent.Definition
                      │
@@ -1255,17 +1259,17 @@ The dependency direction matters:
 Foldkit remains the source of truth. Agent Native does **not** become a second application model.
 
 A prototype of this exists on the `prototype/agent-native` branch as
-`@foldkit/agent-native`. It is private and only partly verified against the
+`foldkit-agent-native`. It is private and only partly verified against the
 framework, so it is not part of the published set:
 
 ```text
-@foldkit/agent-native
+foldkit-agent-native
 ```
 
 with an API such as:
 
 ```ts
-import { AgentNative } from "@foldkit/agent-native"
+import { AgentNative } from "foldkit-agent-native"
 import { registerPackageActions } from "@agent-native/core/server"
 
 registerPackageActions(
@@ -1360,7 +1364,7 @@ Message
 
 Routing that through Agent Native would add indirection without solving a problem.
 
-## Why not make `@foldkit/agent` just an Agent Native wrapper?
+## Why not make `foldkit-agent` just an Agent Native wrapper?
 
 Agent Native is intentionally action-first: an Action is the canonical application capability. Foldkit already has a stronger native abstraction for interactive applications: the state machine itself.
 
@@ -1388,9 +1392,9 @@ This gives Foldkit the benefits of Agent Native's existing ecosystem without giv
 
 A sensible implementation order would be:
 
-1. keep `@foldkit/agent` tiny and independent;
+1. keep `foldkit-agent` tiny and independent;
 2. implement WebMCP directly as the first adapter;
-3. prototype `@foldkit/agent-native` for remote MCP/A2A/auth/CLI infrastructure;
+3. prototype `foldkit-agent-native` for remote MCP/A2A/auth/CLI infrastructure;
 4. only build native replacements where Agent Native is too tightly coupled to its own application architecture.
 
 # In-app agents
@@ -1418,7 +1422,7 @@ invocation can be omitted:
 agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id })
 ```
 
-# DevTools MCP vs `@foldkit/agent`
+# DevTools MCP vs `foldkit-agent`
 
 These solve different problems.
 
@@ -1438,7 +1442,7 @@ Broad debugging capabilities may include:
 - the full configured Message Schema;
 - arbitrary Schema-valid Message dispatch.
 
-## `@foldkit/agent`
+## `foldkit-agent`
 
 Purpose:
 
@@ -1458,7 +1462,7 @@ It exposes only:
 DevTools MCP
   = broad debugging access to a running Runtime
 
-@foldkit/agent
+foldkit-agent
   = narrow application-defined capability access
 ```
 
@@ -1586,7 +1590,7 @@ Adapters dispatch Messages. They do not reimplement application behavior.
 
 # Non-goals
 
-`@foldkit/agent` is not intended to:
+`foldkit-agent` is not intended to:
 
 - replace `update`;
 - replace Commands;
@@ -1747,11 +1751,11 @@ WebMCP is particularly compelling because it can expose these capabilities direc
 ## Repository
 
 ```text
-packages/agent          @foldkit/agent
-packages/agent-webmcp   @foldkit/agent-webmcp
-packages/agent-mcp      @foldkit/agent-mcp
-packages/agent-a2a      @foldkit/agent-a2a
-packages/agent-native   @foldkit/agent-native (prototype, unpublished)
+packages/agent          foldkit-agent
+packages/agent-webmcp   foldkit-agent-webmcp
+packages/agent-mcp      foldkit-agent-mcp
+packages/agent-a2a      foldkit-agent-a2a
+packages/agent-native   foldkit-agent-native (prototype, unpublished)
 examples/todo           a worked example, end to end
 ```
 

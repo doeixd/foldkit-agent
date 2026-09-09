@@ -1,6 +1,6 @@
-# `@foldkit/agent-webmcp`
+# `foldkit-agent-webmcp`
 
-The browser-native adapter for [`@foldkit/agent`](../agent). It projects exposed
+The browser-native adapter for [`foldkit-agent`](../agent). It projects exposed
 Foldkit Messages into Chrome's experimental WebMCP Imperative API.
 
 WebMCP runs in the page itself, so a tool's `execute` dispatches directly into
@@ -8,20 +8,20 @@ the same live Foldkit Runtime the human is already using — no DOM automation,
 and no external browser-session bridge.
 
 ```text
-browser agent -> document.modelContext -> @foldkit/agent-webmcp
+browser agent -> document.modelContext -> foldkit-agent-webmcp
               -> Foldkit AgentRuntime  -> Message -> update -> Model + Commands
 ```
 
 ## Install
 
 ```bash
-pnpm add @foldkit/agent @foldkit/agent-webmcp
+pnpm add foldkit-agent foldkit-agent-webmcp
 ```
 
 ## Usage
 
 ```ts
-import { AgentWebMcp } from '@foldkit/agent-webmcp'
+import { AgentWebMcp } from 'foldkit-agent-webmcp'
 
 const registration = AgentWebMcp.register({ agent: agentRuntime })
 ```

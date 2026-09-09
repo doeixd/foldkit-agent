@@ -1,5 +1,5 @@
-import { Agent } from '@foldkit/agent'
-import { AgentMcp, type HttpRequest, type HttpResponse, type SseEvent } from '@foldkit/agent-mcp'
+import { Agent } from 'foldkit-agent'
+import { AgentMcp, type HttpRequest, type HttpResponse, type SseEvent } from 'foldkit-agent-mcp'
 import { Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

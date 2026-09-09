@@ -1,5 +1,5 @@
 {
-  "name": "@foldkit/agent-example-todo",
+  "name": "foldkit-agent-example-todo",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,8 +8,8 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@foldkit/agent": "workspace:*",
-    "@foldkit/agent-webmcp": "workspace:*"
+    "foldkit-agent": "workspace:*",
+    "foldkit-agent-webmcp": "workspace:*"
   },
   "devDependencies": {
     "effect": "4.0.0-rc.112",

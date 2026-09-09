@@ -1,5 +1,5 @@
-import { Agent } from '@foldkit/agent'
-import { AgentMcp } from '@foldkit/agent-mcp'
+import { Agent } from 'foldkit-agent'
+import { AgentMcp } from 'foldkit-agent-mcp'
 import { Option, Schema } from 'effect'
 import * as HttpEffect from 'effect/unstable/http/HttpEffect'
 import { defineMessageUnion } from 'foldkit/message'

@@ -1,4 +1,4 @@
-import type { Agent } from '@foldkit/agent'
+import type { Agent } from 'foldkit-agent'
 import { Effect } from 'effect'
 import {
   type Id,

@@ -1,5 +1,5 @@
 {
-  "name": "@foldkit/agent",
+  "name": "foldkit-agent",
   "version": "0.1.0",
   "description": "A thin, Schema-first agent layer for Foldkit. Project a Foldkit Model and Message union into a protocol-neutral agent contract.",
   "type": "module",

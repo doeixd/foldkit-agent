@@ -1,5 +1,5 @@
-import { Agent } from '@foldkit/agent'
-import { AgentNative } from '@foldkit/agent-native'
+import { Agent } from 'foldkit-agent'
+import { AgentNative } from 'foldkit-agent-native'
 import { Duration, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { beforeEach, describe, expect, it } from 'vitest'

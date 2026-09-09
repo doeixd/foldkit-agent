@@ -16,7 +16,7 @@ import type { AnyMessage } from './types.js'
 import type { MessageUnion } from 'foldkit/message'
 
 /**
- * The `@foldkit/agent` constructors with `Model` and `Principal` already fixed.
+ * The `foldkit-agent` constructors with `Model` and `Principal` already fixed.
  *
  * Each signature mirrors the free function of the same name; only the Model is
  * no longer inferred.
