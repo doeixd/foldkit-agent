@@ -20,7 +20,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "format": "prettier --write \"**/*.{ts,json,yaml}\"",
-    "format:check": "prettier --check \"**/*.{ts,json,yaml}\""
+    "format:check": "prettier --check \"**/*.{ts,json,yaml}\"",
+    "release": "pnpm build && pnpm -r --filter './packages/*' publish --access public"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -820,26 +820,26 @@ RequestedDeleteTodo: {
 }
 ```
 
-Completion is **not executed** in this version. The contract is recorded and
-exposed through introspection, and validated dispatch remains the completion
-boundary:
+Dispatch waits for a completing Message when a variant declares one, and reports
+how the operation finished. Without a completion contract, successful validated
+dispatch remains the boundary:
 
 ```ts
-interface Completion<Request, Result> {
+interface Completion<Request, Success extends AnyMessage, Failure extends AnyMessage> {
   readonly success:
-    | MessageConstructor<Result>
-    | ReadonlyArray<MessageConstructor<Result>>
+    | MessageConstructor<Success>
+    | ReadonlyArray<MessageConstructor<Success>>
 
   readonly failure?:
-    | MessageConstructor<unknown>
-    | ReadonlyArray<MessageConstructor<unknown>>
+    | MessageConstructor<Failure>
+    | ReadonlyArray<MessageConstructor<Failure>>
 
   readonly correlate?: (
     request: Request,
-    result: Result,
+    result: Success | Failure,
   ) => boolean
 
-  readonly timeout?: Duration.DurationInput
+  readonly timeout?: Duration.Input
 }
 ```
 
@@ -1615,12 +1615,14 @@ Agent.define(...)
 Agent.bind(...)
 ```
 
-Deferred, as planned:
+Shipped since, in the order the plan set out: automatic docs generation
+(`Agent.toMarkdown`, `Agent.toManifest`), async completion tracking, MCP over
+stdio and Streamable HTTP, an audit log, and A2A.
 
-- async completion tracking (the contract is recorded, not executed);
-- A2A;
-- automatic docs generation;
-- history/replay.
+Deferred still:
+
+- Model replay. The audit log records what was invoked and refused, which is
+  accountability, not a Model history to replay.
 
 Shipped rather than deferred, because they cost little: custom input mapping
 (`input` + `toMessage`) and named resources.
@@ -1765,7 +1767,13 @@ pnpm test        # vitest
 pnpm typecheck   # tsc -b
 pnpm build       # tsdown
 pnpm demo        # run examples/todo
+pnpm release     # build, then publish every public package
 ```
+
+Publish with **pnpm**, not npm. The adapters declare `foldkit-agent` as a
+`workspace:^` peer dependency, which pnpm rewrites to a real range
+(`^0.1.0`) when it packs. `npm publish` would ship the `workspace:` protocol
+verbatim, and every install of that version would fail.
 
 [`examples/todo`](./examples/todo) is the shortest path to seeing this work: one
 state machine driven by a human and by an agent, exposed through WebMCP, with
