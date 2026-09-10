@@ -16,6 +16,7 @@ export {
   InvalidReplicaHistoryError,
   ReplicaClosedError,
   StorageError,
+  UnsupportedClockVersionError,
   UnsupportedReplicaVersionError,
   WrongReplicaStorageError,
   type ReplicaError,

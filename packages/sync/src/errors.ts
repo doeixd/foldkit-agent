@@ -6,6 +6,15 @@ export class StorageError extends Schema.TaggedError<StorageError>()('StorageErr
   cause: Schema.optional(Schema.Unknown),
 }) {}
 
+/** The stored clock state targets a schema version this build does not support. */
+export class UnsupportedClockVersionError extends Schema.TaggedError<UnsupportedClockVersionError>()(
+  'UnsupportedClockVersionError',
+  {
+    schemaVersion: Schema.NullOr(Schema.Number),
+    message: Schema.String,
+  },
+) {}
+
 /** The storage holds a different replica's state. */
 export class WrongReplicaStorageError extends Schema.TaggedError<WrongReplicaStorageError>()(
   'WrongReplicaStorageError',

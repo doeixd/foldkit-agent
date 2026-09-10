@@ -238,7 +238,6 @@ describe('a durable LWW clock', () => {
   it.each([
     ['document', { ...initial, documentId: 'other' }],
     ['replica', { ...initial, replicaId: 'b' }],
-    ['version', { ...initial, schemaVersion: 2 }],
     ['counter', { ...initial, revision: 0.5 }],
     ['extra field', { ...initial, extra: true }],
   ])('closes storage when saved state has invalid %s', (_, state) =>
@@ -252,6 +251,22 @@ describe('a durable LWW clock', () => {
       ),
     ),
   )
+
+  it('reports an unsupported newer schema version without overwriting the state', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const state = { ...initial, schemaVersion: 2 }
+          const saved = memory(state)
+          expect(yield* Effect.result(open(saved.storage))).toMatchObject({
+            _tag: 'Failure',
+            failure: { _tag: 'UnsupportedClockVersionError', schemaVersion: 2 },
+          })
+          expect(yield* saved.storage.load()).toEqual(state)
+          expect(saved.closes()).toBe(1)
+        }),
+      ),
+    ))
 
   it('closes storage when initialization cannot persist its identity', () =>
     Effect.runPromise(

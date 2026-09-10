@@ -1,5 +1,5 @@
 import { Effect, Exit, Ref, Schema, SynchronizedRef } from 'effect'
-import { StorageError } from './errors.js'
+import { StorageError, UnsupportedClockVersionError } from './errors.js'
 import { DocumentId, ReplicaId } from './ids.js'
 import type { Storage } from './indexedDb.js'
 
@@ -13,8 +13,11 @@ const Stamp = Schema.Struct({
   replicaId: ReplicaId,
 })
 
+/** The persisted clock format. A bump must handle the older value explicitly. */
+const CLOCK_SCHEMA_VERSION = 1
+
 const ClockState = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literal(CLOCK_SCHEMA_VERSION),
   documentId: DocumentId,
   replicaId: ReplicaId,
   // The high-water counter also serves as the storage's CAS revision.
@@ -38,6 +41,25 @@ const clockError = (message: string, cause: unknown): StorageError =>
     cause,
   })
 
+const VersionProbe = Schema.Struct({ schemaVersion: Schema.optional(Schema.Number) })
+/**
+ * Tells a version this build does not understand apart from malformed data, so
+ * the caller gets an actionable failure and the stored state is preserved.
+ */
+const unsupportedVersion = (input: unknown): UnsupportedClockVersionError | undefined => {
+  let found: { readonly schemaVersion?: number | undefined }
+  try {
+    found = Schema.decodeUnknownSync(VersionProbe)(input)
+  } catch {
+    return undefined
+  }
+  if (found.schemaVersion === CLOCK_SCHEMA_VERSION) return undefined
+  return new UnsupportedClockVersionError({
+    schemaVersion: found.schemaVersion ?? null,
+    message: `Stored clock uses schema ${found.schemaVersion ?? '?'}; this build supports ${CLOCK_SCHEMA_VERSION}`,
+  })
+}
+
 /**
  * Opens a durable clock over the caller's storage.
  *
@@ -50,15 +72,21 @@ export const openLwwClock = (options: {
   readonly documentId: DocumentId
   readonly replicaId: ReplicaId
   readonly storage: Storage<LwwClockState>
-}): Effect.Effect<LwwClock, StorageError> =>
+}): Effect.Effect<LwwClock, StorageError | UnsupportedClockVersionError> =>
   Effect.gen(function* () {
     const { documentId, replicaId, storage } = options
     yield* Effect.annotateCurrentSpan({ documentId, replicaId })
-    const initial = decodeClock({ schemaVersion: 1, documentId, replicaId, revision: 0 })
+    const initial = decodeClock({
+      schemaVersion: CLOCK_SCHEMA_VERSION,
+      documentId,
+      replicaId,
+      revision: 0,
+    })
     const saved = yield* storage.load()
     const state = yield* Effect.try({
       try: () => (saved === undefined ? initial : decodeClock(saved)),
-      catch: cause => clockError('Stored clock state is invalid', cause),
+      catch: cause =>
+        unsupportedVersion(saved) ?? clockError('Stored clock state is invalid', cause),
     })
     if (state.documentId !== documentId || state.replicaId !== replicaId)
       return yield* new StorageError({ message: 'Wrong clock storage' })
