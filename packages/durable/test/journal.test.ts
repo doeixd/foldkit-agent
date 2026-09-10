@@ -1,12 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Config, Deferred, Effect, Fiber, Option, Stream, type Scope } from 'effect'
+import { Config, Deferred, Effect, Fiber, Metric, Option, Stream, type Scope } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   JournalService,
   actorId,
   documentId,
+  journalMetrics,
   makeJournal,
   makeJournalLayer,
   opId,
@@ -500,6 +501,41 @@ describe('the effect ledger', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('counts a coalesced run once', () =>
+    withJournal(function* (journal) {
+      const runsBefore = yield* Metric.value(journalMetrics.effectRuns)
+      const coalescedBefore = yield* Metric.value(journalMetrics.effectRunsCoalesced)
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let executions = 0
+      const run = () =>
+        journal.runEffect(
+          'shared',
+          Effect.gen(function* () {
+            executions += 1
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(release)
+            return 'done'
+          }),
+        )
+
+      const first = yield* Effect.forkScoped(run())
+      yield* Deferred.await(started)
+      const second = yield* Effect.forkScoped(run())
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(release, undefined)
+      yield* Effect.all([Fiber.join(first), Fiber.join(second)])
+
+      expect(executions).toBe(1)
+      // The owner run is counted once and the joined call as coalesced, never
+      // as a second execution.
+      expect((yield* Metric.value(journalMetrics.effectRuns)).count - runsBefore.count).toBe(1)
+      expect(
+        (yield* Metric.value(journalMetrics.effectRunsCoalesced)).count - coalescedBefore.count,
+      ).toBe(1)
+    }))
 })
 
 describe('the journal layer', () => {

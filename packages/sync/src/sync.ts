@@ -1,4 +1,4 @@
-import { Effect, Ref, Schema, SynchronizedRef } from 'effect'
+import { Effect, Metric, Ref, Schema, SynchronizedRef } from 'effect'
 import {
   CheckpointRegressionError,
   CommittedOrderError,
@@ -50,6 +50,16 @@ const decodeCommitted = Schema.decodeUnknownSync(CommittedSchema, { onExcessProp
  * growing without limit on a log that is never checkpointed.
  */
 const COMMITTED_ID_WINDOW = 1024
+
+/** Counters and a histogram an application can scrape. */
+export const syncMetrics = {
+  exchanges: Metric.counter('foldkit_sync_exchanges_total'),
+  applied: Metric.counter('foldkit_sync_commits_applied_total'),
+  checkpoints: Metric.counter('foldkit_sync_checkpoints_adopted_total'),
+  exchangePending: Metric.histogram('foldkit_sync_exchange_pending', {
+    boundaries: [1, 4, 16, 64, 256, 1024],
+  }),
+}
 
 /** Keeps the storage driver's message visible on the typed failure. */
 const storageError = (context: string, cause: unknown): StorageError =>
@@ -321,14 +331,26 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             yield* persist(next, current)
             return [undefined, next] as const
           }),
-        )
+        ).pipe(Effect.withSpan('Sync.submit', { attributes: { documentId, replicaId } }))
 
       const synchronize: Replica<Message, Shared>['synchronize'] = Effect.gen(function* () {
         const transport = yield* Transport
         if (yield* Ref.get(closed))
           return yield* new ReplicaClosedError({ message: 'Replica is closed' })
         const sent = yield* SynchronizedRef.get(stateRef)
-        const response = decodeExchange(yield* transport.exchange(sent.cursor, sent.pending))
+        yield* Metric.update(syncMetrics.exchanges, 1)
+        yield* Metric.update(syncMetrics.exchangePending, sent.pending.length)
+        const response = decodeExchange(
+          yield* transport.exchange(sent.cursor, sent.pending).pipe(
+            Effect.tapError(error =>
+              Effect.logWarning('sync exchange failed', {
+                documentId,
+                replicaId,
+                error: error.message,
+              }),
+            ),
+          ),
+        )
         yield* SynchronizedRef.modifyEffect(stateRef, current =>
           Effect.gen(function* () {
             // A `close` during the exchange must not persist its result.
@@ -349,6 +371,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                 })
               committed = response.checkpoint.model
               cursor = response.checkpoint.cursor
+              yield* Metric.update(syncMetrics.checkpoints, 1)
+              yield* Effect.logDebug('sync checkpoint adopted', { documentId, replicaId, cursor })
             }
             const acknowledged = new Set(response.acknowledged ?? [])
             const rejected = new Set(response.rejected)
@@ -359,6 +383,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                   opId: id,
                   message: 'Server rejected an operation that was not sent',
                 })
+            let applied = 0
             for (const raw of response.operations) {
               const { committed: operation, message } = yield* Effect.try({
                 try: () => decodeCommittedOperation(raw, documentId),
@@ -375,7 +400,9 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
               committed = definition.replay(committed, message)
               ids.add(operation.opId)
               cursor = operation.serverSequence
+              applied += 1
             }
+            if (applied > 0) yield* Metric.update(syncMetrics.applied, applied)
             const next = yield* Effect.try({
               try: () =>
                 decodeState({
@@ -398,7 +425,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             return [undefined, next] as const
           }),
         )
-      })
+      }).pipe(Effect.withSpan('Sync.synchronize', { attributes: { documentId } }))
 
       return {
         shared: Effect.map(SynchronizedRef.get(stateRef), optimistic),
@@ -411,7 +438,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           yield* Effect.sync(() => storage.close())
         }),
       }
-    })
+    }).pipe(Effect.withSpan('Sync.openReplica', { attributes: { documentId, replicaId } }))
 
   return {
     documentId,

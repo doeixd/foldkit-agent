@@ -49,6 +49,7 @@ export {
 } from './transport.js'
 export {
   defineSync,
+  syncMetrics,
   type Checkpoint,
   type Committed,
   type Exchange,

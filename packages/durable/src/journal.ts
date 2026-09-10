@@ -6,6 +6,7 @@ import {
   Effect,
   Exit,
   Layer,
+  Metric,
   Option,
   PubSub,
   Stream,
@@ -25,6 +26,15 @@ import {
 } from './errors.js'
 
 const SCHEMA_VERSION = 1
+
+/** Counters an application can scrape; the default registry already collects them. */
+export const journalMetrics = {
+  appends: Metric.counter('foldkit_durable_appends_total'),
+  compactions: Metric.counter('foldkit_durable_compactions_total'),
+  /** Owner runs only; a joined or recorded call is counted as coalesced instead. */
+  effectRuns: Metric.counter('foldkit_durable_effect_runs_total'),
+  effectRunsCoalesced: Metric.counter('foldkit_durable_effect_runs_coalesced_total'),
+}
 
 /** An operation as the journal committed it, with its authoritative order and actor. */
 export interface Committed<Operation> {
@@ -405,9 +415,17 @@ const makeShape = <Operation, Snapshot, Principal>(
         ),
       )
 
-    // Publish only after the transaction committed, so a subscriber never
-    // observes a change that could still roll back.
-    if (outcome.changed) yield* PubSub.publish(changes, key)
+    // Publish and observe only after the transaction committed, so a subscriber
+    // never sees a change that could still roll back.
+    if (outcome.changed) {
+      yield* Metric.update(journalMetrics.appends, 1)
+      yield* Effect.logDebug('journal append', {
+        key,
+        opId,
+        sequence: outcome.committed.sequence,
+      })
+      yield* PubSub.publish(changes, key)
+    }
     return outcome.committed
   })
 
@@ -441,6 +459,8 @@ const makeShape = <Operation, Snapshot, Principal>(
         error instanceof InvalidCompactionError ? error : journalError('Could not compact', error),
       ),
     )
+    yield* Metric.update(journalMetrics.compactions, 1)
+    yield* Effect.logDebug('journal compact', { key, through })
   })
 
   const effect: Shape['effect'] = Effect.fn('Journal.effect')(function* (key: string) {
@@ -502,14 +522,19 @@ const makeShape = <Operation, Snapshot, Principal>(
           return [{ deferred: created, owner: true }, next]
         },
       )
-      if (!entry.owner)
+      if (!entry.owner) {
+        yield* Metric.update(journalMetrics.effectRunsCoalesced, 1)
         return yield* Deferred.await(entry.deferred) as Effect.Effect<Result, E | JournalError>
+      }
 
       return yield* Effect.gen(function* () {
         const recorded = yield* effect(key)
-        if (Option.isSome(recorded) && recorded.value.status === 'succeeded')
+        if (Option.isSome(recorded) && recorded.value.status === 'succeeded') {
+          yield* Metric.update(journalMetrics.effectRunsCoalesced, 1)
           return recorded.value.result as Result
+        }
 
+        yield* Metric.update(journalMetrics.effectRuns, 1)
         yield* record(key, 'pending', undefined, undefined)
         return yield* run.pipe(
           Effect.tap(value => record(key, 'succeeded', value, undefined)),

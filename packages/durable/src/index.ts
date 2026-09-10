@@ -17,9 +17,10 @@ export {
   OperationRejectedError,
 } from './errors.js'
 export {
+  JournalService,
+  journalMetrics,
   makeJournal,
   makeJournalLayer,
-  JournalService,
   type AppendError,
   type AuthorizationRequest,
   type Committed,
