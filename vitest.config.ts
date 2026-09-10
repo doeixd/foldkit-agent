@@ -19,6 +19,7 @@ export default defineConfig({
       'foldkit-agent-webmcp': fileURLToPath(
         new URL('./packages/agent-webmcp/src/index.ts', import.meta.url),
       ),
+      'foldkit-durable': fileURLToPath(new URL('./packages/durable/src/index.ts', import.meta.url)),
     },
   },
   test: {
