@@ -111,6 +111,11 @@ export interface SocketLike {
   close(): void
   onMessage(listener: (data: string) => void): () => void
   onClose(listener: () => void): () => void
+  /**
+   * Optional. When provided, exchanges wait for it before sending, so a
+   * transport can connect asynchronously. Absent means already connected.
+   */
+  onOpen?(listener: () => void): () => void
 }
 
 export interface SocketOptions {
@@ -124,6 +129,14 @@ const nativeSocket = (url: string): SocketLike => {
   return {
     send: data => socket.send(data),
     close: () => socket.close(),
+    onOpen: listener => {
+      if (socket.readyState === WebSocket.OPEN) {
+        listener()
+        return () => {}
+      }
+      socket.addEventListener('open', listener)
+      return () => socket.removeEventListener('open', listener)
+    },
     onMessage: listener => {
       const handler = (event: MessageEvent): void => listener(String(event.data))
       socket.addEventListener('message', handler)
@@ -153,6 +166,13 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
       Effect.map(socket => {
         const pending = new Map<string, (effect: Effect.Effect<unknown, TransportError>) => void>()
         let nextId = 0
+        // A connecting socket cannot send yet; hold exchanges until it opens.
+        const queued: Array<() => void> = []
+        let ready = socket.onOpen === undefined
+        const offOpen = socket.onOpen?.(() => {
+          ready = true
+          for (const send of queued.splice(0)) send()
+        })
         socket.onMessage(data => {
           let reply: ExchangeReply
           try {
@@ -170,6 +190,7 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
           )
         })
         socket.onClose(() => {
+          offOpen?.()
           for (const [id, resume] of pending) {
             pending.delete(id)
             resume(Effect.fail(new TransportError({ message: 'transport closed' })))
@@ -178,11 +199,15 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
         return {
           exchange: (cursor, pendingOps) =>
             Effect.callback<unknown, TransportError>(resume => {
-              const id = String(nextId++)
-              pending.set(id, resume)
-              socket.send(
-                JSON.stringify({ id, cursor, pending: pendingOps } satisfies ExchangeFrame),
-              )
+              const send = (): void => {
+                const id = String(nextId++)
+                pending.set(id, resume)
+                socket.send(
+                  JSON.stringify({ id, cursor, pending: pendingOps } satisfies ExchangeFrame),
+                )
+              }
+              if (ready) send()
+              else queued.push(send)
             }),
         }
       }),

@@ -37,16 +37,17 @@ await replica.synchronize(transport)
   replayed.
 - The transport seam (`Transport`): an Effect service with a loopback layer, a
   bridge to and from the promise client the replica speaks, and a WebSocket
-  client layer. A refusal is an exchange result; only a wire failure is a
-  `TransportError`.
+  client layer that queues until the socket opens. `serveSocket` is the server
+  side of a connection. A refusal is an exchange result; only a wire failure is
+  a `TransportError`.
 
 ## Limits
 
 - IndexedDB is the only storage adapter.
 - It assumes an authoritative, single-writer-per-document server that orders
   operations; there is no peer-to-peer or CRDT merge.
-- Presence ships an in-process channel (`loopbackPresenceChannel`) and the
-  transport ships a loopback layer; a server-side wire handler is not built, so
-  `layerSocket` speaks frames to whatever is on the other end.
+- Presence ships an in-process channel (`loopbackPresenceChannel`). Binding
+  `serveSocket` to a platform WebSocket server is left to the application; the
+  sync example shows a `ws` one.
 - Unpublished: `private` until an application other than the sync spike depends
   on the API.
