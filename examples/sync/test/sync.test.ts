@@ -45,14 +45,17 @@ afterEach(async () => {
   server.close()
 })
 
-describe('the journal', () => {
-  it('atomically persists ordering, idempotency, and its snapshot across restart', async () => {
+// Generic durable-journal and replica behavior lives in packages/durable and
+// packages/sync; these cover how this application's contract is wired to them.
+describe('the journal adapter', () => {
+  it('persists app operations across restart', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'foldkit-journal-'))
     const path = join(directory, 'journal.sqlite')
     const journal = openJournal(path)
     try {
       const first = journal.append(operation('a', 1), principal)
       expect(journal.append(operation('a', 1), principal)).toEqual(first)
+      // Key order in the encoded Message must not affect idempotency.
       expect(
         journal.append(
           {
@@ -86,20 +89,6 @@ describe('the journal', () => {
     }
   })
 
-  it('rejects reuse of an operation identity with different data or actor', () => {
-    server.append(operation('a', 1), principal)
-    expect(() => server.append(operation('a', 1, created('a', 'different')), principal)).toThrow(
-      'identity conflict',
-    )
-    expect(() => server.append(operation('a', 1), { ...principal, actorId: 'another' })).toThrow(
-      'identity conflict',
-    )
-    expect(server.snapshot('todos')).toEqual({
-      cursor: 1,
-      model: { todos: [{ id: 'a', title: 'a' }] },
-    })
-  })
-
   it.each([
     ['schema version', { ...operation('a', 1), schemaVersion: 2 }],
     ['protocol version', { ...operation('a', 1), protocolVersion: 2 }],
@@ -125,56 +114,7 @@ describe('the journal', () => {
     expect(server.snapshot('todos').cursor).toBe(0)
   })
 
-  it('compacts committed payloads while keeping identity and the snapshot', () => {
-    server.append(operation('a', 1, created('a')), principal)
-    server.append(operation('a', 2, created('b')), principal)
-    server.append(operation('a', 3, created('c')), principal)
-    const before = server.snapshot('todos')
-    server.compact('todos', 2)
-
-    // The compacted prefix lives only in the snapshot now.
-    expect(server.read('todos', 0).map(op => op.opId)).toEqual(['a:3'])
-    expect(server.snapshot('todos')).toEqual(before)
-
-    // A retransmission of a compacted operation is still idempotent.
-    expect(server.append(operation('a', 1, created('a')), principal).serverSequence).toBe(1)
-    expect(server.snapshot('todos')).toEqual(before)
-  })
-
-  it('refuses a compaction cursor that moves backwards or past the snapshot', () => {
-    server.append(operation('a', 1, created('a')), principal)
-    expect(() => server.compact('todos', 2)).toThrow('Invalid compaction cursor')
-    server.compact('todos', 1)
-    expect(() => server.compact('todos', 0)).toThrow('Invalid compaction cursor')
-  })
-
-  it('denies an operation the policy refuses and commits nothing', () => {
-    const guarded = openJournal(':memory:', {
-      authorize: ({ principal, message }) =>
-        message._tag !== 'DeletedTodo' || principal.actorId === 'owner',
-    })
-    try {
-      guarded.append(operation('a', 1, created('a')), principal)
-      expect(() =>
-        guarded.append(operation('a', 2, Message.DeletedTodo({ id: 'a' })), {
-          ...principal,
-          actorId: 'guest',
-        }),
-      ).toThrow('refused by authorization')
-
-      // The refusal consumed neither the snapshot nor the operation identity.
-      expect(guarded.snapshot('todos')).toEqual({
-        cursor: 1,
-        model: { todos: [{ id: 'a', title: 'a' }] },
-      })
-      guarded.append(operation('a', 2, Message.DeletedTodo({ id: 'a' })), principal)
-      expect(guarded.snapshot('todos')).toEqual({ cursor: 2, model: { todos: [] } })
-    } finally {
-      guarded.close()
-    }
-  })
-
-  it('authorizes against the authoritative Model, not the operation', () => {
+  it('applies the app policy against the authoritative Model', () => {
     const guarded = openJournal(':memory:', {
       authorize: ({ message, model }) =>
         message._tag !== 'RenamedTodo' || model.todos.some(todo => todo.id === message.id),
@@ -198,14 +138,6 @@ describe('the journal', () => {
     } finally {
       guarded.close()
     }
-  })
-
-  it('records the transport principal as the actor', () => {
-    const committed = server.append(operation('a', 1, created('a')), {
-      ...principal,
-      actorId: 'alice',
-    })
-    expect(committed.actorId).toBe('alice')
   })
 
   it('sends a checkpoint only below the compaction floor', async () => {
@@ -233,42 +165,9 @@ describe('the journal', () => {
       guarded.close()
     }
   })
-
-  it('notifies subscribers after a commit and stops after unsubscribe', () => {
-    const guarded = openJournal(':memory:')
-    try {
-      let notifications = 0
-      const unsubscribe = guarded.subscribe(() => {
-        notifications += 1
-      })
-
-      guarded.appendAsServer(created('a'), principal, 'server')
-      expect(notifications).toBe(1)
-
-      unsubscribe()
-      guarded.appendAsServer(created('b'), principal, 'server')
-      expect(notifications).toBe(1)
-    } finally {
-      guarded.close()
-    }
-  })
-
-  it('keeps committing when a subscriber throws', () => {
-    const guarded = openJournal(':memory:')
-    try {
-      guarded.subscribe(() => {
-        throw new Error('subscriber failed')
-      })
-
-      expect(() => guarded.appendAsServer(created('a'), principal, 'server')).not.toThrow()
-      expect(guarded.snapshot('todos').cursor).toBe(1)
-    } finally {
-      guarded.close()
-    }
-  })
 })
 
-describe('local durability and reconciliation', () => {
+describe('the wired replica', () => {
   it('restores the offline outbox and sequence without persisting local Model fields', async () => {
     const a = await open('a')
     await a.submit(created('first'))
@@ -373,27 +272,6 @@ describe('local durability and reconciliation', () => {
     expect(a.pending().map(op => op.opId)).toEqual(['a:1'])
   })
 
-  it('removes a refused optimistic operation without committing it', async () => {
-    const a = await open('a')
-    await a.submit(created('a'))
-    await a.synchronize(server.transport({ ...principal, canWrite: false }))
-    expect(a.pending()).toEqual([])
-    expect(a.shared()).toEqual({ todos: [] })
-    expect(server.snapshot('todos').cursor).toBe(0)
-  })
-
-  it('refuses a gap in committed history atomically', async () => {
-    const a = await open('a')
-    const first = server.append(operation('a', 1), principal)
-    await expect(
-      a.synchronize({
-        exchange: async () => ({ operations: [{ ...first, serverSequence: 2 }], rejected: [] }),
-      }),
-    ).rejects.toThrow('committed order')
-    expect(a.cursor()).toBe(0)
-    expect(a.shared()).toEqual({ todos: [] })
-  })
-
   it('ignores retransmitted committed operations and refuses work after close', async () => {
     const a = await open('a')
     const committed = server.append(operation('a', 1), principal)
@@ -408,15 +286,8 @@ describe('local durability and reconciliation', () => {
   })
 
   it.each([
-    [
-      'zero sequence',
-      {
-        operations: [{ ...operation('remote', 1), serverSequence: 0, actorId: 'owner' }],
-        rejected: [],
-      },
-    ],
-    ['foreign rejection', { operations: [], rejected: ['other:1'] }],
     ['malformed rejection', { operations: [], rejected: 'a:1' }],
+    ['unknown committed shape', { operations: [{ nope: true }], rejected: [] }],
   ])('refuses a response with %s without changing durable state', async (_, response) => {
     const a = await open('a')
     await a.submit(created('local'))
@@ -446,21 +317,6 @@ describe('local durability and reconciliation', () => {
     expect(a.pending()).toEqual([])
   })
 
-  it('sends the retained tail, not a checkpoint, to a replica above the floor', async () => {
-    server.append(operation('seed', 1, created('a')), principal)
-    const a = await open('a')
-    await a.synchronize(server.transport(principal))
-    expect(a.cursor()).toBe(1)
-
-    server.append(operation('seed', 2, created('b')), principal)
-    server.append(operation('seed', 3, created('c')), principal)
-    server.compact('todos', 1)
-    await a.synchronize(server.transport(principal))
-
-    expect(a.cursor()).toBe(3)
-    expect(a.shared().todos.map(todo => todo.id)).toEqual(['a', 'b', 'c'])
-  })
-
   it('acknowledges a pending operation that compaction already folded in', async () => {
     const a = await open('a')
     await a.submit(created('todo'))
@@ -481,66 +337,6 @@ describe('local durability and reconciliation', () => {
     expect(a.cursor()).toBe(1)
     expect(a.pending()).toEqual([])
     expect(a.shared()).toEqual(server.snapshot('todos').model)
-  })
-
-  it('reaches the same state from a compacted checkpoint as from full replay', async () => {
-    server.append(operation('seed', 1, created('a')), principal)
-    server.append(operation('seed', 2, Message.RenamedTodo({ id: 'a', title: 'first' })), principal)
-    const replayed = await open('replayed')
-    await replayed.synchronize(server.transport(principal))
-
-    server.append(
-      operation('seed', 3, Message.RenamedTodo({ id: 'a', title: 'second' })),
-      principal,
-    )
-    await replayed.synchronize(server.transport(principal))
-    server.compact('todos', 3)
-
-    const checkpointed = await open('checkpointed')
-    await checkpointed.synchronize(server.transport(principal))
-
-    expect(checkpointed.cursor()).toBe(replayed.cursor())
-    expect(checkpointed.shared()).toEqual(replayed.shared())
-  })
-
-  it('refuses a checkpoint older than the replica', async () => {
-    server.append(operation('seed', 1, created('a')), principal)
-    const a = await open('a')
-    await a.synchronize(server.transport(principal))
-    expect(a.cursor()).toBe(1)
-
-    await expect(
-      a.synchronize({
-        exchange: async () => ({
-          operations: [],
-          rejected: [],
-          checkpoint: { cursor: 0, model: { todos: [] } },
-        }),
-      }),
-    ).rejects.toThrow('Checkpoint is behind the replica')
-
-    // The refused exchange left durable state where it was.
-    expect(a.cursor()).toBe(1)
-    expect(a.shared().todos).toEqual([{ id: 'a', title: 'a' }])
-  })
-
-  it('removes an operation the policy refuses instead of committing it', async () => {
-    const guarded = openJournal(':memory:', {
-      authorize: ({ principal }) => principal.actorId === 'owner',
-    })
-    try {
-      const a = await open('a')
-      await a.submit(created('todo'))
-      await a.synchronize(guarded.transport({ ...principal, actorId: 'guest' }))
-
-      // A policy refusal is a rejected entry, not a failed exchange: the outbox
-      // is cleared and the optimistic projection reverts.
-      expect(a.pending()).toEqual([])
-      expect(a.shared()).toEqual({ todos: [] })
-      expect(guarded.snapshot('todos').cursor).toBe(0)
-    } finally {
-      guarded.close()
-    }
   })
 })
 

@@ -118,6 +118,9 @@ describe('a durable journal', () => {
       expect(() => journal.append('todos', { ...add(1), id: 'different' }, principal)).toThrow(
         'Operation identity conflict',
       )
+      expect(() =>
+        journal.append('todos', add(1, 'a'), { actorId: 'other', canWrite: true }),
+      ).toThrow('Operation identity conflict')
       expect(journal.load('todos')).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
     } finally {
       journal.close()
