@@ -2,10 +2,11 @@ import { strict as assert } from 'node:assert'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
 import { Effect } from 'effect'
-import { Message } from './app.js'
+import { Message, type Shared } from './app.js'
 import { indexedDb } from './indexedDb.js'
-import { openJournal } from './journal.js'
+import { openJournal, type Principal } from './journal.js'
 import { openReplica } from './replica.js'
+import { serverAgentHost } from './serverAgent.js'
 
 const factory = new IDBFactory()
 const server = openJournal(':memory:')
@@ -23,36 +24,14 @@ await alice.synchronize(transport)
 await bob.synchronize(transport)
 assert.deepEqual(alice.shared(), bob.shared())
 
+const SyncAgent = Agent.forModel<Shared, Principal>()
 const agent = Agent.bind({
-  definition: Agent.define({
-    messages: Agent.expose(Message, {
+  definition: SyncAgent.define({
+    messages: SyncAgent.expose(Message, {
       RenamedTodo: { name: 'rename_todo', description: 'Rename a shared todo' },
     }),
   }),
-  host: {
-    model: () => server.snapshot('todos').model,
-    dispatch: (message: typeof Message.Type) => {
-      // The agent is its own replica, but has no persisted outbox here. The
-      // document cursor only ever advances, so deriving its sequence from that
-      // keeps each dispatch's identity unique without a second counter to keep
-      // in sync. Hard-coding `agent:1` made the second dispatch collide and the
-      // journal reject it as an identity conflict.
-      const baseCursor = server.snapshot('todos').cursor
-      server.append(
-        {
-          protocolVersion: 1,
-          schemaVersion: 1,
-          documentId: 'todos',
-          replicaId: 'agent',
-          opId: `agent:${baseCursor + 1}`,
-          localSequence: baseCursor + 1,
-          baseCursor,
-          message,
-        },
-        principal,
-      )
-    },
-  },
+  host: serverAgentHost({ journal: server, principal }),
 })
 await Effect.runPromise(
   agent.messages.dispatch('rename_todo', { id: 'a', title: 'Renamed by agent' }),

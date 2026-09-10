@@ -212,3 +212,5 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
     close: () => database.close(),
   }
 }
+
+export type Journal = ReturnType<typeof openJournal>
