@@ -1,7 +1,8 @@
+import { Effect, Exit, Scope } from 'effect'
 import {
-  createJournal,
-  OperationRejectedError,
+  makeJournal,
   type Committed as DurableCommitted,
+  type Journal as DurableJournal,
 } from 'foldkit-durable'
 import type { Committed, Operation, TransportClient } from 'foldkit-sync'
 import { decodeShared, decodeMessage, replay, type Message, type Shared } from './app.js'
@@ -35,38 +36,69 @@ export interface JournalPolicy {
   readonly authorize?: Authorize
   /**
    * Effects a committed operation triggers. Each runs at most once per
-   * operation, keyed by the operation id, so a resend or replay cannot
-   * duplicate it.
+   * operation, keyed by the document and operation id, so a resend or replay
+   * cannot duplicate it.
    */
   readonly effects?: (message: Message) => ReadonlyArray<ServerEffect>
 }
 
+export interface Journal {
+  readonly append: (input: unknown, principal: Principal) => Committed
+  readonly appendAsServer: (message: Message, principal: Principal, producer: string) => Committed
+  readonly settle: (committed: Committed) => Promise<void>
+  readonly read: (documentId: string, after: number) => ReadonlyArray<Committed>
+  readonly compact: (documentId: string, through: number) => void
+  readonly snapshot: (documentId: string) => { cursor: number; model: Shared }
+  readonly subscribe: (listener: (key: string) => void) => () => void
+  readonly transport: (principal: Principal) => TransportClient
+  readonly close: () => void
+}
+
 /**
- * The sync server's journal: the durable package configured for this
- * application's operation envelope and shared Model.
+ * The sync server's journal: the Effect-native durable package configured for
+ * this application, exposed through the synchronous and promise seams the
+ * Foldkit runtime, agent host, and replica still speak.
+ *
+ * `node:sqlite` is synchronous, so the reads and writes run to completion here;
+ * only settling an effect can suspend.
  */
-export const openJournal = (path: string, policy: JournalPolicy = {}) => {
+export const openJournal = (path: string, policy: JournalPolicy = {}): Journal => {
   const authorize = policy.authorize
   const effectsFor = policy.effects
-  const durable = createJournal<Operation, Shared, Principal>({
-    file: path,
-    operation: { encode: operation => operation, decode: Sync.normalizeOperation },
-    snapshot: { encode: snapshot => snapshot, decode: decodeShared },
-    empty: () => ({ todos: [] }),
-    reduce: (snapshot, operation) => replay(snapshot, decodeMessage(operation.message)),
-    opId: operation => operation.opId,
-    actorId: principal => principal.actorId,
-    validate: ({ key, operation, cursor }) => {
-      if (operation.documentId !== key) throw new Error('Wrong document')
-      if (operation.baseCursor > cursor) throw new Error('Operation cursor is ahead of the server')
-    },
-    ...(authorize === undefined
-      ? {}
-      : {
-          authorize: ({ principal, operation, snapshot }) =>
-            authorize({ principal, message: decodeMessage(operation.message), model: snapshot }),
-        }),
-  })
+  const scope = Effect.runSync(Scope.make())
+  const durable: DurableJournal<Operation, Shared, Principal> = (() => {
+    try {
+      return Effect.runSync(
+        makeJournal<Operation, Shared, Principal>({
+          file: path,
+          operation: { encode: operation => operation, decode: Sync.normalizeOperation },
+          snapshot: { encode: snapshot => snapshot, decode: decodeShared },
+          empty: () => ({ todos: [] }),
+          reduce: (snapshot, operation) => replay(snapshot, decodeMessage(operation.message)),
+          opId: operation => operation.opId,
+          actorId: principal => principal.actorId,
+          validate: ({ key, operation, cursor }) => {
+            if (operation.documentId !== key) throw new Error('Wrong document')
+            if (operation.baseCursor > cursor)
+              throw new Error('Operation cursor is ahead of the server')
+          },
+          ...(authorize === undefined
+            ? {}
+            : {
+                authorize: ({ principal, operation, snapshot }) =>
+                  authorize({
+                    principal,
+                    message: decodeMessage(operation.message),
+                    model: snapshot,
+                  }),
+              }),
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      )
+    } catch (error) {
+      Effect.runSync(Scope.close(scope, Exit.void))
+      throw error
+    }
+  })()
 
   /** The durable record, flattened into the wire shape the protocol exchanges. */
   const toCommitted = (committed: DurableCommitted<Operation>, documentId: string): Committed =>
@@ -77,7 +109,13 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
 
   const append = (input: unknown, principal: Principal): Committed => {
     if (!principal.actorId || !principal.canWrite) throw new Error('Unauthorized operation')
-    return toCommitted(durable.append(principal.documentId, input, principal), principal.documentId)
+    const committed = Effect.runSync(durable.append(principal.documentId, input, principal))
+    return toCommitted(committed, principal.documentId)
+  }
+
+  const snapshot = (documentId: string): { cursor: number; model: Shared } => {
+    const { cursor, snapshot: model } = Effect.runSync(durable.load(documentId))
+    return { cursor, model }
   }
 
   /**
@@ -90,7 +128,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
    * labels who authored it in the log.
    */
   const appendAsServer = (message: Message, principal: Principal, producer: string): Committed => {
-    const baseCursor = durable.load(principal.documentId).cursor
+    const baseCursor = snapshot(principal.documentId).cursor
     return append(
       {
         protocolVersion: 1,
@@ -107,27 +145,24 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
   }
 
   const read = (documentId: string, after: number): ReadonlyArray<Committed> =>
-    durable.read(documentId, after).map(committed => toCommitted(committed, documentId))
-
-  const snapshot = (documentId: string): { cursor: number; model: Shared } => {
-    const { cursor, snapshot: model } = durable.load(documentId)
-    return { cursor, model }
-  }
+    Effect.runSync(durable.read(documentId, after)).map(committed =>
+      toCommitted(committed, documentId),
+    )
 
   /**
    * Runs the effects a committed operation declared, once each.
    *
-   * Safe to call for an operation already settled: the ledger keys each effect
-   * to the operation, so a resend, replay, or second call is a no-op.
+   * The ledger keys each effect to the document and operation, so a resend,
+   * replay, or second call is a no-op.
    */
   const settle = async (committed: Committed): Promise<void> => {
     const effects = effectsFor?.(decodeMessage(committed.message)) ?? []
     for (const [index, effect] of effects.entries()) {
-      // `opId` is only replica-scoped, so the document has to be part of the
-      // effect key: two documents may share a `replicaId:sequence`.
-      await durable.runEffect(
-        `${committed.documentId}/${committed.opId}/command/${index}`,
-        effect.run,
+      await Effect.runPromise(
+        durable.runEffect(
+          `${committed.documentId}/${committed.opId}/command/${index}`,
+          Effect.tryPromise({ try: () => effect.run(), catch: error => error }),
+        ),
       )
     }
   }
@@ -136,46 +171,43 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
     append,
     appendAsServer,
     settle,
-    subscribe: durable.subscribe,
     read,
-    compact: durable.compact,
+    compact: (documentId, through) => Effect.runSync(durable.compact(documentId, through)),
     snapshot,
+    subscribe: durable.subscribe,
     transport: (principal: Principal): TransportClient => ({
       exchange: async (cursor, pending) => {
         if (!principal.actorId) throw new Error('Unauthenticated reader')
         const rejected: string[] = []
         const acknowledged: string[] = []
         for (const input of pending) {
-          // Validation and identity conflicts fail the exchange; an authorization
-          // refusal is a policy answer, so it removes the outbox entry instead.
           const operation = Sync.normalizeOperation(input)
           if (!principal.canWrite) {
             rejected.push(operation.opId)
             continue
           }
-          try {
-            const committed = append(operation, principal)
+          const outcome = Effect.runSync(
+            Effect.result(durable.append(principal.documentId, operation, principal)),
+          )
+          if (outcome._tag === 'Failure') {
+            if (outcome.failure._tag === 'OperationRejectedError')
+              rejected.push(outcome.failure.opId)
+            else throw outcome.failure
+          } else {
             // Settled before the ack, so the client's retry cannot repeat it.
-            await settle(committed)
-            acknowledged.push(committed.opId)
-          } catch (error) {
-            if (error instanceof OperationRejectedError) rejected.push(error.opId)
-            else throw error
+            await settle(toCommitted(outcome.success, principal.documentId))
+            acknowledged.push(outcome.success.operation.opId)
           }
         }
-        // The replica's range predates the compacted payloads, so the log cannot
-        // fill it in; hand back the snapshot. Pending was still appended above
-        // and is acknowledged, so nothing the replica authored is replayed onto
-        // the snapshot it is about to adopt.
-        if (cursor < durable.floor(principal.documentId)) {
+        if (cursor < Effect.runSync(durable.floor(principal.documentId))) {
           const { cursor: at, model } = snapshot(principal.documentId)
           return { checkpoint: { cursor: at, model }, operations: [], rejected, acknowledged }
         }
         return { operations: read(principal.documentId, cursor), rejected, acknowledged }
       },
     }),
-    close: durable.close,
+    close: () => {
+      Effect.runSync(Scope.close(scope, Exit.void))
+    },
   }
 }
-
-export type Journal = ReturnType<typeof openJournal>

@@ -1,7 +1,7 @@
-import { Schema } from 'effect'
+import { Effect, Exit, Schema, Scope } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { defineMessageUnion } from 'foldkit/message'
-import { createJournal, OperationRejectedError } from 'foldkit-durable'
+import { makeJournal, OperationRejectedError } from 'foldkit-durable'
 import {
   defineSync,
   indexedDb,
@@ -35,22 +35,35 @@ const rename = (counter: number, replicaId: string, value: string | null): Messa
   Message.Renamed({ title: { stamp: { counter, replicaId }, value } })
 
 const openJournal = () => {
-  const journal = createJournal<Operation, Shared, { actorId: string; canWrite: boolean }>({
-    file: ':memory:',
-    operation: { encode: value => value, decode: Sync.normalizeOperation },
-    snapshot: {
-      encode: Schema.encodeSync(Shared),
-      decode: Schema.decodeUnknownSync(Shared, { onExcessProperty: 'error' }),
-    },
-    empty: () => empty,
-    reduce: (model, operation) => update(model, decodeMessage(operation.message)),
-    opId: operation => operation.opId,
-    actorId: principal => principal.actorId,
-    authorize: ({ principal }) => principal.canWrite,
-    validate: ({ key, operation }) => {
-      if (operation.documentId !== key) throw new Error('Wrong document')
-    },
-  })
+  const scope = Effect.runSync(Scope.make())
+  const durable = Effect.runSync(
+    makeJournal<Operation, Shared, { actorId: string; canWrite: boolean }>({
+      file: ':memory:',
+      operation: { encode: value => value, decode: Sync.normalizeOperation },
+      snapshot: {
+        encode: Schema.encodeSync(Shared),
+        decode: Schema.decodeUnknownSync(Shared, { onExcessProperty: 'error' }),
+      },
+      empty: () => empty,
+      reduce: (model, operation) => update(model, decodeMessage(operation.message)),
+      opId: operation => operation.opId,
+      actorId: principal => principal.actorId,
+      authorize: ({ principal }) => principal.canWrite,
+      validate: ({ key, operation }) => {
+        if (operation.documentId !== key) throw new Error('Wrong document')
+      },
+    }).pipe(Effect.provideService(Scope.Scope, scope)),
+  )
+  // The test drives the journal synchronously; `node:sqlite` is synchronous.
+  const journal = {
+    append: (key: string, input: unknown, principal: { actorId: string; canWrite: boolean }) =>
+      Effect.runSync(durable.append(key, input, principal)),
+    floor: (key: string) => Effect.runSync(durable.floor(key)),
+    load: (key: string) => Effect.runSync(durable.load(key)),
+    read: (key: string, after: number) => Effect.runSync(durable.read(key, after)),
+    compact: (key: string, through: number) => Effect.runSync(durable.compact(key, through)),
+    close: () => Effect.runSync(Scope.close(scope, Exit.void)),
+  }
   const transport = (canWrite = true): TransportClient => ({
     exchange: async (cursor, pending) => {
       const acknowledged: string[] = []

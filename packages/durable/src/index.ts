@@ -8,8 +8,16 @@
  */
 export type { Codec } from './codec.js'
 export {
-  createJournal,
+  IdentityConflictError,
+  InvalidCompactionError,
+  InvalidCursorError,
+  InvalidOperationError,
+  JournalError,
   OperationRejectedError,
+} from './errors.js'
+export {
+  makeJournal,
+  type AppendError,
   type AuthorizationRequest,
   type Committed,
   type EffectRecord,
