@@ -2,6 +2,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineAction } from '@agent-native/core/action'
+import { closeDbExec } from '@agent-native/core/db'
+import { appStateGet } from '@agent-native/core/application-state'
 import {
   actionsToEngineTools,
   autoDiscoverActions,
@@ -13,7 +15,7 @@ import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Agent } from 'foldkit-agent'
 import { AgentNative } from 'foldkit-agent-native'
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 
 const Message = defineMessageUnion({ SetLimit: { value: Schema.Number } })
 const LimitAgent = Agent.forModel<{ limit: number }, { canEdit: boolean }>()
@@ -47,6 +49,8 @@ let directory: string
 let registry: Record<string, ActionEntry>
 
 beforeAll(async () => {
+  // The tool loop can query framework metadata even when action auditing is disabled.
+  vi.stubEnv('DATABASE_URL', 'pglite:memory')
   directory = await mkdtemp(join(tmpdir(), 'foldkit-native-'))
   await mkdir(join(directory, 'actions'))
   await writeFile(join(directory, 'package.json'), '{"type":"module"}')
@@ -62,6 +66,8 @@ beforeAll(async () => {
 }, 30_000)
 
 afterAll(async () => {
+  await closeDbExec()
+  vi.unstubAllEnvs()
   if (directory) await rm(directory, { recursive: true, force: true })
 })
 
@@ -96,6 +102,16 @@ it.each([
     expect(result.status).toBe('completed')
     expect(JSON.parse(result.output)).toMatchObject({ ok: expectedLimit !== 0 })
     expect(limit).toBe(expectedLimit)
+    // Wait for the framework's background change marker before closing its database.
+    await vi.waitFor(
+      async () => {
+        expect(await appStateGet(ownerEmail, '__action_change__')).toMatchObject({
+          actionName: 'foldkit_spike_set_limit',
+          owner: ownerEmail,
+        })
+      },
+      { timeout: 10_000 },
+    )
   },
   30_000,
 )

@@ -70,7 +70,8 @@ sharing one `~standard`, so calling them in turn leaves a single object carrying
 ## What the spike proves
 
 Run `pnpm exec vitest run packages/agent-native/test/framework.test.ts` at the
-repository root. No LLM credentials, database, or network server are needed.
+repository root. No LLM credentials or network server are needed. The suite uses
+an in-memory PGlite database for the framework's internal metadata lookups.
 
 | Framework surface | Executable evidence |
 | --- | --- |
