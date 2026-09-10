@@ -86,7 +86,7 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   say('# authorization is a separate question')
   principal = { canDelete: false }
   const denied = await Effect.runPromise(
-    Effect.result(agent.messages.dispatch(Message.RequestedDeleteTodo, { id: 'todo-1' })),
+    Effect.result(agent.messages.dispatch(Message.RequestedDeleteTodo, {})),
   )
   say(denied._tag === 'Failure' ? `refused: ${denied.failure.message}` : 'unexpectedly allowed')
   say(`todos still: ${store.model().todos.length}`)
@@ -100,10 +100,12 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   await registration.refresh()
   say(`registered tools: ${registration.registered().join(', ')}`)
 
-  const deleteTodo = modelContext.tool('delete_todo')
-  say(`delete_todo inputSchema: ${JSON.stringify(deleteTodo.inputSchema)}`)
+  const deleteTodo = modelContext.tool('delete_selected_todo')
+  // The advertised input is a closed empty object: the target comes from the
+  // Model, so there is nothing for an agent to supply and nothing to get wrong.
+  say(`delete_selected_todo inputSchema: ${JSON.stringify(deleteTodo.inputSchema)}`)
 
-  const result = await deleteTodo.execute({ id: 'todo-1' }, {})
+  const result = await deleteTodo.execute({}, {})
   say(`tool result: ${result.content[0]?.text}`)
   say(
     `todos now: ${

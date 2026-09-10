@@ -31,12 +31,21 @@ export const AppAgent = TodoAgent.define({
       description: 'Rename an existing todo',
     },
 
+    // A contextual capability: it takes its target from the Model rather than
+    // from the caller. `rename_todo` above is the explicit form, naming the todo
+    // it acts on; this one cannot act on anything but the current selection, so
+    // an agent has no id to get wrong.
     RequestedDeleteTodo: {
-      name: 'delete_todo',
-      description: 'Delete the selected todo',
+      name: 'delete_selected_todo',
+      description: 'Delete the currently selected todo',
 
-      // Discoverability follows the Model: no selection, no capability.
+      // Availability is not a hint: without a selection this capability is
+      // neither advertised nor invocable, which is what makes the empty input
+      // safe to resolve below.
       available: model => Option.isSome(model.selectedTodoId),
+
+      input: Schema.Struct({}),
+      toMessage: (_, { model }) => ({ id: Option.getOrThrow(model.selectedTodoId) }),
 
       // Authorization is a separate question from availability.
       authorize: ({ principal }) => principal.canDelete,

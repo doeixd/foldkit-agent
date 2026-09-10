@@ -46,14 +46,15 @@ application these two functions read and write the live Foldkit Runtime.
    projected context.
 3. **The agent originates the same transition**, naming the capability by
    Message reference rather than by string.
-4. **Availability follows the Model.** `delete_todo` does not exist until a todo
-   is selected.
+4. **Availability follows the Model.** `delete_selected_todo` does not exist
+   until a todo is selected -- it is neither advertised nor invocable, which is
+   what lets it take its target from the Model instead of from the caller.
 5. **Availability is not authorization.** With the capability available, a
    principal that may not delete is still refused, and no Message is dispatched.
 6. **Through WebMCP.** The same contract registered as tools, with the input
    schema derived rather than written by hand.
 7. **Registrations follow the Model.** Deleting the selected todo clears the
-   selection in `update`, so `delete_todo` is unregistered.
+   selection in `update`, so `delete_selected_todo` is unregistered.
 8. **Untrusted input is refused** at the Schema boundary, before `update`.
 
 ## Notes
@@ -64,4 +65,12 @@ Messages and lets `update` decide what they mean.
 
 `RequestedCreateTodo` is written with the description shorthand, so its
 capability name is the normalized tag, `requested_create_todo`. Variants that
-want a shorter protocol name give one explicitly, as `delete_todo` does.
+want a shorter protocol name give one explicitly, as `delete_selected_todo`
+does.
+
+`rename_todo` and `delete_selected_todo` are the two shapes a capability takes.
+`rename_todo` is explicit: it names the todo it acts on, and works whatever the
+UI is showing. `delete_selected_todo` is contextual: it derives its target from
+the Model, advertises a closed empty input, and exists only while a selection
+does. Selecting is its own capability rather than a step an agent must perform
+to unlock a domain operation.

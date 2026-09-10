@@ -14,15 +14,15 @@ describe('the demo', () => {
     expect(transcript).toContain('todos: Write the proposal, Ship the adapter')
 
     // Availability follows the Model.
-    expect(transcript).toMatch(/no selection: (?!.*delete_todo)/)
-    expect(transcript).toMatch(/selected todo-1: .*delete_todo/)
+    expect(transcript).toMatch(/no selection: (?!.*delete_selected_todo)/)
+    expect(transcript).toMatch(/selected todo-1: .*delete_selected_todo/)
 
     // Availability is not authorization.
-    expect(transcript).toContain('refused: Not authorized to invoke "delete_todo"')
+    expect(transcript).toContain('refused: Not authorized to invoke "delete_selected_todo"')
     expect(transcript).toContain('todos still: 2')
 
     // The WebMCP surface is derived, not written by hand.
-    expect(transcript).toContain('"required":["id"]')
+    expect(transcript).toContain('"properties":{},"required":[],"additionalProperties":false')
     expect(transcript).toContain('tool result: Dispatched RequestedDeleteTodo')
 
     // A capability that is gone is unregistered.
@@ -96,7 +96,7 @@ describe('the example contract', () => {
 
     store.dispatch(Message.RequestedCreateTodo({ title: 'Doomed' }))
     await Effect.runPromise(agent.messages.dispatch(Message.SelectedTodo, { id: 'todo-1' }))
-    await Effect.runPromise(agent.messages.dispatch(Message.RequestedDeleteTodo, { id: 'todo-1' }))
+    await Effect.runPromise(agent.messages.dispatch(Message.RequestedDeleteTodo, {}))
 
     expect(Option.isNone(store.model().selectedTodoId)).toBe(true)
   })
