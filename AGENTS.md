@@ -92,6 +92,10 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
 
 **Library behaviour**
 
+- **Give embedded Foldkit containers an id.** The runtime fails asynchronously
+  before rendering when its container has no id; a DOM test otherwise sees only
+  an empty element and hides the actual initialization failure.
+
 - **Probe, do not assume, what a library type means.** `Schema.Struct({})` is
   not an empty-object schema: it accepts `{foo:1}`, `[]` and `"str"` even with
   `onExcessProperty: 'error'`. Use `Schema.Record(Schema.String, Schema.Never)`.

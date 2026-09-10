@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Foldkit sync spike</title></head>
+  <body>
+    <h1>Durable local messages</h1>
+    <p>Add a todo, then reload: the todo survives and the selection resets.</p>
+    <form id="create"><label>Title <input id="title" required></label><button>Add todo</button></form>
+    <button id="select">Select first todo</button>
+    <div id="sync-app"></div>
+    <script type="module" src="/src/browser.ts"></script>
+  </body>
+</html>

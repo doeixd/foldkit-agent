@@ -1794,6 +1794,7 @@ packages/agent-mcp      foldkit-agent-mcp
 packages/agent-a2a      foldkit-agent-a2a
 packages/agent-native   foldkit-agent-native (prototype, unpublished)
 examples/todo           a worked example, end to end
+examples/sync           durable messages and ordered replication feasibility spike
 ```
 
 ```bash
@@ -1801,7 +1802,7 @@ pnpm install
 pnpm test        # vitest
 pnpm typecheck   # tsc -b
 pnpm build       # tsdown
-pnpm demo        # run examples/todo
+pnpm demo        # run the todo and sync examples
 pnpm release     # build, then publish every public package
 ```
 

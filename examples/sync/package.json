@@ -1,0 +1,23 @@
+{
+  "name": "foldkit-agent-example-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "demo": "tsx src/demo.ts",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "foldkit-agent": "workspace:*"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.4",
+    "jsdom": "26.1.0",
+    "@types/jsdom": "21.1.7",
+    "typescript": "^5.7.2",
+    "vite": "5.4.21"
+  }
+}
