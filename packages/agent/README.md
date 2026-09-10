@@ -313,7 +313,9 @@ or dispatches its Message. Both fail with `AgentCancelledError`.
 
 Dispatch runs in a fixed order: resolve the capability, check `available`,
 decode input through its Effect Schema, run `authorize`, then construct and
-dispatch the Message. A failure at any step means no Message reaches `update`.
+dispatch the Message. A refusal before host dispatch sends no Message. A host
+failure may occur after delivery; completion timeouts and cancellation after
+delivery do not undo it.
 
 `available` is checked before `authorize`, so a capability the Model does not
 currently offer reports as unavailable rather than leaking whether the caller
@@ -366,6 +368,10 @@ does not retarget an invocation already in flight.
 `InvocationContext.model` is that snapshot -- the same value `available` was
 checked against. There is no separate field for it.
 
+The host must treat returned Models as immutable and replace them on updates.
+The runtime retains the reference; it does not clone the Model. Unknown
+capabilities and already-cancelled invocations never read the Model.
+
 This matters because a contextual capability can read the Model twice:
 
 ```ts
@@ -390,7 +396,7 @@ cleared.
 Snapshot consistency is not live-state freshness. One invocation sees one Model;
 a later invocation sees the newer one. The Runtime guarantees the first, not the
 second. If the user changes the selection while an invocation is suspended, that
-invocation still targets what it was offered.
+invocation still targets the selection captured when dispatch began.
 
 Nothing rejects a dispatch because the live Model has advanced since capture.
 Optimistic concurrency -- a version on the snapshot, and an adapter opting into
@@ -421,6 +427,5 @@ directly when the Model does not matter.
 proposal's snippets use Effect 3 names; `Schema.OptionFromSelf` is
 `Schema.Option` here.
 
-Deferred, as the proposal's "Minimal v1" suggests: completion tracking is
-recorded on the contract and surfaced through introspection, but validated
-dispatch remains the completion boundary.
+Completion tracking is implemented as described above. Host dispatch is the
+completion boundary only for capabilities without a completion contract.

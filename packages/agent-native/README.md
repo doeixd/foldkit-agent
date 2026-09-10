@@ -2,9 +2,9 @@
 
 Compiles a [`foldkit-agent`](../agent) contract into Agent Native actions.
 
-**This is a prototype.** It is not published, and it has never run against Agent
-Native itself — only against a stub with the shape the framework's documentation
-describes. Read the limits at the bottom before relying on it.
+**This is an unpublished prototype.** Package-level framework probes and unit
+tests exist, but integration in a running Agent Native app is still unverified.
+See the limits below.
 
 ## What it does
 
@@ -48,9 +48,9 @@ tests assert that an action refuses exactly what the contract refuses.
 
 ## The schema bridge
 
-The framework's examples use Zod, but `defineAction` types its `schema` field as
-`StandardSchemaV1` and validates through it. Effect Schema converts to one, so
-there is no conversion layer and no Zod dependency.
+The adapter exposes the encoded input schema as a Standard Schema validator,
+rejecting undeclared fields. It preserves encoded values for `dispatchUnknown`
+to decode once, including transforming schemas such as `NumberFromString`.
 
 The subtlety is which conversion, and it fails silently:
 
@@ -69,8 +69,6 @@ sharing one `~standard`, so calling them in turn leaves a single object carrying
 
 ## Limits
 
-- **Never run against the framework.** Everything here is verified against a
-  stub.
 - **Only partly verified.** Against the published `@agent-native/core@0.177.1`:
   the imports resolve, `registerPackageActions` accepts what this produces, and
   `defineAction` accepts an Effect-derived Standard Schema and derives its
