@@ -1,3 +1,4 @@
+import { Clock, Duration, Effect, Fiber, PubSub, Ref, Stream, type Scope } from 'effect'
 import type { SocketLike } from './transport.js'
 
 /** One peer's presence. A `null` value means the peer left. */
@@ -9,19 +10,21 @@ export interface PresenceUpdate<Update> {
 /**
  * The ephemeral channel presence travels on.
  *
- * Deliberately not the durable transport: presence is broadcast, never
+ * `updates` is the inbound bus a peer consumes; `publish` sends one to the bus.
+ * Splitting them keeps an inbound update from being echoed straight back out.
+ * This is deliberately not the durable transport: presence is broadcast, never
  * journaled, so a dropped or duplicated update is harmless.
  */
 export interface PresenceChannel<Update> {
-  publish(update: PresenceUpdate<Update>): void
-  subscribe(listener: (update: PresenceUpdate<Update>) => void): () => void
+  readonly updates: PubSub.PubSub<PresenceUpdate<Update>>
+  readonly publish: (update: PresenceUpdate<Update>) => Effect.Effect<void>
 }
 
 export interface PresenceOptions<Update> {
   /** This peer's identity on the channel. */
   readonly id: string
-  /** Milliseconds without an update before a peer is dropped. */
-  readonly ttl: number
+  /** How long a peer may go without refreshing before it is dropped. */
+  readonly ttl: Duration.Input
   /**
    * Validates the untrusted value a peer sends before it is stored. Presence
    * crosses a wire, so this is required rather than trusting the type
@@ -29,8 +32,6 @@ export interface PresenceOptions<Update> {
    */
   readonly decodeValue: (value: unknown) => Update
   readonly channel?: PresenceChannel<Update> | undefined
-  /** Injectable clock, for tests. */
-  readonly now?: (() => number) | undefined
 }
 
 export interface PresencePeer<Update> {
@@ -41,115 +42,142 @@ export interface PresencePeer<Update> {
 
 export interface Presence<Update> {
   /** Sets this peer's value and broadcasts it. */
-  set(value: Update): void
+  readonly set: (value: Update) => Effect.Effect<void>
   /** Removes this peer and broadcasts the departure. */
-  leave(): void
+  readonly leave: Effect.Effect<void>
   /** Live peers, self included, with stale ones excluded. */
-  peers(): ReadonlyArray<PresencePeer<Update>>
+  readonly peers: Effect.Effect<ReadonlyArray<PresencePeer<Update>>>
   /** Drops expired peers; notifies if any went. */
-  prune(): void
-  subscribe(listener: () => void): () => void
-  /** Stops listening to the channel. */
-  close(): void
+  readonly prune: Effect.Effect<void>
+  /** Notified when the peer set changes. */
+  readonly subscribe: (listener: () => void) => () => void
+  /** Stops consuming the channel; the enclosing scope also does this on exit. */
+  readonly close: Effect.Effect<void>
 }
 
 /**
  * Tracks ephemeral peers with a time-to-live.
  *
  * Nothing here touches the durable log: presence is state a peer refreshes, and
- * a peer that stops refreshing is dropped, not replayed.
+ * a peer that stops refreshing is dropped, not replayed. Time comes from the
+ * `Clock`, so a `TestClock` drives the TTL deterministically.
  */
-export const createPresence = <Update>(options: PresenceOptions<Update>): Presence<Update> => {
-  const now = options.now ?? (() => Date.now())
-  const peers = new Map<string, PresencePeer<Update>>()
-  const listeners = new Set<() => void>()
-  /** A subscriber must never fail an update. */
-  const notify = (): void => {
-    for (const listener of [...listeners]) {
-      try {
-        listener()
-      } catch {
-        // Deliberately swallowed.
-      }
-    }
-  }
-  const expired = (peer: PresencePeer<Update>, at: number): boolean =>
-    at - peer.updatedAt > options.ttl
-
-  const receive = (update: PresenceUpdate<Update>): void => {
-    if (update.id === options.id) return
-    if (update.value === null) {
-      if (peers.delete(update.id)) notify()
-      return
-    }
-    let value: Update
-    try {
-      value = options.decodeValue(update.value)
-    } catch {
-      // A peer's value that fails the contract is dropped, never stored.
-      return
-    }
-    peers.set(update.id, { id: update.id, value, updatedAt: now() })
-    notify()
-  }
-  const unsubscribe = options.channel?.subscribe(receive)
-
-  return {
-    set: value => {
-      peers.set(options.id, { id: options.id, value, updatedAt: now() })
-      options.channel?.publish({ id: options.id, value })
-      notify()
-    },
-    leave: () => {
-      peers.delete(options.id)
-      options.channel?.publish({ id: options.id, value: null })
-      notify()
-    },
-    peers: () => {
-      const at = now()
-      return [...peers.values()].filter(peer => !expired(peer, at)).map(peer => ({ ...peer }))
-    },
-    prune: () => {
-      const at = now()
-      let changed = false
-      for (const [id, peer] of peers) {
-        if (expired(peer, at)) {
-          peers.delete(id)
-          changed = true
-        }
-      }
-      if (changed) notify()
-    },
-    subscribe: listener => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    close: () => {
-      unsubscribe?.()
-      listeners.clear()
-    },
-  }
-}
-
-/** An in-process channel, for tests and single-process demos. */
-export const loopbackPresenceChannel = <Update>(): PresenceChannel<Update> => {
-  const listeners = new Set<(update: PresenceUpdate<Update>) => void>()
-  return {
-    publish: update => {
+export const createPresence = <Update>(
+  options: PresenceOptions<Update>,
+): Effect.Effect<Presence<Update>, never, Scope.Scope | Clock.Clock> =>
+  Effect.gen(function* () {
+    const ttl = Duration.toMillis(options.ttl)
+    const peers = yield* Ref.make(new Map<string, PresencePeer<Update>>())
+    const listeners = new Set<() => void>()
+    /** A subscriber must never fail an update. */
+    const notify = (): void => {
       for (const listener of [...listeners]) {
         try {
-          listener(update)
+          listener()
         } catch {
-          // A subscriber must never fail an update.
+          // Deliberately swallowed.
         }
       }
-    },
-    subscribe: listener => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-  }
-}
+    }
+    const expired = (peer: PresencePeer<Update>, at: number): boolean => at - peer.updatedAt > ttl
+
+    const put = (id: string, value: Update, at: number): Effect.Effect<void> =>
+      Ref.update(peers, map => {
+        const next = new Map(map)
+        next.set(id, { id, value, updatedAt: at })
+        return next
+      })
+    const remove = (id: string): Effect.Effect<boolean> =>
+      Ref.modify(peers, map => {
+        if (!map.has(id)) return [false, map] as const
+        const next = new Map(map)
+        next.delete(id)
+        return [true, next] as const
+      })
+
+    const receive = (update: PresenceUpdate<Update>): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (update.id === options.id) return
+        if (update.value === null) {
+          if (yield* remove(update.id)) notify()
+          return
+        }
+        let value: Update
+        try {
+          value = options.decodeValue(update.value)
+        } catch {
+          // A peer's value that fails the contract is dropped, never stored.
+          return
+        }
+        yield* put(update.id, value, yield* Clock.currentTimeMillis)
+        notify()
+      })
+
+    const channel = options.channel
+    const consuming =
+      channel === undefined
+        ? undefined
+        : yield* Stream.runForEach(Stream.fromPubSub(channel.updates), receive).pipe(
+            Effect.forkScoped,
+          )
+
+    const set = (value: Update): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* put(options.id, value, yield* Clock.currentTimeMillis)
+        if (channel !== undefined) yield* channel.publish({ id: options.id, value })
+        notify()
+      })
+
+    const leave: Effect.Effect<void> = Effect.gen(function* () {
+      yield* remove(options.id)
+      if (channel !== undefined) yield* channel.publish({ id: options.id, value: null })
+      notify()
+    })
+
+    const peerList: Effect.Effect<ReadonlyArray<PresencePeer<Update>>> = Effect.gen(function* () {
+      const at = yield* Clock.currentTimeMillis
+      const map = yield* Ref.get(peers)
+      return [...map.values()].filter(peer => !expired(peer, at)).map(peer => ({ ...peer }))
+    })
+
+    const prune: Effect.Effect<void> = Effect.gen(function* () {
+      const at = yield* Clock.currentTimeMillis
+      const changed = yield* Ref.modify(peers, map => {
+        let removed = false
+        const next = new Map(map)
+        for (const [id, peer] of map) {
+          if (expired(peer, at)) {
+            next.delete(id)
+            removed = true
+          }
+        }
+        return [removed, next] as const
+      })
+      if (changed) notify()
+    })
+
+    const close: Effect.Effect<void> =
+      consuming === undefined ? Effect.void : Fiber.interrupt(consuming).pipe(Effect.asVoid)
+
+    return {
+      set,
+      leave,
+      peers: peerList,
+      prune,
+      subscribe: listener => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      close,
+    }
+  })
+
+/** An in-process channel, for tests and single-process demos. */
+export const loopbackPresenceChannel = <Update>(): Effect.Effect<PresenceChannel<Update>> =>
+  Effect.gen(function* () {
+    const updates = yield* PubSub.unbounded<PresenceUpdate<Update>>()
+    return { updates, publish: update => PubSub.publish(updates, update) }
+  })
 
 /** Broadcasts presence updates among connected peers. */
 export interface PresenceHub<Update> {
@@ -195,15 +223,26 @@ const decodePresence = <Update>(data: string): PresenceUpdate<Update> | undefine
   return { id, value: (payload ?? null) as Update | null }
 }
 
-/** A presence channel carried on a socket, alongside exchange frames. */
-export const socketPresenceChannel = <Update>(socket: SocketLike): PresenceChannel<Update> => ({
-  publish: update => socket.send(JSON.stringify({ [frameType]: update })),
-  subscribe: listener =>
-    socket.onMessage(data => {
-      const update = decodePresence<Update>(data)
-      if (update !== undefined) listener(update)
-    }),
-})
+/** A presence channel fed by frames arriving on a socket, sent back over it. */
+export const socketPresenceChannel = <Update>(
+  socket: SocketLike,
+): Effect.Effect<PresenceChannel<Update>, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const updates = yield* PubSub.unbounded<PresenceUpdate<Update>>()
+    yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        socket.onMessage(data => {
+          const update = decodePresence<Update>(data)
+          if (update !== undefined) PubSub.publishUnsafe(updates, update)
+        }),
+      ),
+      off => Effect.sync(off),
+    )
+    return {
+      updates,
+      publish: update => Effect.sync(() => socket.send(JSON.stringify({ [frameType]: update }))),
+    }
+  })
 
 /** Serves presence frames on an accepted socket, fanning them through the hub. */
 export const servePresence = <Update>(

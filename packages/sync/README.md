@@ -40,11 +40,13 @@ const shared = Effect.runSync(replica.shared)
   Message schema, and a Message the contract does not call durable is refused.
 - Presence (`createPresence`): an ephemeral, TTL'd peer registry, deliberately
   outside the durable log. A peer that stops refreshing is dropped, not
-  replayed. Every value is decoded through the required `decodeValue` before it
-  is stored, so a hostile peer cannot inject a value your `Update` type does not
-  describe. Presence can travel over a socket — `socketPresenceChannel` on the
-  client and `servePresence` fanning through a `createPresenceHub` on the server
-  — or in-process via `loopbackPresenceChannel`.
+  replayed. It is an Effect driven by the `Clock` (so a `TestClock` makes the
+  TTL deterministic), peers live in a `Ref`, and the channel is a `PubSub`.
+  Every value is decoded through the required `decodeValue` before it is stored,
+  so a hostile peer cannot inject a value your `Update` type does not describe.
+  Presence can travel over a socket — `socketPresenceChannel` on the client and
+  `servePresence` fanning through a `createPresenceHub` on the server — or
+  in-process via `loopbackPresenceChannel`.
 - The transport seam (`Transport`): an Effect service with a loopback layer, a
   bridge to and from the promise client the replica speaks, and a WebSocket
   client layer. The socket reconnects on an exponential, jittered backoff and

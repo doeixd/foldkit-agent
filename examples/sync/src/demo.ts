@@ -9,7 +9,8 @@ import {
   type Replica,
   type TransportClient,
 } from 'foldkit-sync'
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Layer, Schema, type Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 import { Message, type Shared } from './app.js'
 import { openJournal, type Principal } from './journal.js'
 import { serverAgentHost } from './serverAgent.js'
@@ -67,35 +68,47 @@ assert.deepEqual(shared(alice).todos, [
 ])
 
 // Presence is ephemeral: selection is shared between peers and never persisted
-// or replayed. An injected clock makes the TTL deterministic.
-let clock = 1_000
-const presence = loopbackPresenceChannel<{ selectedTodoId: string }>()
+// or replayed. A TestClock makes the TTL deterministic.
 const SelectedTodoPresence = Schema.Struct({ selectedTodoId: Schema.String })
 const decodeSelectedTodo = Schema.decodeUnknownSync(SelectedTodoPresence)
-const alicePresence = createPresence<{ selectedTodoId: string }>({
-  id: 'alice',
-  ttl: 5_000,
-  channel: presence,
-  now: () => clock,
-  decodeValue: decodeSelectedTodo,
-})
-const bobPresence = createPresence<{ selectedTodoId: string }>({
-  id: 'bob',
-  ttl: 5_000,
-  channel: presence,
-  now: () => clock,
-  decodeValue: decodeSelectedTodo,
-})
-alicePresence.set({ selectedTodoId: 'a' })
-assert.deepEqual(
-  bobPresence.peers().map(peer => [peer.id, peer.value.selectedTodoId]),
-  [['alice', 'a']],
+await Effect.runPromise(
+  Effect.scoped(
+    Effect.gen(function* () {
+      const presence = yield* loopbackPresenceChannel<{ selectedTodoId: string }>()
+      const alicePresence = yield* createPresence<{ selectedTodoId: string }>({
+        id: 'alice',
+        ttl: '5 seconds',
+        channel: presence,
+        decodeValue: decodeSelectedTodo,
+      })
+      const bobPresence = yield* createPresence<{ selectedTodoId: string }>({
+        id: 'bob',
+        ttl: '5 seconds',
+        channel: presence,
+        decodeValue: decodeSelectedTodo,
+      })
+
+      // Let both channel consumers subscribe before anything is published.
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+
+      yield* alicePresence.set({ selectedTodoId: 'a' })
+      // Let the sibling's channel consumer drain the publish.
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      assert.deepEqual(
+        (yield* bobPresence.peers).map(peer => [peer.id, peer.value.selectedTodoId]),
+        [['alice', 'a']],
+      )
+
+      yield* TestClock.adjust('6 seconds')
+      yield* bobPresence.prune
+      assert.deepEqual(yield* bobPresence.peers, [])
+    }).pipe(
+      Effect.provide(TestClock.layer() as unknown as Layer.Layer<Clock.Clock>),
+    ) as Effect.Effect<void, never, Scope.Scope>,
+  ),
 )
-clock = 6_001
-bobPresence.prune()
-assert.deepEqual(bobPresence.peers(), [])
-alicePresence.close()
-bobPresence.close()
 
 console.log(
   'Recovered an offline outbox, converged two replicas, replayed two server agent Messages, and let a presence peer expire.',

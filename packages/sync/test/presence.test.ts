@@ -1,4 +1,5 @@
-import { Schema } from 'effect'
+import { Clock, Effect, Layer, PubSub, Schema, type Scope } from 'effect'
+import { TestClock } from 'effect/testing'
 import { describe, expect, it } from 'vitest'
 import {
   createPresence,
@@ -18,130 +19,181 @@ const decodeCursor = Schema.decodeUnknownSync(Schema.Struct({ cursor: Schema.Num
 const make = (options: Omit<PresenceOptions<Cursor>, 'decodeValue'>) =>
   createPresence<Cursor>({ decodeValue: decodeCursor, ...options })
 
+/**
+ * Runs a presence program under a deterministic `TestClock` and a scope.
+ *
+ * The casts cover a gap in the pinned Effect rc: `TestClock.layer()` installs the
+ * `TestClock` as `Clock.Clock` at runtime, but `provide` does not narrow `Clock`
+ * out of a `Clock | Scope` requirement, so `Effect.scoped` still sees it.
+ */
+const run = (program: Effect.Effect<void, never, Clock.Clock | Scope.Scope>) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.provide(
+        program,
+        TestClock.layer() as unknown as Layer.Layer<Clock.Clock>,
+      ) as Effect.Effect<void, never, Scope.Scope>,
+    ),
+  )
+
+/** Lets the forked channel consumers drain what was just published. */
+const settle = Effect.yieldNow.pipe(Effect.andThen(Effect.yieldNow))
+
 describe('presence', () => {
-  it('expires a peer that stops refreshing after its ttl', () => {
-    let clock = 0
-    const presence = make({ id: 'a', ttl: 100, now: () => clock })
+  it('expires a peer that stops refreshing after its ttl', () =>
+    run(
+      Effect.gen(function* () {
+        const presence = yield* make({ id: 'a', ttl: '100 millis' })
 
-    presence.set({ cursor: 1 })
-    expect(presence.peers()).toHaveLength(1)
+        yield* presence.set({ cursor: 1 })
+        expect(yield* presence.peers).toHaveLength(1)
 
-    clock = 100
-    expect(presence.peers()).toHaveLength(1)
+        yield* TestClock.adjust('100 millis')
+        expect(yield* presence.peers).toHaveLength(1)
 
-    clock = 101
-    expect(presence.peers()).toEqual([])
-  })
+        yield* TestClock.adjust('1 millis')
+        expect(yield* presence.peers).toEqual([])
+      }),
+    ))
 
-  it('keeps a peer live while it refreshes before the ttl', () => {
-    let clock = 0
-    const presence = make({ id: 'a', ttl: 100, now: () => clock })
+  it('keeps a peer live while it refreshes before the ttl', () =>
+    run(
+      Effect.gen(function* () {
+        const presence = yield* make({ id: 'a', ttl: '100 millis' })
 
-    presence.set({ cursor: 1 })
-    clock = 90
-    presence.set({ cursor: 2 })
+        yield* presence.set({ cursor: 1 })
+        yield* TestClock.adjust('90 millis')
+        yield* presence.set({ cursor: 2 })
 
-    clock = 150
-    expect(presence.peers()).toEqual([{ id: 'a', value: { cursor: 2 }, updatedAt: 90 }])
+        yield* TestClock.adjust('60 millis')
+        expect(yield* presence.peers).toEqual([{ id: 'a', value: { cursor: 2 }, updatedAt: 90 }])
 
-    clock = 191
-    expect(presence.peers()).toEqual([])
-  })
+        yield* TestClock.adjust('41 millis')
+        expect(yield* presence.peers).toEqual([])
+      }),
+    ))
 
-  it('prunes expired peers and notifies only when something went', () => {
-    let clock = 0
-    const presence = make({ id: 'a', ttl: 100, now: () => clock })
-    let notifications = 0
-    presence.subscribe(() => {
-      notifications += 1
-    })
+  it('prunes expired peers and notifies only when something went', () =>
+    run(
+      Effect.gen(function* () {
+        const presence = yield* make({ id: 'a', ttl: '100 millis' })
+        let notifications = 0
+        presence.subscribe(() => {
+          notifications += 1
+        })
 
-    presence.set({ cursor: 1 })
-    expect(notifications).toBe(1)
+        yield* presence.set({ cursor: 1 })
+        expect(notifications).toBe(1)
 
-    clock = 50
-    presence.prune()
-    expect(notifications).toBe(1)
+        yield* TestClock.adjust('50 millis')
+        yield* presence.prune
+        expect(notifications).toBe(1)
 
-    clock = 101
-    presence.prune()
-    expect(notifications).toBe(2)
-  })
+        yield* TestClock.adjust('51 millis')
+        yield* presence.prune
+        expect(notifications).toBe(2)
+      }),
+    ))
 
-  it('broadcasts to other peers over the channel and drops a departure', () => {
-    let clock = 0
-    const channel = loopbackPresenceChannel<Cursor>()
-    const a = make({ id: 'a', ttl: 100, channel, now: () => clock })
-    const b = make({ id: 'b', ttl: 100, channel, now: () => clock })
+  it('broadcasts to other peers over the channel and drops a departure', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        // Let the forked consumer subscribe before anything is published.
+        yield* settle
 
-    a.set({ cursor: 3 })
-    expect(b.peers()).toEqual([{ id: 'a', value: { cursor: 3 }, updatedAt: 0 }])
+        yield* a.set({ cursor: 3 })
+        yield* settle
+        expect(yield* b.peers).toEqual([{ id: 'a', value: { cursor: 3 }, updatedAt: 0 }])
 
-    b.set({ cursor: 5 })
-    expect(a.peers().map(peer => peer.id)).toEqual(['a', 'b'])
+        yield* b.set({ cursor: 5 })
+        yield* settle
+        expect((yield* a.peers).map(peer => peer.id)).toEqual(['a', 'b'])
 
-    a.leave()
-    expect(a.peers().map(peer => peer.id)).toEqual(['b'])
-    expect(b.peers().map(peer => peer.id)).toEqual(['b'])
-  })
+        yield* a.leave
+        yield* settle
+        expect((yield* a.peers).map(peer => peer.id)).toEqual(['b'])
+        expect((yield* b.peers).map(peer => peer.id)).toEqual(['b'])
+      }),
+    ))
 
-  it('notifies subscribers, stops on unsubscribe, and survives a throwing one', () => {
-    const channel = loopbackPresenceChannel<Cursor>()
-    const a = make({ id: 'a', ttl: 100, channel })
-    const b = make({ id: 'b', ttl: 100, channel })
-    b.subscribe(() => {
-      throw new Error('subscriber failed')
-    })
-    let notifications = 0
-    const stop = b.subscribe(() => {
-      notifications += 1
-    })
+  it('notifies subscribers, stops on unsubscribe, and survives a throwing one', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        // Let the forked consumer subscribe before anything is published.
+        yield* settle
+        b.subscribe(() => {
+          throw new Error('subscriber failed')
+        })
+        let notifications = 0
+        const stop = b.subscribe(() => {
+          notifications += 1
+        })
 
-    expect(() => a.set({ cursor: 1 })).not.toThrow()
-    expect(notifications).toBe(1)
+        yield* a.set({ cursor: 1 })
+        yield* settle
+        expect(notifications).toBe(1)
 
-    stop()
-    a.set({ cursor: 2 })
-    expect(notifications).toBe(1)
-  })
+        stop()
+        yield* a.set({ cursor: 2 })
+        yield* settle
+        expect(notifications).toBe(1)
+      }),
+    ))
 
-  it('stops receiving once closed', () => {
-    const channel = loopbackPresenceChannel<Cursor>()
-    const a = make({ id: 'a', ttl: 100, channel })
-    const b = make({ id: 'b', ttl: 100, channel })
+  it('stops receiving once closed', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        // Let the forked consumer subscribe before anything is published.
+        yield* settle
 
-    b.close()
-    a.set({ cursor: 9 })
-    expect(b.peers()).toEqual([])
-  })
+        yield* b.close
+        yield* a.set({ cursor: 9 })
+        yield* settle
+        expect(yield* b.peers).toEqual([])
+      }),
+    ))
 
-  it('carries presence between peers through a hub over sockets', () => {
-    const hub = createPresenceHub<Cursor>()
-    const a = socketPair()
-    const b = socketPair()
-    servePresence(a.server, hub)
-    servePresence(b.server, hub)
+  it('carries presence between peers through a hub over sockets', () =>
+    run(
+      Effect.gen(function* () {
+        const hub = createPresenceHub<Cursor>()
+        const a = socketPair()
+        const b = socketPair()
+        servePresence(a.server, hub)
+        servePresence(b.server, hub)
 
-    const presenceA = make({
-      id: 'a',
-      ttl: 100,
-      channel: socketPresenceChannel(a.client),
-    })
-    const presenceB = make({
-      id: 'b',
-      ttl: 100,
-      channel: socketPresenceChannel(b.client),
-    })
+        const presenceA = yield* make({
+          id: 'a',
+          ttl: '100 millis',
+          channel: yield* socketPresenceChannel<Cursor>(a.client),
+        })
+        const presenceB = yield* make({
+          id: 'b',
+          ttl: '100 millis',
+          channel: yield* socketPresenceChannel<Cursor>(b.client),
+        })
+        yield* settle
 
-    presenceA.set({ cursor: 1 })
-    expect(presenceB.peers().map(peer => [peer.id, peer.value.cursor])).toEqual([['a', 1]])
+        yield* presenceA.set({ cursor: 1 })
+        yield* settle
+        expect((yield* presenceB.peers).map(peer => [peer.id, peer.value.cursor])).toEqual([
+          ['a', 1],
+        ])
 
-    presenceA.leave()
-    expect(presenceB.peers()).toEqual([])
-
-    presenceA.close()
-    presenceB.close()
-  })
+        yield* presenceA.leave
+        yield* settle
+        expect(yield* presenceB.peers).toEqual([])
+      }),
+    ))
 
   it('ignores messages that are not presence updates', () => {
     const hub = createPresenceHub<Cursor>()
@@ -169,13 +221,22 @@ describe('presence', () => {
     expect(seen).toEqual(['a'])
   })
 
-  it('drops a peer value that fails the contract', () => {
-    const channel = loopbackPresenceChannel<Cursor>()
-    const b = make({ id: 'b', ttl: 100, channel })
+  it('drops a peer value that fails the contract', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        // Let the forked consumer subscribe before anything is published.
+        yield* settle
 
-    // A hostile peer bypasses the typed publish with a wrong-shaped value.
-    channel.publish({ id: 'a', value: { cursor: 'not a number' } as unknown as Cursor })
+        // A hostile peer bypasses the typed publish with a wrong-shaped value.
+        yield* PubSub.publish(channel.updates, {
+          id: 'a',
+          value: { cursor: 'not a number' } as unknown as Cursor,
+        })
+        yield* settle
 
-    expect(b.peers()).toEqual([])
-  })
+        expect(yield* b.peers).toEqual([])
+      }),
+    ))
 })
