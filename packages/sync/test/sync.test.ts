@@ -10,6 +10,7 @@ import {
   type Operation,
   type Replica,
   type ReplicaState,
+  type ReplicaStatus,
   type Storage,
   type SyncDefinition,
   type TransportClient,
@@ -100,6 +101,8 @@ const shared = (replica: Replica<Message, Shared>): Shared => Effect.runSync(rep
 const pending = (replica: Replica<Message, Shared>): ReadonlyArray<Operation> =>
   Effect.runSync(replica.pending)
 const cursor = (replica: Replica<Message, Shared>): number => Effect.runSync(replica.cursor)
+const status = (replica: Replica<Message, Shared>): Promise<ReplicaStatus> =>
+  Effect.runPromise(replica.status)
 const close = (replica: Replica<Message, Shared>): Promise<void> => Effect.runPromise(replica.close)
 
 describe('the operation codec', () => {
@@ -339,5 +342,37 @@ describe('the replica', () => {
     expect(cursor(replica)).toBe(1100)
     const saved = (await Effect.runPromise(storage.load())) as ReplicaState<Shared>
     expect(saved.committedIds.length).toBeLessThan(1100)
+  })
+
+  it('reports a refusal without exposing internals', async () => {
+    const replica = await open('a')
+    await submit(replica, created('t'))
+
+    expect((await status(replica)).rejected).toEqual([])
+
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: ['a:1'] }) })
+
+    expect(await status(replica)).toEqual({
+      pending: 0,
+      cursor: 0,
+      lastError: undefined,
+      rejected: ['a:1'],
+    })
+  })
+
+  it('records the last exchange failure and clears it after a success', async () => {
+    const replica = await open('a')
+
+    await expect(
+      sync(replica, {
+        exchange: async () => {
+          throw new Error('offline')
+        },
+      }),
+    ).rejects.toThrow('offline')
+    expect((await status(replica)).lastError).toBe('offline')
+
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: [] }) })
+    expect((await status(replica)).lastError).toBeUndefined()
   })
 })

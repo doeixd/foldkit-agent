@@ -39,6 +39,9 @@ const shared = Effect.runSync(replica.shared)
 - Reconciliation: committed operations are replayed in order, acknowledged or
   refused pending entries are dropped, and a checkpoint replaces the compacted
   prefix.
+- A redacted status (`replica.status`): the pending count, the cursor, the last
+  exchange failure, and the operations the server refused — enough for a UI to
+  explain and recover without exposing Messages or the Model.
 - Strict decoding: an operation is always validated with the application's
   Message schema, and a Message the contract does not call durable is refused.
 - Presence (`createPresence`): an ephemeral, TTL'd peer registry, deliberately

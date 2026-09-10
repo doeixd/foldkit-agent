@@ -57,6 +57,7 @@ export {
   type Operation,
   type Replica,
   type ReplicaState,
+  type ReplicaStatus,
   type Sync,
   type SyncDefinition,
   type TransportClient,

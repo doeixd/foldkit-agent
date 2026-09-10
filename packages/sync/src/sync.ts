@@ -96,11 +96,23 @@ export interface TransportClient {
   exchange(cursor: number, pending: ReadonlyArray<Operation>): Promise<unknown>
 }
 
+/** A redacted view of a replica's state, for a UI to explain and recover. */
+export interface ReplicaStatus {
+  readonly pending: number
+  readonly cursor: number
+  /** The last exchange failure, cleared by a successful exchange. */
+  readonly lastError: string | undefined
+  /** Operations the server refused, most recent first. */
+  readonly rejected: ReadonlyArray<OpId>
+}
+
 export interface Replica<Message, Shared> {
   /** The optimistic projection: committed state with pending operations replayed. */
   readonly shared: Effect.Effect<Shared>
   readonly pending: Effect.Effect<ReadonlyArray<Operation>>
   readonly cursor: Effect.Effect<number>
+  /** Waiting/recovery information without exposing Messages or the Model. */
+  readonly status: Effect.Effect<ReplicaStatus>
   readonly submit: (message: Message) => Effect.Effect<void, ReplicaError>
   /** Reconciles against the server. The `Transport` service must be provided. */
   readonly synchronize: Effect.Effect<void, ReplicaError | TransportError, Transport>
@@ -270,6 +282,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
 
       const stateRef = yield* SynchronizedRef.make(state)
       const closed = yield* Ref.make(false)
+      const lastError = yield* Ref.make<string | undefined>(undefined)
+      const rejectedOps = yield* Ref.make<ReadonlyArray<OpId>>([])
 
       // `SynchronizedRef.modifyEffect` installs the returned state itself, so
       // persisting must not also set the ref (that would re-enter the lock).
@@ -326,10 +340,13 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         const response = decodeExchange(
           yield* transport.exchange(sent.cursor, sent.pending).pipe(
             Effect.tapError(error =>
-              Effect.logWarning('sync exchange failed', {
-                documentId,
-                replicaId,
-                error: error.message,
+              Effect.gen(function* () {
+                yield* Effect.logWarning('sync exchange failed', {
+                  documentId,
+                  replicaId,
+                  error: error.message,
+                })
+                yield* Ref.set(lastError, error.message)
               }),
             ),
           ),
@@ -408,12 +425,26 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             return [undefined, next] as const
           }),
         )
+        yield* Ref.set(lastError, undefined)
+        if (response.rejected.length > 0)
+          yield* Ref.update(rejectedOps, previous =>
+            [...response.rejected, ...previous].slice(0, 32),
+          )
       }).pipe(Effect.withSpan('Sync.synchronize', { attributes: { documentId } }))
 
       return {
         shared: Effect.map(SynchronizedRef.get(stateRef), optimistic),
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
         cursor: Effect.map(SynchronizedRef.get(stateRef), state => state.cursor),
+        status: Effect.gen(function* () {
+          const state = yield* SynchronizedRef.get(stateRef)
+          return {
+            pending: state.pending.length,
+            cursor: state.cursor,
+            lastError: yield* Ref.get(lastError),
+            rejected: yield* Ref.get(rejectedOps),
+          }
+        }),
         submit,
         synchronize,
         close: Effect.gen(function* () {
