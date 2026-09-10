@@ -1785,6 +1785,37 @@ From there:
 
 WebMCP is particularly compelling because it can expose these capabilities directly from the page that already owns the Foldkit Runtime — no DOM automation and no external browser-session bridge required.
 
+# Replicated shared state: `foldkit-durable` + `foldkit-sync`
+
+`foldkit-agent` projects an application's Message union to agents. The same
+union, run over a durable ordered log, also supports offline, multiplayer, and
+remote-agent state. That half lives in two prototype packages:
+
+| Package | What it is |
+| --- | --- |
+| [`foldkit-durable`](./packages/durable) | A durable, ordered operation log: atomic idempotent append, a snapshot and cursor per key, compaction, change notification, and a durable effect ledger keyed by operation. |
+| [`foldkit-sync`](./packages/sync) | A local-first replica: an offline outbox, an optimistic projection, and reconciliation against the authoritative order, plus an Effect `Transport` service and an ephemeral TTL'd presence registry. |
+
+`examples/sync` is the worked example: a SQLite journal, IndexedDB replicas, a
+`ws` transport, an agent bound to the shared replica, and a demo that runs the
+whole path.
+
+The model, in one line:
+
+> Selected Messages are serializable operations over an explicit projection of
+> the Model, replicated through a server-sequenced durable log.
+
+Invariants the packages hold: an operation commits at most once despite
+retransmission; replica-local Model state never enters the shared snapshot;
+availability and authorization are checked before commit; compaction and
+checkpoints never change the logical state; presence never enters the log; and a
+server-authority effect runs at most once per operation.
+
+Both packages are `private` prototypes. There is no CRDT merge, no
+Message-schema migration, and the command-authority taxonomy is only partly
+expressed (effects are declared per Message). See
+[issue #42](https://github.com/doeixd/foldkit-agent/issues/42) for the roadmap.
+
 ## Repository
 
 ```text
