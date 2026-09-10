@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Config, Deferred, Effect, Fiber, Metric, Option, Stream, type Scope } from 'effect'
@@ -15,6 +16,11 @@ import {
   type Journal,
   type JournalOptions,
 } from '../src/index.js'
+
+// Vite 5's builtin list predates node:sqlite; let Node resolve it directly.
+const { DatabaseSync } = createRequire(import.meta.url)(
+  'node:sqlite',
+) as typeof import('node:sqlite')
 
 interface Operation {
   readonly opId: string
@@ -294,6 +300,60 @@ describe('a durable journal', () => {
       const result = yield* Effect.result(journal.read(todos, 2))
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidCursorError' } })
     }))
+
+  it('upgrades a database written before version tracking, keeping its data', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'foldkit-migrate-'))
+    const path = join(directory, 'journal.sqlite')
+    try {
+      // A database from before the `user_version` migration: the tables exist
+      // and hold data, but no version is recorded.
+      const legacy = new DatabaseSync(path)
+      legacy.exec(`
+        CREATE TABLE documents (
+          key TEXT PRIMARY KEY, cursor INTEGER NOT NULL, snapshot TEXT NOT NULL,
+          compact_before INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE operations (
+          key TEXT NOT NULL, op_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+          actor_id TEXT NOT NULL, input TEXT,
+          PRIMARY KEY (key, op_id), UNIQUE (key, sequence)
+        );
+        CREATE TABLE effects (
+          key TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, error TEXT
+        );
+        INSERT INTO operations (key, op_id, sequence, actor_id, input)
+          VALUES ('todos', 'a:1', 1, 'owner', '{"opId":"a:1","kind":"add","id":"a"}');
+        INSERT INTO documents (key, cursor, snapshot)
+          VALUES ('todos', 1, '{"ids":["a"]}');
+      `)
+      legacy.close()
+
+      await withJournal(
+        function* (journal) {
+          expect(
+            (yield* journal.read(todos, 0)).map(committed => [
+              committed.operation.opId,
+              committed.sequence,
+            ]),
+          ).toEqual([['a:1', 1]])
+          expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
+          // The log continues from the legacy cursor rather than restarting.
+          expect((yield* journal.append(todos, add(2, 'b'), principal)).sequence).toBe(2)
+        },
+        {},
+        path,
+      )
+
+      const migrated = new DatabaseSync(path)
+      try {
+        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 1 })
+      } finally {
+        migrated.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 
   it('notifies subscribers after a commit and stops after unsubscribe', () =>
     withJournal(function* (journal) {
