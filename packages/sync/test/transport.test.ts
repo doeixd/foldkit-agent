@@ -1,9 +1,10 @@
 import { Effect } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   layerFromPromise,
   layerLoopback,
   layerSocket,
+  nativeSocket,
   serveSocket,
   toPromise,
   Transport,
@@ -228,5 +229,49 @@ describe('the socket transport', () => {
       _tag: 'Failure',
       failure: { _tag: 'SyncTransportError', message: 'transport closed' },
     })
+  })
+})
+
+describe('the default socket', () => {
+  it('removes the close listener it registers', () => {
+    class FakeSocket {
+      static readonly OPEN = 1
+      static readonly instances: FakeSocket[] = []
+      readyState = 0
+      private readonly listeners = new Map<string, Set<(event: unknown) => void>>()
+      constructor() {
+        FakeSocket.instances.push(this)
+      }
+      addEventListener(type: string, listener: (event: unknown) => void): void {
+        const set = this.listeners.get(type) ?? new Set()
+        set.add(listener)
+        this.listeners.set(type, set)
+      }
+      removeEventListener(type: string, listener: (event: unknown) => void): void {
+        this.listeners.get(type)?.delete(listener)
+      }
+      emit(type: string): void {
+        for (const listener of [...(this.listeners.get(type) ?? [])]) listener({})
+      }
+      send(): void {}
+      close(): void {}
+    }
+
+    vi.stubGlobal('WebSocket', FakeSocket)
+    try {
+      const socket = nativeSocket('ws://test')
+      const instance = FakeSocket.instances[0]!
+      const listener = vi.fn()
+      const off = socket.onClose(listener)
+
+      instance.emit('close')
+      expect(listener).toHaveBeenCalledTimes(1)
+
+      off()
+      instance.emit('close')
+      expect(listener).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

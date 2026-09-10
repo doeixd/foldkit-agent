@@ -126,7 +126,8 @@ export interface SocketOptions {
   readonly makeSocket?: ((url: string) => SocketLike) | undefined
 }
 
-const nativeSocket = (url: string): SocketLike => {
+/** The default socket factory: the platform `WebSocket`, as a `SocketLike`. */
+export const nativeSocket = (url: string): SocketLike => {
   const socket = new WebSocket(url)
   return {
     send: data => socket.send(data),

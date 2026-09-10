@@ -24,6 +24,7 @@ export {
   layerFromPromise,
   layerLoopback,
   layerSocket,
+  nativeSocket,
   serveSocket,
   toPromise,
   Transport,
