@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Deferred, Effect, Fiber, Option, type Scope } from 'effect'
+import { Deferred, Effect, Fiber, Option, Stream, type Scope } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { makeJournal, type Codec, type Journal, type JournalOptions } from '../src/index.js'
 
@@ -246,25 +246,41 @@ describe('a durable journal', () => {
   it('notifies subscribers after a commit and stops after unsubscribe', () =>
     withJournal(function* (journal) {
       const seen: string[] = []
-      const unsubscribe = journal.subscribe(key => {
-        seen.push(key)
-      })
+      const subscriber = yield* Effect.forkScoped(
+        Stream.runForEach(journal.subscribe, key => Effect.sync(() => seen.push(key))),
+      )
+      yield* Effect.yieldNow
 
       yield* journal.append('todos', add(1), principal)
+      yield* Effect.yieldNow
       expect(seen).toEqual(['todos'])
 
-      unsubscribe()
+      yield* Fiber.interrupt(subscriber)
       yield* journal.append('todos', add(2), principal)
+      yield* Effect.yieldNow
       expect(seen).toEqual(['todos'])
     }))
 
   it('keeps committing when a subscriber throws', () =>
     withJournal(function* (journal) {
-      journal.subscribe(() => {
-        throw new Error('subscriber failed')
-      })
+      const seen: string[] = []
+      yield* Effect.forkScoped(
+        Stream.runForEach(journal.subscribe, () =>
+          Effect.sync(() => {
+            throw new Error('subscriber failed')
+          }).pipe(Effect.catchCause(() => Effect.void)),
+        ),
+      )
+      yield* Effect.forkScoped(
+        Stream.runForEach(journal.subscribe, key => Effect.sync(() => seen.push(key))),
+      )
+      yield* Effect.yieldNow
 
       yield* journal.append('todos', add(1), principal)
+      yield* Effect.yieldNow
+      // A failing subscriber is isolated: the commit lands and every other
+      // subscriber still sees it.
+      expect(seen).toEqual(['todos'])
       expect((yield* journal.load('todos')).cursor).toBe(1)
     }))
 })

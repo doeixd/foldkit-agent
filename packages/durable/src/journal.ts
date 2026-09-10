@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { Deferred, Effect, Exit, Option, type Scope } from 'effect'
+import { Deferred, Effect, Exit, Option, PubSub, Stream, SynchronizedRef, type Scope } from 'effect'
 import type { Codec } from './codec.js'
 import {
   IdentityConflictError,
@@ -119,8 +119,12 @@ export interface Journal<Operation, Snapshot, Principal> {
     key: string,
     run: Effect.Effect<Result, E>,
   ) => Effect.Effect<Result, E | JournalError>
-  /** Notified after each commit that changed a snapshot, with the key. */
-  readonly subscribe: (listener: (key: string) => void) => () => void
+  /**
+   * The document keys a commit changed. Subscription is a `Stream`, so a
+   * subscriber never fails or slows a commit; a caller that needs a callback
+   * adapts it at the edge.
+   */
+  readonly subscribe: Stream.Stream<string>
 }
 
 const describe = (cause: unknown): string =>
@@ -142,42 +146,40 @@ const journalError = (message: string, cause: unknown): JournalError =>
 export const makeJournal = <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
 ): Effect.Effect<Journal<Operation, Snapshot, Principal>, JournalError, Scope.Scope> =>
-  Effect.acquireRelease(
-    Effect.try({
-      try: () => {
-        const database = new DatabaseSync(options.file)
-        try {
-          database.exec(SCHEMA)
-        } catch (error) {
-          database.close()
-          throw error
-        }
-        return database
-      },
-      catch: cause => journalError('Could not open the journal', cause),
-    }),
-    database => Effect.sync(() => database.close()),
-  ).pipe(Effect.map(database => makeShape(database, options)))
+  Effect.gen(function* () {
+    const database = yield* Effect.acquireRelease(
+      Effect.try({
+        try: () => {
+          const database = new DatabaseSync(options.file)
+          try {
+            database.exec(SCHEMA)
+          } catch (error) {
+            database.close()
+            throw error
+          }
+          return database
+        },
+        catch: cause => journalError('Could not open the journal', cause),
+      }),
+      database => Effect.sync(() => database.close()),
+    )
+    const changes = yield* PubSub.unbounded<string>()
+    const inFlight = yield* SynchronizedRef.make(
+      new Map<string, Deferred.Deferred<unknown, unknown>>(),
+    )
+    return makeShape(database, options, changes, inFlight)
+  })
 
 const makeShape = <Operation, Snapshot, Principal>(
   database: InstanceType<typeof DatabaseSync>,
   options: JournalOptions<Operation, Snapshot, Principal>,
+  changes: PubSub.PubSub<string>,
+  inFlight: SynchronizedRef.SynchronizedRef<Map<string, Deferred.Deferred<unknown, unknown>>>,
 ): Journal<Operation, Snapshot, Principal> => {
   type Shape = Journal<Operation, Snapshot, Principal>
-  const listeners = new Set<(key: string) => void>()
-  const inFlight = new Map<string, Deferred.Deferred<unknown, unknown>>()
-
-  const notify = (key: string): void => {
-    for (const listener of [...listeners]) {
-      try {
-        listener(key)
-      } catch {
-        // A subscriber must never fail a commit.
-      }
-    }
-  }
 
   const load: Shape['load'] = Effect.fn('Journal.load')(function* (key: string) {
+    yield* Effect.annotateCurrentSpan({ key })
     return yield* Effect.try({
       try: () => {
         const row = database
@@ -205,6 +207,7 @@ const makeShape = <Operation, Snapshot, Principal>(
   }
 
   const floor: Shape['floor'] = Effect.fn('Journal.floor')(function* (key: string) {
+    yield* Effect.annotateCurrentSpan({ key })
     return yield* Effect.try({
       try: () => compactBefore(key),
       catch: cause => journalError('Could not read the compaction floor', cause),
@@ -221,12 +224,13 @@ const makeShape = <Operation, Snapshot, Principal>(
       catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
     })
     const opId = options.opId(operation)
+    yield* Effect.annotateCurrentSpan({ key, opId })
     const actorId = options.actorId(principal)
     const encoded = yield* Effect.try({
       try: () => JSON.stringify(options.operation.encode(operation)),
       catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
     })
-    return yield* Effect.try({
+    const outcome = yield* Effect.try({
       try: () => {
         database.exec('BEGIN IMMEDIATE')
         try {
@@ -250,7 +254,7 @@ const makeShape = <Operation, Snapshot, Principal>(
                 message: `Operation "${opId}" was reused with different data or actor`,
               })
             database.exec('COMMIT')
-            return committed
+            return { committed, changed: false }
           }
           const { snapshot, cursor } = loadSync()
           try {
@@ -279,8 +283,7 @@ const makeShape = <Operation, Snapshot, Principal>(
             )
             .run(key, sequence, JSON.stringify(options.snapshot.encode(reduced)))
           database.exec('COMMIT')
-          notify(key)
-          return { operation, sequence, actorId }
+          return { committed: { operation, sequence, actorId }, changed: true }
         } catch (error) {
           database.exec('ROLLBACK')
           throw error
@@ -296,6 +299,10 @@ const makeShape = <Operation, Snapshot, Principal>(
         return journalError('Could not append the operation', cause)
       },
     })
+    // Publish only after the transaction committed, so a subscriber never
+    // observes a change that could still roll back.
+    if (outcome.changed) yield* PubSub.publish(changes, key)
+    return outcome.committed
 
     function loadSync(): { snapshot: Snapshot; cursor: number } {
       const row = database.prepare('SELECT cursor, snapshot FROM documents WHERE key = ?').get(key)
@@ -312,6 +319,7 @@ const makeShape = <Operation, Snapshot, Principal>(
     key: string,
     through: number,
   ) {
+    yield* Effect.annotateCurrentSpan({ key, through })
     yield* Effect.try({
       try: () => {
         const cursor = cursorOf(key)
@@ -340,6 +348,7 @@ const makeShape = <Operation, Snapshot, Principal>(
   })
 
   const read: Shape['read'] = Effect.fn('Journal.read')(function* (key: string, after: number) {
+    yield* Effect.annotateCurrentSpan({ key, after })
     return yield* Effect.try({
       try: () => {
         const cursor = cursorOf(key)
@@ -366,6 +375,7 @@ const makeShape = <Operation, Snapshot, Principal>(
   })
 
   const effect: Shape['effect'] = Effect.fn('Journal.effect')(function* (key: string) {
+    yield* Effect.annotateCurrentSpan({ key })
     return yield* Effect.try({
       try: () => {
         const row = database
@@ -401,17 +411,30 @@ const makeShape = <Operation, Snapshot, Principal>(
     })
 
   const runEffect: Shape['runEffect'] = <Result, E>(key: string, run: Effect.Effect<Result, E>) =>
-    Effect.suspend(() => {
-      const existing = inFlight.get(key)
-      if (existing !== undefined)
-        return Deferred.await(existing) as Effect.Effect<Result, E | JournalError>
+    Effect.gen(function* () {
+      yield* Effect.annotateCurrentSpan({ key })
+      // Check-and-reserve is one atomic step, so a concurrent call joins the
+      // run already in flight instead of starting a second one.
+      const entry = yield* SynchronizedRef.modify(
+        inFlight,
+        (
+          map,
+        ): readonly [
+          { readonly deferred: Deferred.Deferred<unknown, unknown>; readonly owner: boolean },
+          Map<string, Deferred.Deferred<unknown, unknown>>,
+        ] => {
+          const existing = map.get(key)
+          if (existing !== undefined) return [{ deferred: existing, owner: false }, map]
+          const created = Deferred.makeUnsafe<unknown, unknown>()
+          const next = new Map(map)
+          next.set(key, created)
+          return [{ deferred: created, owner: true }, next]
+        },
+      )
+      if (!entry.owner)
+        return yield* Deferred.await(entry.deferred) as Effect.Effect<Result, E | JournalError>
 
-      // Reserve synchronously, before any yield, so a concurrent call joins
-      // this run instead of starting a second one.
-      const deferred = Deferred.makeUnsafe<Result, E | JournalError>()
-      inFlight.set(key, deferred as Deferred.Deferred<unknown, unknown>)
-
-      return Effect.gen(function* () {
+      return yield* Effect.gen(function* () {
         const recorded = yield* effect(key)
         if (Option.isSome(recorded) && recorded.value.status === 'succeeded')
           return recorded.value.result as Result
@@ -424,21 +447,20 @@ const makeShape = <Operation, Snapshot, Principal>(
       }).pipe(
         Effect.onExit(exit =>
           Exit.isSuccess(exit)
-            ? Effect.asVoid(Deferred.succeed(deferred, exit.value))
-            : Effect.asVoid(Deferred.failCause(deferred, exit.cause)),
+            ? Effect.asVoid(Deferred.succeed(entry.deferred, exit.value))
+            : Effect.asVoid(Deferred.failCause(entry.deferred, exit.cause)),
         ),
         Effect.ensuring(
-          Effect.sync(() => {
-            inFlight.delete(key)
+          SynchronizedRef.update(inFlight, map => {
+            const next = new Map(map)
+            next.delete(key)
+            return next
           }),
         ),
       )
     })
 
-  const subscribe: Shape['subscribe'] = listener => {
-    listeners.add(listener)
-    return () => listeners.delete(listener)
-  }
+  const subscribe: Shape['subscribe'] = Stream.fromPubSub(changes)
 
   return { load, floor, read, append, compact, effect, runEffect, subscribe }
 }

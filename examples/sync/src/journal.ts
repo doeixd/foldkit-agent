@@ -1,4 +1,4 @@
-import { Effect, Exit, Scope } from 'effect'
+import { Effect, Exit, Fiber, Scope, Stream } from 'effect'
 import {
   makeJournal,
   type Committed as DurableCommitted,
@@ -174,7 +174,16 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
     read,
     compact: (documentId, through) => Effect.runSync(durable.compact(documentId, through)),
     snapshot,
-    subscribe: durable.subscribe,
+    // The agent host still registers a callback; the journal's subscription is
+    // a Stream, so this is the edge where it is bridged back.
+    subscribe: listener => {
+      const fiber = Effect.runFork(
+        Stream.runForEach(durable.subscribe, key =>
+          Effect.sync(() => listener(key)).pipe(Effect.catchCause(() => Effect.void)),
+        ),
+      )
+      return () => Effect.runSync(Fiber.interrupt(fiber))
+    },
     transport: (principal: Principal): TransportClient => ({
       exchange: async (cursor, pending) => {
         if (!principal.actorId) throw new Error('Unauthenticated reader')
