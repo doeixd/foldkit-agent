@@ -7,9 +7,14 @@
     "composite": true,
     "paths": {
       "foldkit-agent": ["../../packages/agent/src/index.ts"],
-      "foldkit-agent-mcp": ["../../packages/agent-mcp/src/index.ts"]
+      "foldkit-agent-mcp": ["../../packages/agent-mcp/src/index.ts"],
+      "foldkit-durable": ["../../packages/durable/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "references": [{ "path": "../../packages/agent" }, { "path": "../../packages/agent-mcp" }]
+  "references": [
+    { "path": "../../packages/agent" },
+    { "path": "../../packages/agent-mcp" },
+    { "path": "../../packages/durable" }
+  ]
 }

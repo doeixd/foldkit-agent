@@ -47,6 +47,9 @@ importers:
       foldkit-agent:
         specifier: workspace:*
         version: link:../../packages/agent
+      foldkit-durable:
+        specifier: workspace:*
+        version: link:../../packages/durable
     devDependencies:
       '@types/jsdom':
         specifier: 21.1.7

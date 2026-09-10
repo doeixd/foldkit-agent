@@ -41,8 +41,7 @@ const decodeOperation = Schema.decodeUnknownSync(Operation, { onExcessProperty: 
 const decodeCommitted = Schema.decodeUnknownSync(Committed, { onExcessProperty: 'error' })
 export const decodeState = Schema.decodeUnknownSync(ReplicaState, { onExcessProperty: 'error' })
 
-const validate = <O extends Operation>(operation: O, documentId: string): O => {
-  if (operation.documentId !== documentId) throw new Error('Wrong document')
+const shape = <O extends Operation>(operation: O): O => {
   if (
     operation.localSequence < 1 ||
     operation.opId !== `${operation.replicaId}:${operation.localSequence}`
@@ -54,11 +53,24 @@ const validate = <O extends Operation>(operation: O, documentId: string): O => {
   return { ...operation, message: encodeMessage(message) }
 }
 
+const assertDocument = <O extends Operation>(operation: O, documentId: string): O => {
+  if (operation.documentId !== documentId) throw new Error('Wrong document')
+  return operation
+}
+
+/**
+ * Decodes and normalizes an operation envelope without checking its document.
+ *
+ * The durable journal keys by document, so the document check is the adapter's,
+ * not the codec's: a codec sees only the value.
+ */
+export const normalizeOperation = (input: unknown): Operation => shape(decodeOperation(input))
+
 export const operationFrom = (input: unknown, documentId: string): Operation =>
-  validate(decodeOperation(input), documentId)
+  assertDocument(normalizeOperation(input), documentId)
 
 export const committedFrom = (input: unknown, documentId: string): Committed =>
-  validate(decodeCommitted(input), documentId)
+  assertDocument(shape(decodeCommitted(input)), documentId)
 
 const Checkpoint = Schema.Struct({
   cursor: Sequence,

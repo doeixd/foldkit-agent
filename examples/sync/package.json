@@ -11,7 +11,8 @@
   "dependencies": {
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
-    "foldkit-agent": "workspace:*"
+    "foldkit-agent": "workspace:*",
+    "foldkit-durable": "workspace:*"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.4",
