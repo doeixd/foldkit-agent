@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
+import { Agent } from 'foldkit-agent'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Message, replay, update } from '../src/app.js'
+import { Message, replay, update, type Shared } from '../src/app.js'
 import { indexedDb, type Storage } from '../src/indexedDb.js'
-import { openJournal } from '../src/journal.js'
+import { openJournal, type Principal } from '../src/journal.js'
 import { openReplica, type Replica } from '../src/replica.js'
+import { serverAgentHost } from '../src/serverAgent.js'
 import type { Exchange, Operation } from '../src/protocol.js'
 
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
@@ -510,5 +512,77 @@ describe('replay safety', () => {
         model: { ...update(model, message).model, selectedTodoId: 'a' },
       })),
     ).toThrow('local Model fields')
+  })
+})
+
+describe('a server agent', () => {
+  const SyncAgent = Agent.forModel<Shared, Principal>()
+  const rename = { name: 'rename_todo', description: 'Rename a shared todo' } as const
+
+  it('commits a dispatch as an operation a replica converges on', async () => {
+    server.append(operation('seed', 1, created('a')), principal)
+    const agent = Agent.bind({
+      definition: SyncAgent.define({
+        messages: SyncAgent.expose(Message, { RenamedTodo: rename }),
+      }),
+      host: serverAgentHost({ journal: server, principal }),
+    })
+
+    await Effect.runPromise(agent.messages.dispatch('rename_todo', { id: 'a', title: 'renamed' }))
+
+    // The agent is a producer with its own replica identity and the caller's
+    // actor, not a second mutation path.
+    expect(server.read('todos', 0).at(-1)).toMatchObject({
+      replicaId: 'agent',
+      actorId: 'owner',
+    })
+
+    const replica = await open('replica')
+    await replica.synchronize(server.transport(principal))
+    expect(replica.shared()).toEqual(server.snapshot('todos').model)
+  })
+
+  it('refuses a capability the principal may not invoke, appending nothing', async () => {
+    const agent = Agent.bind({
+      definition: SyncAgent.define({
+        messages: SyncAgent.expose(Message, {
+          RenamedTodo: {
+            ...rename,
+            authorize: ({ principal }) => principal.actorId === 'owner',
+          },
+        }),
+      }),
+      host: serverAgentHost({ journal: server, principal: { ...principal, actorId: 'guest' } }),
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(agent.messages.dispatch('rename_todo', { id: 'a', title: 'x' })),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag === 'Failure') expect(result.failure._tag).toBe('AgentAuthorizationError')
+    expect(server.snapshot('todos').cursor).toBe(0)
+  })
+
+  it('cannot bypass the journal policy', () => {
+    const guarded = openJournal(':memory:', {
+      authorize: ({ principal }) => principal.actorId === 'owner',
+    })
+    try {
+      const host = serverAgentHost({
+        journal: guarded,
+        principal: { ...principal, actorId: 'guest' },
+      })
+
+      // The agent runtime turns a host throw into a defect, so a diverging
+      // policy fails loudly rather than committing. The contract's typed
+      // `authorize` is the refusal path a caller should see.
+      expect(() => host.dispatch(Message.RenamedTodo({ id: 'a', title: 'x' }))).toThrow(
+        'refused by authorization',
+      )
+      expect(guarded.snapshot('todos').cursor).toBe(0)
+    } finally {
+      guarded.close()
+    }
   })
 })

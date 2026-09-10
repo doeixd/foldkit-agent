@@ -13,7 +13,7 @@ pnpm exec vitest run examples/sync/test
 pnpm --filter foldkit-agent-example-sync dev
 ```
 
-The command-line demo recovers an offline outbox, converges two replicas through a SQLite journal, and dispatches a server agent capability through the same journal. Its browser storage is emulated with `fake-indexeddb`.
+The command-line demo recovers an offline outbox, converges two replicas through a SQLite journal, and dispatches server agent capabilities through the same journal as another producer. Its browser storage is emulated with `fake-indexeddb`.
 
 The dev page uses native IndexedDB and the real Foldkit runtime. Add a todo, select it, and reload: the todo survives while selection resets. This flow was also checked in Chromium. The page exercises local durability; the two-client reconciliation tests use emulated IndexedDB and real SQLite. There is no network server in this example.
 
@@ -37,6 +37,8 @@ The server accepts an already authenticated `Principal` supplied by the transpor
 The client replays newly committed operations in server order, removes acknowledged or explicitly refused pending entries, then replays remaining pending operations on that committed projection. A lost acknowledgement causes safe resend. The server reports acknowledged send IDs explicitly, so a pending operation it committed and then compacted is dropped rather than replayed onto the snapshot the replica adopts. Unknown rejection IDs, malformed responses, unsupported versions, and gaps fail without changing saved state. Concurrent renames use server order. Delete is an ordinary ordered operation; later rename of a missing entity is a no-op.
 
 Compaction drops committed payloads but keeps one identity row per operation so retransmission stays idempotent, and a replica behind the floor adopts the snapshot as a checkpoint. There is no compaction schedule and the identity rows are never garbage-collected. There is no CRDT merge, peer-to-peer authority, presence channel, schema migration, production transport, or general package API. Retained history and committed IDs still make storage and replay costs grow with history and outbox size. Browser storage eviction and abrupt machine power loss are outside the recovery tests.
+
+An `AgentRuntime` bound to the journal (`serverAgentHost`) is an ordinary producer: a capability dispatch becomes one operation authored by a dedicated replica, under the caller's authenticated principal. The contract's `authorize` is the typed refusal a caller sees; the journal policy underneath is the authoritative backstop, so a binding that diverges from it fails loudly instead of committing. Protocol adapters call `dispatchUnknown` on that runtime, so a remote tool call would land in the same durable log the browser converges on. No MCP, A2A, or HTTP transport is wired in this example.
 
 ## Replay and the runtime boundary
 
