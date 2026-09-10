@@ -64,8 +64,8 @@ const describedSchema = (
   schema: Parameters<typeof Schema.toStandardSchemaV1>[0],
 ): StandardSchemaV1<unknown, unknown> => {
   const described = Schema.toStandardJSONSchemaV1(schema as never)
-  // Populates `validate` on the same `~standard` the line above just built.
-  Schema.toStandardSchemaV1(schema)
+  // Stripping fields here would hide invalid input from dispatch's strict decoder.
+  Schema.toStandardSchemaV1(schema, { parseOptions: { onExcessProperty: 'error' } })
 
   return described as unknown as StandardSchemaV1<unknown, unknown>
 }

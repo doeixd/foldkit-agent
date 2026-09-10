@@ -177,6 +177,18 @@ describe('the schema bridge', () => {
     expect(result.issues?.length).toBeGreaterThan(0)
   })
 
+  it.each([
+    ['create_todo', { title: 'x', extra: true }],
+    ['set_limit', { value: '42', extra: true }],
+  ])('rejects undeclared fields before %s can strip them', async (name, input) => {
+    const action = named(name)
+    const result = await action.schema['~standard'].validate(input)
+
+    expect(result.issues?.length).toBeGreaterThan(0)
+    expect(await action.run(input)).toMatchObject({ ok: false })
+    expect(dispatched).toEqual([])
+  })
+
   it('carries its JSON Schema, which is where advertised parameters come from', () => {
     // defineAction reads ~standard.jsonSchema for the tool's parameters. A
     // validation-only Standard Schema is accepted and advertises nothing, so an
