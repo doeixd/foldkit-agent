@@ -1,4 +1,5 @@
 import type { Agent } from 'foldkit-agent'
+import type { ActionTool } from '@agent-native/core/server'
 import { Effect, Schema } from 'effect'
 import type { StandardSchemaV1 } from 'effect/StandardSchema'
 
@@ -29,7 +30,7 @@ export interface ActionResult {
 export interface ActionEntry {
   readonly tool: {
     readonly description: string
-    readonly parameters: Record<string, unknown>
+    readonly parameters: NonNullable<ActionTool['parameters']>
   }
   readonly run: (args: unknown, context?: ActionRunContext) => Promise<ActionResult>
   readonly schema: StandardSchemaV1<unknown, unknown>
@@ -114,8 +115,17 @@ export const actions = (options: ActionsOptions): Record<string, ActionEntry> =>
   const entries: Record<string, ActionEntry> = Object.create(null)
 
   for (const variant of options.definition.messages.variants) {
+    if (variant.inputJsonSchema.type !== 'object') {
+      throw new Error(`Agent Native capability "${variant.name}" requires an object input schema`)
+    }
     entries[variant.name] = {
-      tool: { description: variant.description, parameters: variant.inputJsonSchema },
+      tool: {
+        description: variant.description,
+        parameters: {
+          properties: {},
+          ...variant.inputJsonSchema,
+        } as NonNullable<ActionTool['parameters']>,
+      },
       // Validated on the *encoded* side. The framework hands `run` whatever
       // this schema parsed, and `run` hands that to `dispatchUnknown`, which
       // decodes. A decoding schema here would decode a transforming input
