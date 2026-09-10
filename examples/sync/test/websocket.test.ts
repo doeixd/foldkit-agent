@@ -1,10 +1,11 @@
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { layerSocket } from 'foldkit-sync'
+import { WebSocket as WsClient } from 'ws'
 import { afterEach, expect, it } from 'vitest'
 import { Message } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
-import { startSyncServer, type SyncServer } from '../src/server.js'
+import { startSyncServer, type Authenticated, type SyncServer } from '../src/server.js'
 import { closeStorages, openReplicaEffect, openStorage, type TodoReplica } from './helpers.js'
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
@@ -12,8 +13,11 @@ const accounts: Record<string, Principal> = {
   alice: { actorId: 'alice', documentId: 'todos', canWrite: true },
   bob: { actorId: 'bob', documentId: 'todos', canWrite: false },
 }
-const authenticate = (token: string | null): Principal | undefined =>
-  token === null ? undefined : accounts[token]
+const authenticate = (token: string | null): Authenticated | undefined => {
+  if (token === null) return undefined
+  const account = accounts[token]
+  return account === undefined ? undefined : { principal: account }
+}
 const servers: Array<SyncServer> = []
 
 afterEach(async () => {
@@ -29,7 +33,7 @@ const sync = (url: string, replica: TodoReplica): Promise<void> =>
 
 it('converges a replica over a real WebSocket', async () => {
   const journal = openJournal(':memory:')
-  const server = await startSyncServer({ journal, authenticate: () => principal })
+  const server = await startSyncServer({ journal, authenticate: () => ({ principal }) })
   servers.push(server)
   const replica = await openReplica('browser')
   try {
@@ -51,7 +55,7 @@ it('converges a replica over a real WebSocket', async () => {
 
 it('converges two replicas over the wire', async () => {
   const journal = openJournal(':memory:')
-  const server = await startSyncServer({ journal, authenticate: () => principal })
+  const server = await startSyncServer({ journal, authenticate: () => ({ principal }) })
   servers.push(server)
   const a = await openReplica('a')
   const b = await openReplica('b')
@@ -106,6 +110,41 @@ it('derives a principal per connection and refuses an unknown token', async () =
     expect(Effect.runSync(stranger.cursor)).toBe(0)
   } finally {
     await Promise.all([alice, bob, stranger].map(replica => Effect.runPromise(replica.close)))
+    journal.close()
+  }
+})
+
+it('closes a connection when its credential expires and refuses the token afterwards', async () => {
+  const journal = openJournal(':memory:')
+  const expiresAt = Date.now() + 150
+  const server = await startSyncServer({
+    journal,
+    authenticate: token => (token === 'short' ? { principal, expiresAt } : undefined),
+  })
+  servers.push(server)
+
+  // An open connection is closed with 4401 once the credential expires.
+  const socket = new WsClient(`${server.url}?token=short`)
+  const closed = new Promise<number>(resolve => socket.once('close', code => resolve(code)))
+  await new Promise<void>((resolve, reject) => {
+    socket.once('open', () => resolve())
+    socket.once('error', reject)
+  })
+  expect(await closed).toBe(4401)
+
+  // The same token cannot reconnect once it has expired.
+  const replica = await openReplica('browser')
+  try {
+    await expect(
+      Effect.runPromise(
+        Effect.provide(
+          replica.synchronize,
+          layerSocket({ url: `${server.url}?token=short`, maxRetries: 0 }),
+        ),
+      ),
+    ).rejects.toThrow()
+  } finally {
+    await Effect.runPromise(replica.close)
     journal.close()
   }
 })

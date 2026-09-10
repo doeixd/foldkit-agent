@@ -10,14 +10,17 @@ import {
 } from 'foldkit-sync'
 import { afterEach, expect, it } from 'vitest'
 import { openJournal, type Principal } from '../src/journal.js'
-import { startSyncServer, type SyncServer } from '../src/server.js'
+import { startSyncServer, type Authenticated, type SyncServer } from '../src/server.js'
 
 const accounts: Record<string, Principal> = {
   alice: { actorId: 'alice', documentId: 'todos', canWrite: true },
   bob: { actorId: 'bob', documentId: 'todos', canWrite: true },
 }
-const authenticate = (token: string | null): Principal | undefined =>
-  token === null ? undefined : accounts[token]
+const authenticate = (token: string | null): Authenticated | undefined => {
+  if (token === null) return undefined
+  const account = accounts[token]
+  return account === undefined ? undefined : { principal: account }
+}
 
 const Selection = Schema.Struct({ selectedTodoId: Schema.String })
 type Selection = typeof Selection.Type
