@@ -182,6 +182,19 @@ describe('AgentRuntime.messages.dispatch', () => {
     expect(host.dispatched).toEqual([])
   })
 
+  it('reports an unavailable capability without inspecting its input', () => {
+    // Availability is checked before decoding, so a caller learns the
+    // capability is not on offer rather than what its payload should have
+    // looked like. Reversing the two would answer a malformed payload with a
+    // schema complaint, telling an unauthorized caller the capability exists.
+    const failure = failureOf(
+      runtime.messages.dispatchUnknown('delete_todo', { nonsense: true }, invocation()),
+    )
+
+    expect(failure._tag).toBe('AgentCapabilityUnavailableError')
+    expect(host.dispatched).toEqual([])
+  })
+
   it('offers the same capability to both once the Model makes it available', () => {
     host.setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
 
