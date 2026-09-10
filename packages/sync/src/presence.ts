@@ -123,7 +123,13 @@ export const loopbackPresenceChannel = <Update>(): PresenceChannel<Update> => {
   const listeners = new Set<(update: PresenceUpdate<Update>) => void>()
   return {
     publish: update => {
-      for (const listener of [...listeners]) listener(update)
+      for (const listener of [...listeners]) {
+        try {
+          listener(update)
+        } catch {
+          // A subscriber must never fail an update.
+        }
+      }
     },
     subscribe: listener => {
       listeners.add(listener)
@@ -148,7 +154,13 @@ export const createPresenceHub = <Update>(): PresenceHub<Update> => {
       return () => peers.delete(send)
     },
     publish: update => {
-      for (const send of [...peers]) send(update)
+      for (const send of [...peers]) {
+        try {
+          send(update)
+        } catch {
+          // One broken peer must not starve the rest of the fan-out.
+        }
+      }
     },
   }
 }

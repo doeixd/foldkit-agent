@@ -85,12 +85,26 @@ export const serveSocket = (
     }
   }
   const stopMessage = socket.onMessage(data => {
-    let frame: ExchangeFrame
+    let parsed: unknown
     try {
-      frame = JSON.parse(data) as ExchangeFrame
+      parsed = JSON.parse(data)
     } catch {
       return
     }
+    if (typeof parsed !== 'object' || parsed === null) return
+    const { id, cursor, pending } = parsed as { id?: unknown; cursor?: unknown; pending?: unknown }
+    // Without an id there is nobody to answer, so drop the frame.
+    if (typeof id !== 'string') return
+    if (
+      typeof cursor !== 'number' ||
+      !Number.isSafeInteger(cursor) ||
+      cursor < 0 ||
+      !Array.isArray(pending)
+    ) {
+      send({ id, error: 'Invalid exchange frame' })
+      return
+    }
+    const frame: ExchangeFrame = { id, cursor, pending: pending as ReadonlyArray<Operation> }
     void (async () => {
       try {
         const result = await options.exchange(frame.cursor, frame.pending)

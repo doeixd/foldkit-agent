@@ -51,13 +51,3 @@ export class IdentityConflictError extends Schema.TaggedError<IdentityConflictEr
     message: Schema.String,
   },
 ) {}
-
-/** An externally visible effect failed; the outcome is recorded durably. */
-export class EffectExecutionError extends Schema.TaggedError<EffectExecutionError>()(
-  'EffectExecutionError',
-  {
-    key: Schema.String,
-    message: Schema.String,
-    cause: Schema.optional(Schema.Unknown),
-  },
-) {}

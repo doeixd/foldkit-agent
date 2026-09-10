@@ -149,4 +149,17 @@ describe('presence', () => {
 
     expect(seen).toEqual([])
   })
+
+  it('delivers to every peer when one send throws', () => {
+    const hub = createPresenceHub<Cursor>()
+    const seen: Array<string> = []
+    hub.join(() => {
+      throw new Error('dead socket')
+    })
+    hub.join(update => seen.push(update.id))
+
+    hub.publish({ id: 'a', value: { cursor: 1 } })
+
+    expect(seen).toEqual(['a'])
+  })
 })

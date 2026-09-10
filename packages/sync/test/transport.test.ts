@@ -133,6 +133,24 @@ describe('the socket transport', () => {
     })
   })
 
+  it('refuses a frame it cannot answer before the handler sees it', async () => {
+    const { client, server } = socketPair()
+    let exchanged = 0
+    serveSocket(server, {
+      exchange: () => {
+        exchanged += 1
+        return { operations: [], rejected: [] }
+      },
+    })
+
+    client.send('not json')
+    client.send(JSON.stringify({ id: 'x', cursor: 'nope', pending: [] }))
+    client.send(JSON.stringify({ cursor: 0, pending: [] }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(exchanged).toBe(0)
+  })
+
   it('returns a handler failure to the client as a transport error', async () => {
     const { client, server } = socketPair()
     serveSocket(server, {
