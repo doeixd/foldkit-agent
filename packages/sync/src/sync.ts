@@ -43,6 +43,14 @@ export type Committed = typeof CommittedSchema.Type
 const decodeOperation = Schema.decodeUnknownSync(OperationSchema, { onExcessProperty: 'error' })
 const decodeCommitted = Schema.decodeUnknownSync(CommittedSchema, { onExcessProperty: 'error' })
 
+/**
+ * How many committed-operation ids a replica retains for duplicate detection.
+ * Committed sequences are contiguous and the server enforces `opId`
+ * uniqueness, so this is defence in depth; bounding it keeps replica state from
+ * growing without limit on a log that is never checkpointed.
+ */
+const COMMITTED_ID_WINDOW = 1024
+
 /** Keeps the storage driver's message visible on the typed failure. */
 const storageError = (context: string, cause: unknown): StorageError =>
   new StorageError({
@@ -156,16 +164,22 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       input,
     ) as Exchange<Shared>
 
-  const shape = <O extends Operation>(operation: O): O => {
+  const checkIdentity = (operation: Operation): void => {
     if (
       operation.localSequence < 1 ||
       operation.opId !== `${operation.replicaId}:${operation.localSequence}`
     ) {
       throw new Error('Invalid operation identity')
     }
-    const message = decodeMessage(operation.message)
-    if (!definition.durable(message)) throw new Error('Message is local-only')
-    return { ...operation, message: encodeMessage(message) }
+  }
+  const decodeDurable = (message: unknown): Message => {
+    const decoded = decodeMessage(message)
+    if (!definition.durable(decoded)) throw new Error('Message is local-only')
+    return decoded
+  }
+  const shape = <O extends Operation>(operation: O): O => {
+    checkIdentity(operation)
+    return { ...operation, message: encodeMessage(decodeDurable(operation.message)) }
   }
   const assertDocument = <O extends Operation>(operation: O, key: string): O => {
     if (operation.documentId !== key) throw new Error('Wrong document')
@@ -174,8 +188,21 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const normalizeOperation = (input: unknown): Operation => shape(decodeOperation(input))
   const operationFrom = (input: unknown, key: string): Operation =>
     assertDocument(normalizeOperation(input), key)
+  /**
+   * A committed operation arrives with its message already encoded, so decode it
+   * once for the contract check and hand it to `replay` instead of decoding and
+   * re-encoding it on the way through `shape`.
+   */
+  const decodeCommittedOperation = (
+    input: unknown,
+    key: string,
+  ): { readonly committed: Committed; readonly message: Message } => {
+    const committed = assertDocument(decodeCommitted(input), key)
+    checkIdentity(committed)
+    return { committed, message: decodeDurable(committed.message) }
+  }
   const committedFrom = (input: unknown, key: string): Committed =>
-    assertDocument(shape(decodeCommitted(input)), key)
+    decodeCommittedOperation(input, key).committed
 
   const optimistic = (state: ReplicaState<Shared>): Shared =>
     state.pending.reduce(
@@ -333,8 +360,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                   message: 'Server rejected an operation that was not sent',
                 })
             for (const raw of response.operations) {
-              const operation = yield* Effect.try({
-                try: () => committedFrom(raw, documentId),
+              const { committed: operation, message } = yield* Effect.try({
+                try: () => decodeCommittedOperation(raw, documentId),
                 catch: cause =>
                   new InvalidReplicaHistoryError({ message: 'Invalid committed operation', cause }),
               })
@@ -345,7 +372,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                   actual: operation.serverSequence,
                   message: 'Invalid committed order',
                 })
-              committed = definition.replay(committed, decodeMessage(operation.message))
+              committed = definition.replay(committed, message)
               ids.add(operation.opId)
               cursor = operation.serverSequence
             }
@@ -356,7 +383,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                   revision: current.revision + 1,
                   committed,
                   cursor,
-                  committedIds: [...ids],
+                  committedIds: [...ids].slice(-COMMITTED_ID_WINDOW),
                   pending: current.pending.filter(
                     operation =>
                       !ids.has(operation.opId) &&

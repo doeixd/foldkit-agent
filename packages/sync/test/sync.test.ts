@@ -326,4 +326,19 @@ describe('the replica', () => {
     await first
     await expect(queued).rejects.toThrow('Replica is closed')
   })
+
+  it('bounds the retained committed-id set while applying every commit', async () => {
+    const storage = memoryStorage()
+    const replica = await open('a', storage)
+    const operations = Array.from({ length: 1100 }, (_, index) =>
+      committed('seed', index + 1, index + 1, created(`t${index}`)),
+    )
+
+    await sync(replica, { exchange: async () => ({ operations, rejected: [] }) })
+
+    // Every commit applied, but the persisted id set did not grow with the log.
+    expect(cursor(replica)).toBe(1100)
+    const saved = (await storage.load()) as ReplicaState<Shared>
+    expect(saved.committedIds.length).toBeLessThan(1100)
+  })
 })
