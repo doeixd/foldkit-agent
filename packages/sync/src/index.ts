@@ -7,6 +7,7 @@
  * journal provides authoritative order.
  */
 export { indexedDb, type Storage } from './indexedDb.js'
+export { DocumentId, OpId, ReplicaId, documentId, opId, replicaId } from './ids.js'
 export {
   CheckpointRegressionError,
   CommittedOrderError,

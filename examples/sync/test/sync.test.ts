@@ -4,7 +4,15 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
-import { StorageError, type Exchange, type Operation, type Storage } from 'foldkit-sync'
+import {
+  documentId,
+  opId,
+  replicaId,
+  StorageError,
+  type Exchange,
+  type Operation,
+  type Storage,
+} from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Message, replay, update, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
@@ -14,16 +22,16 @@ import { closeStorages, openReplica, openStorage, type PromiseReplica } from './
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const created = (id: string, title = id) => Message.CreatedTodo({ id, title })
 const operation = (
-  replicaId: string,
+  replica: string,
   localSequence: number,
-  message: Message = created(replicaId),
+  message: Message = created(replica),
 ): Operation => ({
   protocolVersion: 1,
   schemaVersion: 1,
-  documentId: 'todos',
-  replicaId,
+  documentId: documentId('todos'),
+  replicaId: replicaId(replica),
   localSequence,
-  opId: `${replicaId}:${localSequence}`,
+  opId: opId(`${replica}:${localSequence}`),
   baseCursor: 0,
   message,
 })

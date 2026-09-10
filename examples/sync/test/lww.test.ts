@@ -10,9 +10,11 @@ import {
 } from 'foldkit-durable'
 import {
   defineSync,
+  documentId,
   layerFromPromise,
   lwwRegister,
   openLwwClock,
+  replicaId,
   type Operation,
   type TransportClient,
 } from 'foldkit-sync'
@@ -26,26 +28,28 @@ const Shared = Schema.Struct({ title: Title.schema })
 type Shared = typeof Shared.Type
 const Message = defineMessageUnion({ Renamed: { title: Title.schema } })
 type Message = typeof Message.Type
-const empty: Shared = { title: { stamp: { counter: 0, replicaId: 'initial' }, value: 'Original' } }
+const empty: Shared = {
+  title: { stamp: { counter: 0, replicaId: replicaId('initial') }, value: 'Original' },
+}
 const update = (model: Shared, message: Message): Shared => ({
   ...model,
   title: Title.merge(model.title, message.title),
 })
 const decodeMessage = Schema.decodeUnknownSync(Message, { onExcessProperty: 'error' })
 const Sync = defineSync({
-  documentId: 'titles',
+  documentId: documentId('titles'),
   message: Message,
   shared: Shared,
   empty,
   durable: () => true,
   replay: update,
 })
-const rename = (counter: number, replicaId: string, value: string | null): Message =>
-  Message.Renamed({ title: { stamp: { counter, replicaId }, value } })
+const rename = (counter: number, replica: string, value: string | null): Message =>
+  Message.Renamed({ title: { stamp: { counter, replicaId: replicaId(replica) }, value } })
 
 /** A promise facade over the Effect replica, so the LWW test reads as before. */
 const openReplica = async (id: string, storage: Parameters<typeof Sync.openReplica>[1]) => {
-  const replica = await Effect.runPromise(Sync.openReplica(id, storage))
+  const replica = await Effect.runPromise(Sync.openReplica(replicaId(id), storage))
   return {
     shared: () => Effect.runSync(replica.shared),
     pending: () => Effect.runSync(replica.pending),
@@ -73,7 +77,7 @@ const openJournal = () => {
       actorId: principal => toActorId(principal.actorId),
       authorize: ({ principal }) => principal.canWrite,
       validate: ({ key, operation }) => {
-        if (operation.documentId !== key) throw new Error('Wrong document')
+        if (String(operation.documentId) !== String(key)) throw new Error('Wrong document')
       },
     }).pipe(Effect.provideService(Scope.Scope, scope)),
   )
@@ -207,8 +211,8 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
   const openClock = async () =>
     Effect.runPromise(
       openLwwClock({
-        documentId: 'titles',
-        replicaId: 'a',
+        documentId: documentId('titles'),
+        replicaId: replicaId('a'),
         storage: await Effect.runPromise(openStorage('a-clock', factory)),
       }),
     )
@@ -250,8 +254,8 @@ it('IndexedDB admits only one clock writer at a saved revision', async () => {
   const openClock = async () =>
     Effect.runPromise(
       openLwwClock({
-        documentId: 'titles',
-        replicaId: 'a',
+        documentId: documentId('titles'),
+        replicaId: replicaId('a'),
         storage: await Effect.runPromise(openStorage('clock', factory)),
       }),
     )

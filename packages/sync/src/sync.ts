@@ -10,6 +10,7 @@ import {
   type ReplicaError,
 } from './errors.js'
 import type { Storage } from './indexedDb.js'
+import { DocumentId, OpId, ReplicaId } from './ids.js'
 import { Transport, TransportError } from './transport.js'
 
 const Sequence = Schema.Number.check(
@@ -22,10 +23,10 @@ const Sequence = Schema.Number.check(
 const OperationSchema = Schema.Struct({
   protocolVersion: Schema.Literal(1),
   schemaVersion: Schema.Literal(1),
-  documentId: Schema.NonEmptyString,
-  replicaId: Schema.NonEmptyString,
+  documentId: DocumentId,
+  replicaId: ReplicaId,
   localSequence: Sequence,
-  opId: Schema.NonEmptyString,
+  opId: OpId,
   baseCursor: Sequence,
   message: Schema.Unknown,
 })
@@ -67,9 +68,9 @@ export interface Checkpoint<Shared> {
 
 export interface Exchange<Shared> {
   readonly operations: ReadonlyArray<unknown>
-  readonly rejected: ReadonlyArray<string>
+  readonly rejected: ReadonlyArray<OpId>
   /** Sends from the request that are durably committed, so the replica can drop them. */
-  readonly acknowledged?: ReadonlyArray<string> | undefined
+  readonly acknowledged?: ReadonlyArray<OpId> | undefined
   /** The snapshot a replica predating compaction adopts in place of the log. */
   readonly checkpoint?: Checkpoint<Shared> | undefined
 }
@@ -107,7 +108,7 @@ export interface Replica<Message, Shared> {
 }
 
 export interface SyncDefinition<Message, Shared, MessageEncoded, SharedEncoded> {
-  readonly documentId: string
+  readonly documentId: DocumentId
   readonly message: Schema.Codec<Message, MessageEncoded, never, never>
   readonly shared: Schema.Codec<Shared, SharedEncoded, never, never>
   readonly empty: Shared
@@ -116,13 +117,13 @@ export interface SyncDefinition<Message, Shared, MessageEncoded, SharedEncoded> 
 }
 
 export interface Sync<Message, Shared> {
-  readonly documentId: string
+  readonly documentId: DocumentId
   readonly normalizeOperation: (input: unknown) => Operation
-  readonly operationFrom: (input: unknown, documentId: string) => Operation
-  readonly committedFrom: (input: unknown, documentId: string) => Committed
+  readonly operationFrom: (input: unknown, documentId: DocumentId) => Operation
+  readonly committedFrom: (input: unknown, documentId: DocumentId) => Committed
   readonly decodeExchange: (input: unknown) => Exchange<Shared>
   readonly openReplica: (
-    replicaId: string,
+    replicaId: ReplicaId,
     storage: Storage<ReplicaState<Shared>>,
   ) => Effect.Effect<Replica<Message, Shared>, ReplicaError>
 }
@@ -144,8 +145,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const ReplicaStateSchema = Schema.Struct({
     protocolVersion: Schema.Literal(1),
     schemaVersion: Schema.Literal(1),
-    documentId: Schema.NonEmptyString,
-    replicaId: Schema.NonEmptyString,
+    documentId: DocumentId,
+    replicaId: ReplicaId,
     revision: Sequence,
     nextLocalSequence: Sequence,
     cursor: Sequence,
@@ -156,8 +157,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const CheckpointSchema = Schema.Struct({ cursor: Sequence, model: definition.shared })
   const ExchangeSchema = Schema.Struct({
     operations: Schema.Array(Schema.Unknown),
-    rejected: Schema.Array(Schema.NonEmptyString),
-    acknowledged: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+    rejected: Schema.Array(OpId),
+    acknowledged: Schema.optional(Schema.Array(OpId)),
     checkpoint: Schema.optional(CheckpointSchema),
   })
   const decodeState = Schema.decodeUnknownSync(ReplicaStateSchema, { onExcessProperty: 'error' })
@@ -183,12 +184,12 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     checkIdentity(operation)
     return { ...operation, message: encodeMessage(decodeDurable(operation.message)) }
   }
-  const assertDocument = <O extends Operation>(operation: O, key: string): O => {
+  const assertDocument = <O extends Operation>(operation: O, key: DocumentId): O => {
     if (operation.documentId !== key) throw new Error('Wrong document')
     return operation
   }
   const normalizeOperation = (input: unknown): Operation => shape(decodeOperation(input))
-  const operationFrom = (input: unknown, key: string): Operation =>
+  const operationFrom = (input: unknown, key: DocumentId): Operation =>
     assertDocument(normalizeOperation(input), key)
   /**
    * A committed operation arrives with its message already encoded, so decode it
@@ -197,13 +198,13 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
    */
   const decodeCommittedOperation = (
     input: unknown,
-    key: string,
+    key: DocumentId,
   ): { readonly committed: Committed; readonly message: Message } => {
     const committed = assertDocument(decodeCommitted(input), key)
     checkIdentity(committed)
     return { committed, message: decodeDurable(committed.message) }
   }
-  const committedFrom = (input: unknown, key: string): Committed =>
+  const committedFrom = (input: unknown, key: DocumentId): Committed =>
     decodeCommittedOperation(input, key).committed
 
   const optimistic = (state: ReplicaState<Shared>): Shared =>
@@ -213,7 +214,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     )
 
   const openReplica = (
-    replicaId: string,
+    replicaId: ReplicaId,
     storage: Storage<ReplicaState<Shared>>,
   ): Effect.Effect<Replica<Message, Shared>, ReplicaError> =>
     Effect.gen(function* () {

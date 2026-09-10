@@ -6,6 +6,7 @@ import {
   indexedDb,
   layerFromPromise,
   loopbackPresenceChannel,
+  replicaId,
   type Replica,
   type TransportClient,
 } from 'foldkit-sync'
@@ -18,7 +19,7 @@ import { Sync } from './sync.js'
 
 type TodoReplica = Replica<Message, Shared>
 const open = (id: string, storage: Parameters<typeof Sync.openReplica>[1]): Promise<TodoReplica> =>
-  Effect.runPromise(Sync.openReplica(id, storage))
+  Effect.runPromise(Sync.openReplica(replicaId(id), storage))
 const submit = (replica: TodoReplica, message: Message): Promise<void> =>
   Effect.runPromise(replica.submit(message))
 const synchronize = (replica: TodoReplica, transport: TransportClient): Promise<void> =>

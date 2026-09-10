@@ -1,11 +1,18 @@
 import { Deferred, Effect, Fiber } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { openLwwClock, StorageError, type LwwClockState, type Storage } from '../src/index.js'
+import {
+  documentId,
+  openLwwClock,
+  replicaId,
+  StorageError,
+  type LwwClockState,
+  type Storage,
+} from '../src/index.js'
 
 const initial: LwwClockState = {
   schemaVersion: 1,
-  documentId: 'todos',
-  replicaId: 'a',
+  documentId: documentId('todos'),
+  replicaId: replicaId('a'),
   revision: 0,
 }
 const memory = (saved: unknown = undefined) => {
@@ -27,7 +34,7 @@ const memory = (saved: unknown = undefined) => {
   return { storage, closes: () => closes }
 }
 const open = (storage: Storage<LwwClockState>) =>
-  openLwwClock({ documentId: 'todos', replicaId: 'a', storage })
+  openLwwClock({ documentId: documentId('todos'), replicaId: replicaId('a'), storage })
 
 describe('a durable LWW clock', () => {
   it('persists before issuing a stamp and serializes overlapping allocations', () =>

@@ -7,7 +7,12 @@ import {
   type Committed as DurableCommitted,
   type Journal as DurableJournal,
 } from 'foldkit-durable'
-import type { Committed, Operation, TransportClient } from 'foldkit-sync'
+import {
+  documentId as toSyncDocumentId,
+  type Committed,
+  type Operation,
+  type TransportClient,
+} from 'foldkit-sync'
 import { decodeShared, decodeMessage, replay, type Message, type Shared } from './app.js'
 import { Sync } from './sync.js'
 
@@ -81,7 +86,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
           opId: operation => toOpId(operation.opId),
           actorId: principal => toActorId(principal.actorId),
           validate: ({ key, operation, cursor }) => {
-            if (operation.documentId !== key) throw new Error('Wrong document')
+            if (String(operation.documentId) !== String(key)) throw new Error('Wrong document')
             if (operation.baseCursor > cursor)
               throw new Error('Operation cursor is ahead of the server')
           },
@@ -107,7 +112,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
   const toCommitted = (committed: DurableCommitted<Operation>, documentId: string): Committed =>
     Sync.committedFrom(
       { ...committed.operation, serverSequence: committed.sequence, actorId: committed.actorId },
-      documentId,
+      toSyncDocumentId(documentId),
     )
 
   const append = (input: unknown, principal: Principal): Committed => {

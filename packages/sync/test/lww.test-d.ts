@@ -1,8 +1,8 @@
 import { Effect, Schema } from 'effect'
-import { lwwRegister, type LwwClock } from '../src/index.js'
+import { lwwRegister, replicaId, type LwwClock } from '../src/index.js'
 
 const Count = lwwRegister(Schema.NumberFromString)
-const stamp = { counter: 1, replicaId: 'a' }
+const stamp = { counter: 1, replicaId: replicaId('a') }
 const result: number = Count.merge({ stamp, value: 1 }, { stamp, value: 1 }).value
 Schema.encodeSync(Count.schema)({ stamp, value: result })
 // @ts-expect-error merge consumes decoded values

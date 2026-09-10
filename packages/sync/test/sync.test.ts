@@ -2,7 +2,10 @@ import { Deferred, Effect, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   defineSync,
+  documentId,
   layerFromPromise,
+  opId,
+  replicaId,
   type Committed,
   type Operation,
   type Replica,
@@ -24,7 +27,7 @@ const Message = Schema.Union([
 type Message = typeof Message.Type
 
 const definition: SyncDefinition<Message, Shared, unknown, unknown> = {
-  documentId: 'todos',
+  documentId: documentId('todos'),
   message: Message,
   shared: Shared,
   empty: { todos: [] },
@@ -53,24 +56,24 @@ const Sync = defineSync(definition)
 
 const created = (id: string, title = id): Message => ({ _tag: 'CreatedTodo', id, title })
 
-const operation = (replicaId: string, localSequence: number, message: Message): Operation => ({
+const operation = (replica: string, localSequence: number, message: Message): Operation => ({
   protocolVersion: 1,
   schemaVersion: 1,
-  documentId: 'todos',
-  replicaId,
+  documentId: documentId('todos'),
+  replicaId: replicaId(replica),
   localSequence,
-  opId: `${replicaId}:${localSequence}`,
+  opId: opId(`${replica}:${localSequence}`),
   baseCursor: 0,
   message,
 })
 
 const committed = (
-  replicaId: string,
+  replica: string,
   localSequence: number,
   serverSequence: number,
   message: Message,
 ): Committed => ({
-  ...operation(replicaId, localSequence, message),
+  ...operation(replica, localSequence, message),
   serverSequence,
   actorId: 'owner',
 })
@@ -88,7 +91,7 @@ const memoryStorage = (initial?: unknown): Storage<ReplicaState<Shared>> => {
 }
 
 const open = (id: string, storage = memoryStorage()): Promise<Replica<Message, Shared>> =>
-  Effect.runPromise(Sync.openReplica(id, storage))
+  Effect.runPromise(Sync.openReplica(replicaId(id), storage))
 const submit = (replica: Replica<Message, Shared>, message: Message): Promise<void> =>
   Effect.runPromise(replica.submit(message))
 const sync = (replica: Replica<Message, Shared>, transport: TransportClient): Promise<void> =>
@@ -120,14 +123,14 @@ describe('the operation codec', () => {
   it('checks the document only when the caller supplies one', () => {
     const foreign = { ...operation('a', 1, created('t')), documentId: 'other' }
     expect(Sync.normalizeOperation(foreign)).toMatchObject({ documentId: 'other' })
-    expect(() => Sync.operationFrom(foreign, 'todos')).toThrow('Wrong document')
+    expect(() => Sync.operationFrom(foreign, documentId('todos'))).toThrow('Wrong document')
   })
 
   it('refuses a committed operation without a positive server sequence', () => {
     expect(() =>
       Sync.committedFrom(
         { ...operation('a', 1, created('t')), serverSequence: 0, actorId: 'owner' },
-        'todos',
+        documentId('todos'),
       ),
     ).toThrow()
   })

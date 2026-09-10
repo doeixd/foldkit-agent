@@ -2,6 +2,7 @@ import { Effect, Exit, Scope } from 'effect'
 import {
   indexedDb,
   layerFromPromise,
+  replicaId,
   StorageError,
   type Operation,
   type Replica,
@@ -39,7 +40,7 @@ export const closeStorages = (): Promise<void> =>
 export const openReplicaEffect = (
   id: string,
   storage: Parameters<typeof Sync.openReplica>[1],
-): Promise<TodoReplica> => Effect.runPromise(Sync.openReplica(id, storage))
+): Promise<TodoReplica> => Effect.runPromise(Sync.openReplica(replicaId(id), storage))
 
 /** A promise facade, so app-level test bodies read as they did before. */
 export interface PromiseReplica {

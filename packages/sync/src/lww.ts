@@ -1,5 +1,6 @@
 import { Effect, Exit, Ref, Schema, SynchronizedRef } from 'effect'
 import { StorageError } from './errors.js'
+import { DocumentId, ReplicaId } from './ids.js'
 import type { Storage } from './indexedDb.js'
 
 /** A logical write time; replica ids break concurrent ties using UTF-16 order. */
@@ -9,13 +10,13 @@ const Stamp = Schema.Struct({
     Schema.isGreaterThanOrEqualTo(0),
     Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
   ),
-  replicaId: Schema.NonEmptyString,
+  replicaId: ReplicaId,
 })
 
 const ClockState = Schema.Struct({
   schemaVersion: Schema.Literal(1),
-  documentId: Schema.NonEmptyString,
-  replicaId: Stamp.fields.replicaId,
+  documentId: DocumentId,
+  replicaId: ReplicaId,
   // The high-water counter also serves as the storage's CAS revision.
   revision: Stamp.fields.counter,
 })
@@ -46,8 +47,8 @@ const clockError = (message: string, cause: unknown): StorageError =>
  * initialization does not leak the connection.
  */
 export const openLwwClock = (options: {
-  readonly documentId: string
-  readonly replicaId: string
+  readonly documentId: DocumentId
+  readonly replicaId: ReplicaId
   readonly storage: Storage<LwwClockState>
 }): Effect.Effect<LwwClock, StorageError> =>
   Effect.gen(function* () {

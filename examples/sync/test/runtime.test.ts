@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
+import { replicaId } from 'foldkit-sync'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Message } from '../src/app.js'
 import { mountReplica } from '../src/runtime.js'
@@ -23,7 +24,7 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
     release = resolve
   })
   const replica = await Effect.runPromise(
-    Sync.openReplica('a', {
+    Sync.openReplica(replicaId('a'), {
       ...storage,
       save: (state, revision) =>
         Effect.gen(function* () {

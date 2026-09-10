@@ -1,5 +1,5 @@
 import { Effect, Scope } from 'effect'
-import { indexedDb } from 'foldkit-sync'
+import { indexedDb, replicaId } from 'foldkit-sync'
 import { Message } from './app.js'
 import { mountReplica } from './runtime.js'
 import { Sync } from './sync.js'
@@ -13,7 +13,7 @@ const replica = await Effect.runPromise(
       Scope.Scope,
       storageScope,
     )
-    return yield* Sync.openReplica('browser', storage)
+    return yield* Sync.openReplica(replicaId('browser'), storage)
   }),
 )
 const runtime = mountReplica(replica, document.querySelector<HTMLElement>('#sync-app')!)
