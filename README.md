@@ -937,6 +937,9 @@ interface Invocation {
 }
 ```
 
+`model` is the invocation's Model snapshot: the same value `available` was
+checked against, not a fresh read.
+
 The optional `signal` gives adapters a common cancellation primitive. For WebMCP
 it maps from the cancellation signal passed to a tool's `execute` function.
 
@@ -1068,6 +1071,15 @@ can encode one to JSON and send it on: `AgentUnknownCapabilityError`,
 `AgentCapabilityUnavailableError`, `AgentInvalidInputError`,
 `AgentAuthorizationError`, and `AgentResourceError`. Every `message` is written
 for the calling agent and never restates application internals.
+
+An invocation captures one Model snapshot when dispatch begins. `available`,
+`authorize` and `toMessage` all observe that snapshot -- `host.model()` is read
+once per invocation, and `InvocationContext.model` is that value -- so a Model
+change while decoding or authorization is pending does not retarget an
+invocation already in flight. That is snapshot consistency, not live-state
+freshness: the next invocation sees the newer Model. Nothing rejects a dispatch
+because the live Model has advanced; see the
+[package README](./packages/agent#the-model-snapshot).
 
 Dispatch runs inside an `Agent.dispatch` span annotated with the capability,
 transport, and invocation id.

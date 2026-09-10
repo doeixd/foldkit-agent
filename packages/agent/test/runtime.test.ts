@@ -1,7 +1,14 @@
 import { Cause, Effect, Option, Schema } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
-import { type Message, type Model, Message as MessageUnion, Todo, emptyModel } from './todoApp.js'
+import {
+  type Message,
+  type Model,
+  Message as MessageUnion,
+  Todo,
+  emptyModel,
+  modelWith,
+} from './todoApp.js'
 
 /** A stand-in for the live Foldkit Runtime: it records what would reach `update`. */
 class TestHost {
@@ -460,5 +467,78 @@ describe('an already-cancelled invocation', () => {
     // Refused before any of the work an invocation would otherwise cause.
     expect(modelReads).toBe(0)
     expect(authorizeCalls).toBe(0)
+  })
+})
+
+describe('the Model snapshot', () => {
+  /**
+   * `delete_selected_todo` reads `selectedTodoId` twice -- once in `available`
+   * and once in `toMessage` -- so the invocation is only coherent if both see
+   * the same Model. The `getOrThrow` is the same one `examples/todo` relies on.
+   */
+  const snapshotAgent = (authorize: () => Effect.Effect<boolean>) => {
+    let model = modelWith({ selectedTodoId: Option.some('A') })
+    let modelReads = 0
+    const dispatched: Array<Message> = []
+
+    const runtime = Agent.bind({
+      definition: Agent.define({
+        messages: Agent.expose(MessageUnion, {
+          RequestedDeleteTodo: {
+            name: 'delete_selected_todo',
+            description: 'Delete the selected todo',
+            available: (m: Model) => Option.isSome(m.selectedTodoId),
+            input: Schema.Struct({}),
+            toMessage: (_: object, context: { model: Model }) => ({
+              id: Option.getOrThrow(context.model.selectedTodoId),
+            }),
+            authorize,
+          },
+        }),
+      }),
+      host: {
+        model: () => {
+          modelReads += 1
+          return model
+        },
+        dispatch: (message: Message) => void dispatched.push(message),
+      },
+    })
+
+    return {
+      runtime,
+      dispatched,
+      setModel: (next: Model) => {
+        model = next
+      },
+      modelReads: () => modelReads,
+    }
+  }
+
+  it('constructs the Message from the Model captured at dispatch, not the live one', async () => {
+    let approve: (allowed: boolean) => void = () => {}
+    const pending = new Promise<boolean>(resolve => {
+      approve = resolve
+    })
+    const agent = snapshotAgent(() => Effect.promise(() => pending))
+
+    const running = Effect.runPromise(
+      agent.runtime.messages.dispatch('delete_selected_todo', {}, invocation()),
+    )
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+    agent.setModel(modelWith({ selectedTodoId: Option.some('B') }))
+    approve(true)
+    await running
+
+    expect(agent.dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'A' }])
+  })
+
+  it('reads the Model once per invocation', () => {
+    const agent = snapshotAgent(() => Effect.succeed(true))
+
+    Effect.runSync(agent.runtime.messages.dispatch('delete_selected_todo', {}, invocation()))
+
+    expect(agent.modelReads()).toBe(1)
   })
 })

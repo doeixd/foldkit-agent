@@ -356,6 +356,48 @@ Dispatch runs inside an `Agent.dispatch` span annotated with the capability,
 transport, and invocation id, so agent-originated transitions show up in
 tracing alongside the rest of the application.
 
+### The Model snapshot
+
+An invocation captures one Model snapshot when dispatch begins. `available`,
+`authorize`, and `toMessage` all observe that snapshot, and a later Model change
+does not retarget an invocation already in flight.
+
+`host.model()` is called once per invocation, not once per predicate, and
+`InvocationContext.model` is that snapshot -- the same value `available` was
+checked against. There is no separate field for it.
+
+This matters because a contextual capability can read the Model twice:
+
+```ts
+RequestedDeleteTodo: {
+  name: 'delete_selected_todo',
+  description: 'Delete the currently selected todo',
+  available: model => Option.isSome(model.selectedTodoId),
+  input: Schema.Struct({}),
+  toMessage: (_, { model }) => ({ id: Option.getOrThrow(model.selectedTodoId) }),
+}
+```
+
+That is [examples/todo](../../examples/todo) as written.
+
+The `getOrThrow` is safe only because the Model `toMessage` reads is the one
+`available` approved. Re-reading after an async `authorize` would let the two
+disagree: `available` passing against a new Model while `toMessage` built from
+the old one, or the reverse, so a capability could be dispatched with the
+selection it was never offered for -- or throw on a selection that had just been
+cleared.
+
+Snapshot consistency is not live-state freshness. One invocation sees one Model;
+a later invocation sees the newer one. The Runtime guarantees the first, not the
+second. If the user changes the selection while an invocation is suspended, that
+invocation still targets what it was offered.
+
+Nothing rejects a dispatch because the live Model has advanced since capture.
+Optimistic concurrency -- a version on the snapshot, and an adapter opting into
+failing the stale invocation -- is deliberately not provided, on the same footing
+as the second availability predicate above: it can be added when a real case
+needs it, and adding it early would fix semantics nothing has asked for.
+
 ## Differences from the proposal
 
 The proposal in the root README describes an API that does not ship with
