@@ -120,6 +120,10 @@ installed `.d.ts` before reaching for a remembered API.
 
 **Types**
 
+- **Capability names can be object prototype keys.** `__proto__` passes name
+  validation but assigning it to `{}` loses the registry entry. Use a `Map` or
+  a record with no prototype for capability lookups.
+
 - **An `any` inside a generic silently disables checking.** `Parameters<>` of an
   intersection resolves to the last signature and widened every payload to
   `any`. A conditional inside a reverse mapped type is circular and quietly

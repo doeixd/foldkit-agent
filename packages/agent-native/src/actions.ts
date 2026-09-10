@@ -111,7 +111,7 @@ export interface ActionsOptions {
  */
 export const actions = (options: ActionsOptions): Record<string, ActionEntry> => {
   const transport = options.transport ?? 'agent-native'
-  const entries: Record<string, ActionEntry> = {}
+  const entries: Record<string, ActionEntry> = Object.create(null)
 
   for (const variant of options.definition.messages.variants) {
     entries[variant.name] = {

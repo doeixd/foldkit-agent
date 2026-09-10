@@ -315,6 +315,29 @@ describe('a transforming capability', () => {
 })
 
 describe('the registry', () => {
+  it('registers __proto__ as an own capability and dispatches it', async () => {
+    const definition = Agent.define({
+      messages: Agent.expose(Message, {
+        RequestedCreateTodo: { name: '__proto__', description: 'Create a todo' },
+      }),
+    })
+    const registry = AgentNative.actions({
+      definition,
+      resolveRuntime: () =>
+        Agent.bind({
+          definition,
+          host: {
+            model: () => emptyModel,
+            dispatch: (message: Message) => void dispatched.push(message),
+          },
+        }),
+    })
+
+    expect(Object.keys(registry)).toEqual(['__proto__'])
+    expect(await registry['__proto__']!.run({ title: 'Write docs' })).toMatchObject({ ok: true })
+    expect(dispatched).toEqual([{ _tag: 'RequestedCreateTodo', title: 'Write docs' }])
+  })
+
   it('is keyed by capability name, as registerPackageActions expects', () => {
     const registry = actionsFor()
 
