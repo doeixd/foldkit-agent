@@ -24,9 +24,21 @@ export interface AuthorizationRequest {
 /** Decides whether a principal may commit an operation against the current Model. */
 export type Authorize = (request: AuthorizationRequest) => boolean
 
+/** An externally visible effect a committed operation triggers server-side. */
+export interface ServerEffect {
+  readonly name: string
+  readonly run: () => Promise<void>
+}
+
 export interface JournalPolicy {
   /** Defaults to allowing; an authenticated write still requires `Principal.canWrite`. */
   readonly authorize?: Authorize
+  /**
+   * Effects a committed operation triggers. Each runs at most once per
+   * operation, keyed by the operation id, so a resend or replay cannot
+   * duplicate it.
+   */
+  readonly effects?: (message: Message) => ReadonlyArray<ServerEffect>
 }
 
 /**
@@ -35,6 +47,7 @@ export interface JournalPolicy {
  */
 export const openJournal = (path: string, policy: JournalPolicy = {}) => {
   const authorize = policy.authorize
+  const effectsFor = policy.effects
   const durable = createJournal<Operation, Shared, Principal>({
     file: path,
     operation: { encode: operation => operation, decode: Sync.normalizeOperation },
@@ -122,7 +135,15 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
             continue
           }
           try {
-            acknowledged.push(append(operation, principal).opId)
+            const committed = append(operation, principal)
+            // Server-authority effects settle before the ack. The ledger keys
+            // each to its operation, so a resend of this operation cannot
+            // repeat a side effect it already performed.
+            const effects = effectsFor?.(decodeMessage(committed.message)) ?? []
+            for (const [index, effect] of effects.entries()) {
+              await durable.runEffect(`${committed.opId}/command/${index}`, effect.run)
+            }
+            acknowledged.push(committed.opId)
           } catch (error) {
             if (error instanceof OperationRejectedError) rejected.push(error.opId)
             else throw error

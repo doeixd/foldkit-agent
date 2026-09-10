@@ -165,6 +165,46 @@ describe('the journal adapter', () => {
       guarded.close()
     }
   })
+
+  it('runs a server-authority effect once per committed operation', async () => {
+    let notifications = 0
+    const guarded = openJournal(':memory:', {
+      effects: message =>
+        message._tag === 'RenamedTodo'
+          ? [
+              {
+                name: 'notify',
+                run: async () => {
+                  notifications += 1
+                },
+              },
+            ]
+          : [],
+    })
+    try {
+      guarded.append(operation('seed', 1, created('todo')), principal)
+      const a = await open('a')
+      await a.submit(Message.RenamedTodo({ id: 'todo', title: 'renamed' }))
+
+      // The commit lands and the effect runs, but the reply is lost.
+      await expect(
+        a.synchronize({
+          exchange: async (cursor, pending) => {
+            await guarded.transport(principal).exchange(cursor, pending)
+            throw new Error('connection lost')
+          },
+        }),
+      ).rejects.toThrow('connection lost')
+      expect(notifications).toBe(1)
+
+      // The resend is idempotent, and the recorded effect is not run again.
+      await a.synchronize(guarded.transport(principal))
+      expect(notifications).toBe(1)
+      expect(a.pending()).toEqual([])
+    } finally {
+      guarded.close()
+    }
+  })
 })
 
 describe('the wired replica', () => {
