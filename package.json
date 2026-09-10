@@ -13,6 +13,9 @@
   },
   "type": "module",
   "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "pnpm -r build",
     "test": "vitest run",
@@ -21,10 +24,10 @@
     "typecheck": "tsc -b",
     "format": "prettier --write \"**/*.{ts,json,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,json,yaml}\"",
+    "pack:check": "pnpm build && pnpm -r --filter \"./packages/*\" exec pnpm pack",
     "release": "pnpm build && pnpm -r --filter './packages/*' publish --access public"
   },
   "devDependencies": {
-    "@effect/sql-sqlite-node": "4.0.0-rc.112",
     "@types/node": "^22.10.2",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",

@@ -2,6 +2,14 @@
   "name": "foldkit-sync",
   "version": "0.1.0",
   "description": "A local-first replica of a shared Foldkit projection: offline outbox, optimistic updates, and reconciliation.",
+  "keywords": [
+    "foldkit",
+    "effect",
+    "local-first",
+    "offline",
+    "replication",
+    "indexeddb"
+  ],
   "type": "module",
   "license": "MIT",
   "author": "Patrick Glenn <doeixd@gmail.com>",
@@ -15,7 +23,10 @@
     "url": "https://github.com/doeixd/foldkit-agent/issues"
   },
   "sideEffects": false,
-  "private": true,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",

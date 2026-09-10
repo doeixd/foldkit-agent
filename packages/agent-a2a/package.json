@@ -2,6 +2,12 @@
   "name": "foldkit-agent-a2a",
   "version": "0.1.0",
   "description": "A2A adapter for foldkit-agent. Serves a Foldkit agent contract as an A2A agent.",
+  "keywords": [
+    "foldkit",
+    "effect",
+    "agents",
+    "a2a"
+  ],
   "type": "module",
   "license": "MIT",
   "author": "Patrick Glenn <doeixd@gmail.com>",
@@ -15,6 +21,10 @@
     "url": "https://github.com/doeixd/foldkit-agent/issues"
   },
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",

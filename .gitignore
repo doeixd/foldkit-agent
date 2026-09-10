@@ -5,5 +5,7 @@ coverage/
 .DS_Store
 *.log
 .pnpm-store/
+.pack/
+*.tgz
 PLAN.md
 .tsbuild/
