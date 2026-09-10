@@ -185,8 +185,10 @@ describe('a durable journal', () => {
       journal.append('todos', add(2, 'b'), principal)
       journal.append('todos', add(3, 'c'), principal)
       const before = journal.load('todos')
+      expect(journal.floor('todos')).toBe(0)
 
       journal.compact('todos', 2)
+      expect(journal.floor('todos')).toBe(2)
       expect(journal.read('todos', 0).map(committed => committed.operation.opId)).toEqual(['a:3'])
       expect(journal.load('todos')).toEqual(before)
 

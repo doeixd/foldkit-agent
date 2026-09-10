@@ -56,6 +56,8 @@ export class OperationRejectedError extends Error {
 
 export interface Journal<Operation, Snapshot, Principal> {
   load(key: string): { readonly snapshot: Snapshot; readonly cursor: number }
+  /** The highest sequence whose payload has been compacted away; `0` if none. */
+  floor(key: string): number
   read(key: string, after: number): ReadonlyArray<Committed<Operation>>
   append(key: string, input: unknown, principal: Principal): Committed<Operation>
   compact(key: string, through: number): void
@@ -208,6 +210,7 @@ export const createJournal = <Operation, Snapshot, Principal>(
   }
   return {
     load,
+    floor: compactBefore,
     read,
     append,
     compact,
