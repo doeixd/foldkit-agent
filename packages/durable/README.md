@@ -169,6 +169,31 @@ before acknowledgement. They use a separate SQLite provider emulator with
 durable idempotency receipts and also demonstrate the duplicate without them.
 These tests cover process termination, not machine power loss.
 
+## Retention
+
+Compaction drops payloads, not identities. Two tables grow for the life of the
+database:
+
+- **Operation identities.** One row per distinct `opId`, kept after its payload
+  is compacted, so a retransmission is acknowledged instead of reapplied.
+- **Effect records.** One row per settled effect key, kept so a replay reuses the
+  result without invoking `run`.
+
+Neither is garbage-collected, so storage grows with the number of distinct
+operations and effects rather than with the payload size you compact away.
+
+Old retries are therefore safe: a replica that reconnects below the compaction
+floor still has its operation acknowledged from the identity row, and its effect
+is not repeated. That holds for as long as the row exists.
+
+The package does not supply a garbage collector. To bound storage an application
+rotates or recreates the database. After that, a retry whose identity row is gone
+is indistinguishable from new work, so the application must refuse it rather than
+reapply it — for example, reject an operation whose `baseCursor` is below the
+floor the application retains, or keep a per-document watermark and refuse
+anything older. State the retained window and the refusal explicitly; do not let
+a rotated journal silently turn an old retry into a new commit.
+
 ## Limits
 
 - SQLite through `@effect/sql-sqlite-node` is the only adapter today, and it

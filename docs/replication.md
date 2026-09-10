@@ -91,7 +91,9 @@ It owns storage and ordering only, and gives you:
 - **Snapshot + cursor written atomically**, so a replica can catch up from a
   cursor or adopt a `checkpoint`.
 - **Compaction** drops old payloads below a floor without changing what replaying
-  the prefix produces.
+  the prefix produces. Identity rows and effect records are never garbage-collected,
+  so bounding storage means rotating the journal and refusing retries older than
+  the retained window (see [Retention](../packages/durable/README.md#retention)).
 - **A change stream** (`journal.subscribe`) and **metrics** (`journalMetrics`).
 - **`runEffect(key, run)` — recorded effect outcomes.** Reuses successful results
   and coalesces concurrent calls within one journal instance. A crash after an
