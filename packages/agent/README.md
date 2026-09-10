@@ -122,7 +122,7 @@ principal must be given a `principal` provider of the matching type.
 RequestedDeleteTodo: {
   name: 'delete_todo',              // optional; defaults to requested_delete_todo
   description: 'Delete a todo',     // required
-  available: model => ...,          // optional: discoverability, not authorization
+  available: model => ...,          // optional: does the capability exist in this Model?
   authorize: ({ principal, input, model, transport }) => ...,  // optional
   input: Schema.Struct({ id: Schema.String }),                 // optional external input
   toMessage: ({ id }, { invocation }) => ({ id, source: 'Agent' }),
@@ -317,8 +317,20 @@ dispatch the Message. A failure at any step means no Message reaches `update`.
 
 `available` is checked before `authorize`, so a capability the Model does not
 currently offer reports as unavailable rather than leaking whether the caller
-would have been permitted. Decoding rejects undeclared fields, matching the
-`additionalProperties: false` the derived JSON Schema advertises. A capability
+would have been permitted.
+
+That check is one half of a single guarantee: an unavailable capability is
+absent from `messages.available`, and dispatching it by name fails with
+`AgentCapabilityUnavailableError`. Availability is stronger than tool
+visibility -- knowing the name is not enough. Splitting it into separate
+discoverability and invocability predicates was considered and rejected:
+whichever predicate gates dispatch still has to run before `authorize`, so a
+split reintroduces the ordering hazard this order exists to prevent. A
+genuinely "hidden but invocable" capability would be a second predicate layered
+on `available`, not a replacement for it, and nothing here needs one yet.
+
+Decoding rejects undeclared fields, matching the `additionalProperties: false`
+the derived JSON Schema advertises. A capability
 with no payload accepts `{}` and nothing else -- not `[]`, not a string, and not
 an object with fields it never declared.
 

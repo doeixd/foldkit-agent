@@ -117,7 +117,10 @@ several.
 ## Notes
 
 `tools/list` returns what is available now, so a Model-dependent capability
-appears and disappears with the Model. `notifications/tools/list_changed` fires
+appears and disappears with the Model. A capability that goes unavailable
+between `tools/list` and `tools/call` fails the call as a tool error rather than
+`-32602`: the request was well formed, the application simply no longer offers
+the capability. `notifications/tools/list_changed` fires
 when that advertised set changes — not on every Model change, or an application
 that updates on each keystroke would become a notification storm. Set
 `debounceMs` when the set itself flaps.

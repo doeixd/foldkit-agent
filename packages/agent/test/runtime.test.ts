@@ -165,14 +165,20 @@ describe('AgentRuntime.messages.dispatch', () => {
     expect(host.dispatched).toEqual([])
   })
 
-  it('refuses a capability whose availability predicate is false', () => {
+  // Availability is one guarantee with two halves: an unavailable capability is
+  // neither advertised nor invocable. Knowing the name is not enough to call it.
+  it('withholds an unavailable capability from discovery and from dispatch', () => {
+    expect(Effect.runSync(runtime.messages.available).map(m => m.name)).not.toContain('delete_todo')
+
     const failure = failureOf(runtime.messages.dispatch('delete_todo', { id: 'a' }, invocation()))
     expect(failure._tag).toBe('AgentCapabilityUnavailableError')
     expect(host.dispatched).toEqual([])
   })
 
-  it('allows the same capability once the Model makes it available', () => {
+  it('offers the same capability to both once the Model makes it available', () => {
     host.setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
+
+    expect(Effect.runSync(runtime.messages.available).map(m => m.name)).toContain('delete_todo')
 
     const result = Effect.runSync(
       runtime.messages.dispatch('delete_todo', { id: 'a' }, invocation()),
@@ -301,19 +307,8 @@ describe('AgentRuntime projections', () => {
     expect(defect.message).not.toContain('Expected')
   })
 
-  it('lists every capability, and only available ones on demand', () => {
+  it('lists the whole contract, including what the Model does not currently offer', () => {
     expect(Effect.runSync(runtime.messages.list).map(m => m.name)).toEqual([
-      'create_todo',
-      'delete_todo',
-      'rename_todo',
-    ])
-    expect(Effect.runSync(runtime.messages.available).map(m => m.name)).toEqual([
-      'create_todo',
-      'rename_todo',
-    ])
-
-    host.setModel({ ...emptyModel, selectedTodoId: Option.some('a') })
-    expect(Effect.runSync(runtime.messages.available).map(m => m.name)).toEqual([
       'create_todo',
       'delete_todo',
       'rename_todo',

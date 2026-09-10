@@ -712,7 +712,20 @@ The adapter holds one `AbortController` per registered tool: when a capability
 becomes unavailable its registration signal is aborted, and when it returns it
 is registered again.
 
-`available` controls **discoverability/capability presence**, not authorization. Calls may still require `authorize`, and backend/domain authorization remains authoritative.
+`available` defines whether the capability **currently belongs to the
+application's agent capability set**. Adapters must not advertise it while it is
+false, and the Runtime rejects invocation with
+`AgentCapabilityUnavailableError` even from a caller who already knows the name.
+Availability is stronger than tool visibility.
+
+It is not authorization. Calls may still require `authorize`, and
+backend/domain authorization remains authoritative.
+
+Do not reach for `available` to mirror incidental UI state. A predicate like
+`model.route._tag === 'Settings'` also makes the capability impossible to invoke
+whenever the user is looking at another screen, which is rarely what the route
+was expressing. Use it where the state genuinely changes whether the capability
+exists -- a delete with nothing selected has nothing to delete.
 
 ### `authorize`
 
@@ -1493,9 +1506,10 @@ Do not serialize the entire Model automatically.
 
 ## 3. Availability is not authorization
 
-`available(model)` decides whether a capability should currently be discoverable.
+`available(model)` decides whether a capability currently exists at all --
+unavailable means neither advertised nor invocable.
 
-`authorize(...)` decides whether a particular caller may invoke it.
+`authorize(...)` decides whether a particular caller may invoke one that does.
 
 Do not conflate the two.
 
