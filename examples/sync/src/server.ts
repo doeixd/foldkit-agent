@@ -25,12 +25,13 @@ export interface SyncServer {
 /**
  * A local WebSocket server fronting the journal.
  *
- * The principal is fixed at construction; a real deployment authenticates each
- * connection and derives it per socket instead.
+ * The principal is derived per connection from the `token` query parameter; a
+ * real deployment would validate a bearer token or session cookie instead.
  */
 export const startSyncServer = async (options: {
   readonly journal: Journal
-  readonly principal: Principal
+  /** Maps a connection's token to a principal; `undefined` refuses the socket. */
+  readonly authenticate: (token: string | null) => Principal | undefined
   readonly port?: number
 }): Promise<SyncServer> => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: options.port ?? 0 })
@@ -40,9 +41,15 @@ export const startSyncServer = async (options: {
   })
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : 0
-  const handler = options.journal.transport(options.principal)
 
-  server.on('connection', socket => {
+  server.on('connection', (socket, request) => {
+    const token = new URL(request.url ?? '', 'ws://localhost').searchParams.get('token')
+    const principal = options.authenticate(token)
+    if (principal === undefined) {
+      socket.close(4401, 'Unauthenticated')
+      return
+    }
+    const handler = options.journal.transport(principal)
     const stop = serveSocket(socketLike(socket), {
       exchange: (cursor, pending) => handler.exchange(cursor, pending),
     })
