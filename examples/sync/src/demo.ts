@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
-import { indexedDb } from 'foldkit-sync'
+import { createPresence, indexedDb, loopbackPresenceChannel } from 'foldkit-sync'
 import { Effect } from 'effect'
 import { Message, type Shared } from './app.js'
 import { openJournal, type Principal } from './journal.js'
@@ -47,8 +47,36 @@ assert.deepEqual(alice.shared().todos, [
   { id: 'b', title: 'Renamed by agent too' },
   { id: 'a', title: 'Renamed by agent' },
 ])
+
+// Presence is ephemeral: selection is shared between peers and never persisted
+// or replayed. An injected clock makes the TTL deterministic.
+let clock = 1_000
+const presence = loopbackPresenceChannel<{ selectedTodoId: string }>()
+const alicePresence = createPresence<{ selectedTodoId: string }>({
+  id: 'alice',
+  ttl: 5_000,
+  channel: presence,
+  now: () => clock,
+})
+const bobPresence = createPresence<{ selectedTodoId: string }>({
+  id: 'bob',
+  ttl: 5_000,
+  channel: presence,
+  now: () => clock,
+})
+alicePresence.set({ selectedTodoId: 'a' })
+assert.deepEqual(
+  bobPresence.peers().map(peer => [peer.id, peer.value.selectedTodoId]),
+  [['alice', 'a']],
+)
+clock = 6_001
+bobPresence.prune()
+assert.deepEqual(bobPresence.peers(), [])
+alicePresence.close()
+bobPresence.close()
+
 console.log(
-  'Recovered an offline outbox, converged two replicas, and replayed two server agent Messages.',
+  'Recovered an offline outbox, converged two replicas, replayed two server agent Messages, and let a presence peer expire.',
 )
 console.log(JSON.stringify(alice.shared()))
 await alice.close()
