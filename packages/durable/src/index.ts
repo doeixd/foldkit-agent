@@ -17,6 +17,8 @@ export {
 } from './errors.js'
 export {
   makeJournal,
+  makeJournalLayer,
+  JournalService,
   type AppendError,
   type AuthorizationRequest,
   type Committed,

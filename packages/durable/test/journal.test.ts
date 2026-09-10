@@ -1,9 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Deferred, Effect, Fiber, Option, Stream, type Scope } from 'effect'
+import { Config, Deferred, Effect, Fiber, Option, Stream, type Scope } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { makeJournal, type Codec, type Journal, type JournalOptions } from '../src/index.js'
+import {
+  JournalService,
+  makeJournal,
+  makeJournalLayer,
+  type Codec,
+  type Journal,
+  type JournalOptions,
+} from '../src/index.js'
 
 interface Operation {
   readonly opId: string
@@ -448,5 +455,26 @@ describe('the effect ledger', () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+})
+
+describe('the journal layer', () => {
+  it('provides the journal as a scoped service with a Config file', async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const journal = yield* JournalService<Operation, Snapshot, Principal>()
+        yield* journal.append('todos', add(1, 'a'), principal)
+        return yield* journal.load('todos')
+      }).pipe(
+        Effect.provide(
+          makeJournalLayer<Operation, Snapshot, Principal>({
+            file: Config.succeed(':memory:'),
+            ...base,
+          }),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
   })
 })

@@ -1,5 +1,17 @@
 import { createRequire } from 'node:module'
-import { Deferred, Effect, Exit, Option, PubSub, Stream, SynchronizedRef, type Scope } from 'effect'
+import {
+  Config,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  PubSub,
+  Stream,
+  SynchronizedRef,
+  type Scope,
+} from 'effect'
 import type { Codec } from './codec.js'
 import {
   IdentityConflictError,
@@ -56,8 +68,11 @@ export interface AuthorizationRequest<Operation, Snapshot, Principal> {
 }
 
 export interface JournalOptions<Operation, Snapshot, Principal> {
-  /** A `node:sqlite` path, or `:memory:`. */
-  readonly file: string
+  /**
+   * A `node:sqlite` path, or `:memory:`. A `Config` lets an application supply
+   * the path as a layer instead of a literal.
+   */
+  readonly file: string | Config.Config<string>
   readonly operation: Codec<Operation>
   readonly snapshot: Codec<Snapshot>
   readonly empty: () => Snapshot
@@ -133,6 +148,11 @@ const describe = (cause: unknown): string =>
 const journalError = (message: string, cause: unknown): JournalError =>
   new JournalError({ message, cause })
 
+const resolveFile = (file: string | Config.Config<string>): Effect.Effect<string, JournalError> =>
+  typeof file === 'string'
+    ? Effect.succeed(file)
+    : file.pipe(Effect.mapError(cause => journalError('Could not read the journal file', cause)))
+
 /**
  * Opens a durable, ordered operation log with a snapshot and cursor per key.
  *
@@ -147,10 +167,11 @@ export const makeJournal = <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
 ): Effect.Effect<Journal<Operation, Snapshot, Principal>, JournalError, Scope.Scope> =>
   Effect.gen(function* () {
+    const file = yield* resolveFile(options.file)
     const database = yield* Effect.acquireRelease(
       Effect.try({
         try: () => {
-          const database = new DatabaseSync(options.file)
+          const database = new DatabaseSync(file)
           try {
             database.exec(SCHEMA)
           } catch (error) {
@@ -169,6 +190,22 @@ export const makeJournal = <Operation, Snapshot, Principal>(
     )
     return makeShape(database, options, changes, inFlight)
   })
+
+/**
+ * The journal as a service, so an application composes it with `Effect.provide`
+ * instead of threading the shape through its own wiring.
+ */
+export const JournalService = <Operation, Snapshot, Principal>() =>
+  Context.Service<
+    Journal<Operation, Snapshot, Principal>,
+    Journal<Operation, Snapshot, Principal>
+  >()('foldkit-durable/Journal')
+
+/** Provides the journal as a scoped layer, releasing the database when the layer closes. */
+export const makeJournalLayer = <Operation, Snapshot, Principal>(
+  options: JournalOptions<Operation, Snapshot, Principal>,
+): Layer.Layer<Journal<Operation, Snapshot, Principal>, JournalError> =>
+  Layer.effect(JournalService<Operation, Snapshot, Principal>(), makeJournal(options))
 
 const makeShape = <Operation, Snapshot, Principal>(
   database: InstanceType<typeof DatabaseSync>,

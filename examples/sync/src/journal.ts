@@ -195,18 +195,20 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
             rejected.push(operation.opId)
             continue
           }
-          const outcome = Effect.runSync(
-            Effect.result(durable.append(principal.documentId, operation, principal)),
+          const committed = Effect.runSync(
+            durable.append(principal.documentId, operation, principal).pipe(
+              Effect.catchTag('OperationRejectedError', error =>
+                Effect.sync(() => {
+                  rejected.push(error.opId)
+                  return undefined
+                }),
+              ),
+            ),
           )
-          if (outcome._tag === 'Failure') {
-            if (outcome.failure._tag === 'OperationRejectedError')
-              rejected.push(outcome.failure.opId)
-            else throw outcome.failure
-          } else {
-            // Settled before the ack, so the client's retry cannot repeat it.
-            await settle(toCommitted(outcome.success, principal.documentId))
-            acknowledged.push(outcome.success.operation.opId)
-          }
+          if (committed === undefined) continue
+          // Settled before the ack, so the client's retry cannot repeat it.
+          await settle(toCommitted(committed, principal.documentId))
+          acknowledged.push(committed.operation.opId)
         }
         if (cursor < Effect.runSync(durable.floor(principal.documentId))) {
           const { cursor: at, model } = snapshot(principal.documentId)
