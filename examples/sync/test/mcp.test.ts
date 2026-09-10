@@ -6,7 +6,7 @@ import { indexedDb } from 'foldkit-sync'
 import { Message, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { serverAgentHost } from '../src/serverAgent.js'
-import { Sync } from '../src/sync.js'
+import { openReplica } from './helpers.js'
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const SyncAgent = Agent.forModel<Shared, Principal>()
@@ -20,7 +20,7 @@ const request = (id: number, method: string, params?: Record<string, unknown>) =
 
 it('commits a durable operation from an MCP tool call and converges a replica', async () => {
   const journal = openJournal(':memory:')
-  const replica = await Sync.openReplica('browser', await indexedDb('browser', new IDBFactory()))
+  const replica = await openReplica('browser', await indexedDb('browser', new IDBFactory()))
   try {
     journal.append(
       {

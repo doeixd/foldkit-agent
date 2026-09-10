@@ -1,12 +1,15 @@
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   defineSync,
+  layerFromPromise,
   type Committed,
   type Operation,
+  type Replica,
   type ReplicaState,
   type Storage,
   type SyncDefinition,
+  type TransportClient,
 } from '../src/index.js'
 
 const Todo = Schema.Struct({ id: Schema.String, title: Schema.String })
@@ -83,6 +86,18 @@ const memoryStorage = (initial?: unknown): Storage<ReplicaState<Shared>> => {
   }
 }
 
+const open = (id: string, storage = memoryStorage()): Promise<Replica<Message, Shared>> =>
+  Effect.runPromise(Sync.openReplica(id, storage))
+const submit = (replica: Replica<Message, Shared>, message: Message): Promise<void> =>
+  Effect.runPromise(replica.submit(message))
+const sync = (replica: Replica<Message, Shared>, transport: TransportClient): Promise<void> =>
+  Effect.runPromise(Effect.provide(replica.synchronize, layerFromPromise(transport)))
+const shared = (replica: Replica<Message, Shared>): Shared => Effect.runSync(replica.shared)
+const pending = (replica: Replica<Message, Shared>): ReadonlyArray<Operation> =>
+  Effect.runSync(replica.pending)
+const cursor = (replica: Replica<Message, Shared>): number => Effect.runSync(replica.cursor)
+const close = (replica: Replica<Message, Shared>): Promise<void> => Effect.runPromise(replica.close)
+
 describe('the operation codec', () => {
   it('normalizes a valid operation and refuses a broken identity', () => {
     const valid = operation('a', 1, created('t'))
@@ -119,36 +134,36 @@ describe('the operation codec', () => {
 
 describe('the replica', () => {
   it('projects a submit optimistically and converges on the committed order', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.submit(created('t', 'first'))
+    const replica = await open('a')
+    await submit(replica, created('t', 'first'))
 
-    expect(replica.shared().todos).toEqual([{ id: 't', title: 'first' }])
-    expect(replica.pending().map(op => op.opId)).toEqual(['a:1'])
+    expect(shared(replica).todos).toEqual([{ id: 't', title: 'first' }])
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
 
-    await replica.synchronize({
+    await sync(replica, {
       exchange: async () => ({
         operations: [committed('a', 1, 1, created('t', 'first'))],
         rejected: [],
       }),
     })
 
-    expect(replica.cursor()).toBe(1)
-    expect(replica.pending()).toEqual([])
+    expect(cursor(replica)).toBe(1)
+    expect(pending(replica)).toEqual([])
   })
 
   it('drops a rejected operation and reverts its optimistic effect', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.submit(created('t'))
+    const replica = await open('a')
+    await submit(replica, created('t'))
 
-    await replica.synchronize({ exchange: async () => ({ operations: [], rejected: ['a:1'] }) })
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: ['a:1'] }) })
 
-    expect(replica.pending()).toEqual([])
-    expect(replica.shared()).toEqual({ todos: [] })
+    expect(pending(replica)).toEqual([])
+    expect(shared(replica)).toEqual({ todos: [] })
   })
 
   it('adopts a checkpoint in place of the log', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.synchronize({
+    const replica = await open('a')
+    await sync(replica, {
       exchange: async () => ({
         operations: [],
         rejected: [],
@@ -156,15 +171,15 @@ describe('the replica', () => {
       }),
     })
 
-    expect(replica.cursor()).toBe(2)
-    expect(replica.shared()).toEqual({ todos: [{ id: 'x', title: 'x' }] })
+    expect(cursor(replica)).toBe(2)
+    expect(shared(replica)).toEqual({ todos: [{ id: 'x', title: 'x' }] })
   })
 
   it('rebases a pending operation onto an adopted checkpoint', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.submit(created('t', 'mine'))
+    const replica = await open('a')
+    await submit(replica, created('t', 'mine'))
 
-    await replica.synchronize({
+    await sync(replica, {
       exchange: async () => ({
         operations: [],
         rejected: [],
@@ -172,18 +187,18 @@ describe('the replica', () => {
       }),
     })
 
-    expect(replica.cursor()).toBe(2)
-    expect(replica.shared().todos).toEqual([
+    expect(cursor(replica)).toBe(2)
+    expect(shared(replica).todos).toEqual([
       { id: 'x', title: 'theirs' },
       { id: 't', title: 'mine' },
     ])
-    expect(replica.pending().map(op => op.opId)).toEqual(['a:1'])
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
   })
 
   it('applies committed operations that follow an adopted checkpoint', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
+    const replica = await open('a')
 
-    await replica.synchronize({
+    await sync(replica, {
       exchange: async () => ({
         operations: [committed('b', 1, 2, created('tail'))],
         rejected: [],
@@ -191,19 +206,19 @@ describe('the replica', () => {
       }),
     })
 
-    expect(replica.cursor()).toBe(2)
-    expect(replica.shared().todos.map(todo => todo.id)).toEqual(['base', 'tail'])
+    expect(cursor(replica)).toBe(2)
+    expect(shared(replica).todos.map(todo => todo.id)).toEqual(['base', 'tail'])
   })
 
   it('refuses a checkpoint older than its own cursor', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.synchronize({
+    const replica = await open('a')
+    await sync(replica, {
       exchange: async () => ({ operations: [committed('b', 1, 1, created('t'))], rejected: [] }),
     })
-    expect(replica.cursor()).toBe(1)
+    expect(cursor(replica)).toBe(1)
 
     await expect(
-      replica.synchronize({
+      sync(replica, {
         exchange: async () => ({
           operations: [],
           rejected: [],
@@ -211,44 +226,44 @@ describe('the replica', () => {
         }),
       }),
     ).rejects.toThrow('Checkpoint is behind the replica')
-    expect(replica.cursor()).toBe(1)
+    expect(cursor(replica)).toBe(1)
   })
 
   it('refuses a gap in the committed order', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
+    const replica = await open('a')
     await expect(
-      replica.synchronize({
+      sync(replica, {
         exchange: async () => ({ operations: [committed('b', 1, 2, created('t'))], rejected: [] }),
       }),
     ).rejects.toThrow('Invalid committed order')
-    expect(replica.cursor()).toBe(0)
+    expect(cursor(replica)).toBe(0)
   })
 
   it('refuses a rejection it did not send', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.submit(created('t'))
+    const replica = await open('a')
+    await submit(replica, created('t'))
 
     await expect(
-      replica.synchronize({ exchange: async () => ({ operations: [], rejected: ['other:1'] }) }),
+      sync(replica, { exchange: async () => ({ operations: [], rejected: ['other:1'] }) }),
     ).rejects.toThrow('Server rejected an operation that was not sent')
-    expect(replica.pending().map(op => op.opId)).toEqual(['a:1'])
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
   })
 
   it('persists the outbox across reopen and projects it optimistically', async () => {
     const storage = memoryStorage()
-    const first = await Sync.openReplica('a', storage)
-    await first.submit(created('t', 'offline'))
-    await first.close()
+    const first = await open('a', storage)
+    await submit(first, created('t', 'offline'))
+    await close(first)
 
-    const reopened = await Sync.openReplica('a', storage)
-    expect(reopened.pending().map(op => op.opId)).toEqual(['a:1'])
-    expect(reopened.shared().todos).toEqual([{ id: 't', title: 'offline' }])
+    const reopened = await open('a', storage)
+    expect(pending(reopened).map(op => op.opId)).toEqual(['a:1'])
+    expect(shared(reopened).todos).toEqual([{ id: 't', title: 'offline' }])
   })
 
   it('refuses storage written for another replica', async () => {
     const storage = memoryStorage()
-    await Sync.openReplica('a', storage)
-    await expect(Sync.openReplica('b', storage)).rejects.toThrow('Wrong replica storage')
+    await open('a', storage)
+    await expect(open('b', storage)).rejects.toThrow('different document or replica')
   })
 
   it('refuses an outbox the replica could not have produced', async () => {
@@ -266,14 +281,14 @@ describe('the replica', () => {
       pending: [operation(replicaId, 1, created('t'))],
     })
 
-    await expect(Sync.openReplica(replicaId, storage)).rejects.toThrow('Invalid outbox')
+    await expect(open(replicaId, storage)).rejects.toThrow('Invalid outbox')
   })
 
   it('refuses work after close and tolerates a second close', async () => {
-    const replica = await Sync.openReplica('a', memoryStorage())
-    await replica.close()
-    await replica.close()
+    const replica = await open('a')
+    await close(replica)
+    await close(replica)
 
-    await expect(replica.submit(created('t'))).rejects.toThrow('Replica is closed')
+    await expect(submit(replica, created('t'))).rejects.toThrow('Replica is closed')
   })
 })

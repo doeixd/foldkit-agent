@@ -7,6 +7,17 @@
  * journal provides authoritative order.
  */
 export { indexedDb, type Storage } from './indexedDb.js'
+export {
+  CheckpointRegressionError,
+  CommittedOrderError,
+  ForeignRejectionError,
+  InvalidOutboxError,
+  InvalidReplicaHistoryError,
+  ReplicaClosedError,
+  StorageError,
+  WrongReplicaStorageError,
+  type ReplicaError,
+} from './errors.js'
 export { lwwRegister, openLwwClock, type LwwClock, type LwwClockState } from './lww.js'
 export {
   createPresence,

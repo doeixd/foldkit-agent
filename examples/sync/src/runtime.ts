@@ -4,7 +4,7 @@ import * as Port from 'foldkit/port'
 import * as Runtime from 'foldkit/runtime'
 import * as Subscription from 'foldkit/subscription'
 import type * as Update from 'foldkit/update'
-import type { Replica, TransportClient } from 'foldkit-sync'
+import { layerFromPromise, type Replica, type TransportClient } from 'foldkit-sync'
 import { Message, Model, durableTags, initialModel, update, type Shared } from './app.js'
 
 const RuntimeMessage = defineMessageUnion({
@@ -34,7 +34,7 @@ export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLE
             commands: [
               {
                 name: 'PersistOperation',
-                effect: Effect.tryPromise(() => replica.submit(message)).pipe(
+                effect: replica.submit(message).pipe(
                   Effect.map(() => RuntimeMessage.RefreshShared()),
                   Effect.catch(() => Effect.succeed(RuntimeMessage.PersistenceFailed())),
                 ),
@@ -56,7 +56,7 @@ export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLE
               }),
         }
       },
-      RefreshShared: () => ({ model: { ...model, ...replica.shared() } }),
+      RefreshShared: () => ({ model: { ...model, ...Effect.runSync(replica.shared) } }),
       PersistenceFailed: () => ({
         model: { ...model, lastError: 'Could not persist this change' },
       }),
@@ -65,7 +65,7 @@ export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLE
     Model,
     container,
     ports,
-    init: () => ({ model: { ...initialModel, ...replica.shared() } }),
+    init: () => ({ model: { ...initialModel, ...Effect.runSync(replica.shared) } }),
     update: wrappedUpdate,
     subscriptions: Subscription.make<Model, RuntimeMessage>()(() => ({
       message: Port.subscription(ports.inbound.message, message =>
@@ -92,7 +92,7 @@ export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLE
   return {
     send: handle.ports.message.send,
     synchronize: async (transport: TransportClient) => {
-      await replica.synchronize(transport)
+      await Effect.runPromise(Effect.provide(replica.synchronize, layerFromPromise(transport)))
       handle.ports.refresh.send(true)
     },
     dispose: handle.dispose,

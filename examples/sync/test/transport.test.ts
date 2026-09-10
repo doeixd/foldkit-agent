@@ -1,17 +1,10 @@
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
-import {
-  indexedDb,
-  layerSocket,
-  serveSocket,
-  toPromise,
-  Transport,
-  type SocketLike,
-} from 'foldkit-sync'
+import { indexedDb, layerSocket, serveSocket, type SocketLike } from 'foldkit-sync'
 import { expect, it } from 'vitest'
 import { Message } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
-import { Sync } from '../src/sync.js'
+import { openReplicaEffect } from './helpers.js'
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 
@@ -55,7 +48,7 @@ it('converges a replica through the socket transport', async () => {
   const { client, server } = socketPair()
   const handler = journal.transport(principal)
   serveSocket(server, { exchange: (cursor, pending) => handler.exchange(cursor, pending) })
-  const replica = await Sync.openReplica('browser', await indexedDb('browser', new IDBFactory()))
+  const replica = await openReplicaEffect('browser', await indexedDb('browser', new IDBFactory()))
   try {
     // A server-side producer commits one operation the client has not seen.
     journal.appendAsServer(
@@ -65,16 +58,16 @@ it('converges a replica through the socket transport', async () => {
     )
 
     await Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* Effect.service(Transport)
-        yield* Effect.promise(() => replica.synchronize(toPromise(service)))
-      }).pipe(Effect.provide(layerSocket({ url: 'ws://test', makeSocket: () => client }))),
+      Effect.provide(
+        replica.synchronize,
+        layerSocket({ url: 'ws://test', makeSocket: () => client }),
+      ),
     )
 
-    expect(replica.cursor()).toBe(1)
-    expect(replica.shared().todos).toEqual([{ id: 'a', title: 'from the wire' }])
+    expect(Effect.runSync(replica.cursor)).toBe(1)
+    expect(Effect.runSync(replica.shared).todos).toEqual([{ id: 'a', title: 'from the wire' }])
   } finally {
-    replica.close()
+    await Effect.runPromise(replica.close)
     journal.close()
   }
 })

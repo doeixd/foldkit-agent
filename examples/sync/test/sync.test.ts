@@ -4,12 +4,12 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
-import { indexedDb, type Exchange, type Operation, type Replica, type Storage } from 'foldkit-sync'
+import { indexedDb, type Exchange, type Operation, type Storage } from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Message, replay, update, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { serverAgentHost } from '../src/serverAgent.js'
-import { Sync } from '../src/sync.js'
+import { openReplica, type PromiseReplica } from './helpers.js'
 
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const created = (id: string, title = id) => Message.CreatedTodo({ id, title })
@@ -29,9 +29,9 @@ const operation = (
 })
 let factory: IDBFactory
 let server: ReturnType<typeof openJournal>
-let replicas: Array<Replica<Message, Shared>>
-const open = async (id: string, storage?: Storage): Promise<Replica<Message, Shared>> => {
-  const replica = await Sync.openReplica(id, storage ?? (await indexedDb(id, factory)))
+let replicas: Array<PromiseReplica>
+const open = async (id: string, storage?: Storage): Promise<PromiseReplica> => {
+  const replica = await openReplica(id, storage ?? (await indexedDb(id, factory)))
   replicas.push(replica)
   return replica
 }

@@ -1,5 +1,17 @@
-import { Schema } from 'effect'
+import { Effect, Ref, Schema, SynchronizedRef } from 'effect'
+import {
+  CheckpointRegressionError,
+  CommittedOrderError,
+  ForeignRejectionError,
+  InvalidOutboxError,
+  InvalidReplicaHistoryError,
+  ReplicaClosedError,
+  StorageError,
+  WrongReplicaStorageError,
+  type ReplicaError,
+} from './errors.js'
 import type { Storage } from './indexedDb.js'
+import { Transport, TransportError } from './transport.js'
 
 const Sequence = Schema.Number.check(
   Schema.isInt(),
@@ -31,6 +43,13 @@ export type Committed = typeof CommittedSchema.Type
 const decodeOperation = Schema.decodeUnknownSync(OperationSchema, { onExcessProperty: 'error' })
 const decodeCommitted = Schema.decodeUnknownSync(CommittedSchema, { onExcessProperty: 'error' })
 
+/** Keeps the storage driver's message visible on the typed failure. */
+const storageError = (context: string, cause: unknown): StorageError =>
+  new StorageError({
+    message: `${context}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    cause,
+  })
+
 export interface Checkpoint<Shared> {
   readonly cursor: number
   readonly model: Shared
@@ -58,27 +77,25 @@ export interface ReplicaState<Shared> {
   readonly pending: ReadonlyArray<Operation>
 }
 
-/** What the replica consumes; the Effect `Transport` service bridges to this. */
+/**
+ * What the promise-based edge adapter consumes; the Effect `Transport` service
+ * is the primary seam.
+ */
 export interface TransportClient {
   exchange(cursor: number, pending: ReadonlyArray<Operation>): Promise<unknown>
 }
 
 export interface Replica<Message, Shared> {
-  shared(): Shared
-  pending(): ReadonlyArray<Operation>
-  cursor(): number
-  submit(message: Message): Promise<void>
-  synchronize(transport: TransportClient): Promise<void>
-  close(): Promise<void>
+  /** The optimistic projection: committed state with pending operations replayed. */
+  readonly shared: Effect.Effect<Shared>
+  readonly pending: Effect.Effect<ReadonlyArray<Operation>>
+  readonly cursor: Effect.Effect<number>
+  readonly submit: (message: Message) => Effect.Effect<void, ReplicaError>
+  /** Reconciles against the server. The `Transport` service must be provided. */
+  readonly synchronize: Effect.Effect<void, ReplicaError | TransportError, Transport>
+  readonly close: Effect.Effect<void>
 }
 
-/**
- * What `foldkit-sync` needs to know about an application.
- *
- * The Message union and the shared projection are the application's own schemas,
- * so an operation is always decoded with the application's contract. `replay`
- * is the application's transition function, restricted to the shared projection.
- */
 export interface SyncDefinition<Message, Shared, MessageEncoded, SharedEncoded> {
   readonly documentId: string
   readonly message: Schema.Codec<Message, MessageEncoded, never, never>
@@ -97,7 +114,7 @@ export interface Sync<Message, Shared> {
   readonly openReplica: (
     replicaId: string,
     storage: Storage<ReplicaState<Shared>>,
-  ) => Promise<Replica<Message, Shared>>
+  ) => Effect.Effect<Replica<Message, Shared>, ReplicaError>
 }
 
 /**
@@ -105,7 +122,7 @@ export interface Sync<Message, Shared> {
  *
  * The returned codecs decide what is a valid operation and what the shared
  * projection means; the replica owns the local outbox, optimistic projection,
- * and reconciliation, and never runs a second reducer.
+ * and reconciliation as Effects, and never runs a second reducer.
  */
 export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   definition: SyncDefinition<Message, Shared, MessageEncoded, SharedEncoded>,
@@ -160,161 +177,209 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const committedFrom = (input: unknown, key: string): Committed =>
     assertDocument(shape(decodeCommitted(input)), key)
 
-  const openReplica = async (
+  const optimistic = (state: ReplicaState<Shared>): Shared =>
+    state.pending.reduce(
+      (model, operation) => definition.replay(model, decodeMessage(operation.message)),
+      state.committed,
+    )
+
+  const openReplica = (
     replicaId: string,
     storage: Storage<ReplicaState<Shared>>,
-  ): Promise<Replica<Message, Shared>> => {
-    const saved = await storage.load()
-    let state: ReplicaState<Shared> = decodeState(
-      saved === undefined
-        ? {
-            protocolVersion: 1,
-            schemaVersion: 1,
-            documentId,
-            replicaId,
-            revision: 0,
-            nextLocalSequence: 1,
-            cursor: 0,
-            committed: definition.empty,
-            committedIds: [],
-            pending: [],
-          }
-        : saved,
-    )
-    if (state.documentId !== documentId || state.replicaId !== replicaId)
-      throw new Error('Wrong replica storage')
-    const committedIds = new Set(state.committedIds)
-    if (state.nextLocalSequence < 1 || committedIds.size !== state.committedIds.length) {
-      throw new Error('Invalid replica history')
-    }
-    const pendingIds = new Set<string>()
-    for (const pending of state.pending) {
-      const operation = operationFrom(pending, documentId)
-      if (
-        operation.replicaId !== replicaId ||
-        operation.localSequence >= state.nextLocalSequence ||
-        committedIds.has(operation.opId) ||
-        pendingIds.has(operation.opId)
-      )
-        throw new Error('Invalid outbox')
-      pendingIds.add(operation.opId)
-    }
-    const optimistic = (next: ReplicaState<Shared>): Shared =>
-      next.pending.reduce(
-        (model, operation) => definition.replay(model, decodeMessage(operation.message)),
-        next.committed,
-      )
-    let shared = optimistic(state)
-    if (saved === undefined) await storage.save(state, null)
+  ): Effect.Effect<Replica<Message, Shared>, ReplicaError> =>
+    Effect.gen(function* () {
+      const saved = yield* Effect.tryPromise({
+        try: () => storage.load(),
+        catch: cause => storageError('Could not read the replica', cause),
+      })
+      const initial: ReplicaState<Shared> = {
+        protocolVersion: 1,
+        schemaVersion: 1,
+        documentId,
+        replicaId,
+        revision: 0,
+        nextLocalSequence: 1,
+        cursor: 0,
+        committed: definition.empty,
+        committedIds: [],
+        pending: [],
+      }
+      const state: ReplicaState<Shared> =
+        saved === undefined
+          ? initial
+          : yield* Effect.try({
+              try: () => decodeState(saved),
+              catch: cause =>
+                new InvalidReplicaHistoryError({
+                  message: 'Stored replica state is invalid',
+                  cause,
+                }),
+            })
+      if (state.documentId !== documentId || state.replicaId !== replicaId)
+        return yield* new WrongReplicaStorageError({
+          documentId,
+          replicaId,
+          message: 'The stored replica belongs to a different document or replica',
+        })
+      const committedIds = new Set(state.committedIds)
+      if (state.nextLocalSequence < 1 || committedIds.size !== state.committedIds.length)
+        return yield* new InvalidReplicaHistoryError({ message: 'Invalid replica history' })
+      const pendingIds = new Set<string>()
+      for (const pending of state.pending) {
+        const operation = yield* Effect.try({
+          try: () => operationFrom(pending, documentId),
+          catch: () => new InvalidOutboxError({ message: 'Invalid outbox' }),
+        })
+        if (
+          operation.replicaId !== replicaId ||
+          operation.localSequence >= state.nextLocalSequence ||
+          committedIds.has(operation.opId) ||
+          pendingIds.has(operation.opId)
+        )
+          return yield* new InvalidOutboxError({ message: 'Invalid outbox' })
+        pendingIds.add(operation.opId)
+      }
+      if (saved === undefined)
+        yield* Effect.tryPromise({
+          try: () => storage.save(state, null),
+          catch: cause => storageError('Could not save the replica', cause),
+        })
 
-    let tail = Promise.resolve()
-    let closed = false
-    const enqueue = <A>(action: () => Promise<A>): Promise<A> => {
-      if (closed) return Promise.reject(new Error('Replica is closed'))
-      const running = tail.then(action)
-      tail = running.then(
-        () => {},
-        () => {},
-      )
-      return running
-    }
-    const commit = async (next: ReplicaState<Shared>): Promise<void> => {
-      const projected = optimistic(next)
-      await storage.save(next, state.revision)
-      state = next
-      shared = projected
-    }
-    return {
-      shared: () => structuredClone(shared),
-      pending: () => structuredClone(state.pending),
-      cursor: () => state.cursor,
-      submit: message =>
-        enqueue(async () => {
-          const operation = operationFrom(
-            {
-              protocolVersion: 1,
-              schemaVersion: 1,
-              documentId,
-              replicaId,
-              localSequence: state.nextLocalSequence,
-              opId: `${replicaId}:${state.nextLocalSequence}`,
-              baseCursor: state.cursor,
-              message: encodeMessage(message),
-            },
-            documentId,
-          )
-          await commit(
-            decodeState({
-              ...state,
-              revision: state.revision + 1,
-              nextLocalSequence: state.nextLocalSequence + 1,
-              pending: [...state.pending, operation],
-            }),
-          )
-        }),
-      synchronize: async transport => {
-        // Keep networking outside the local write queue so offline edits can continue.
-        const sent = await enqueue(async () => ({
-          cursor: state.cursor,
-          pending: structuredClone(state.pending),
-        }))
-        const response = decodeExchange(await transport.exchange(sent.cursor, sent.pending))
-        await enqueue(async () => {
-          let cursor = state.cursor
-          let committed = state.committed
-          // A checkpoint folds committed history into its snapshot, so the
-          // retained id set starts over from it. Ops at or before its cursor are
-          // already in the model; later ones are still applied below.
-          const ids =
-            response.checkpoint === undefined ? new Set(state.committedIds) : new Set<string>()
-          if (response.checkpoint !== undefined) {
-            if (response.checkpoint.cursor < cursor)
-              throw new Error('Checkpoint is behind the replica')
-            committed = response.checkpoint.model
-            cursor = response.checkpoint.cursor
-          }
-          // A checkpoint covers no log rows, so an operation the server committed
-          // before compacting it would otherwise stay pending and replay twice.
-          const acknowledged = new Set(response.acknowledged ?? [])
-          const rejected = new Set(response.rejected)
-          const sentIds = new Set(sent.pending.map(operation => operation.opId))
-          if ([...rejected].some(id => !sentIds.has(id))) {
-            throw new Error('Server rejected an operation that was not sent')
-          }
-          for (const raw of response.operations) {
-            const operation = committedFrom(raw, documentId)
-            if (operation.serverSequence <= cursor) continue
-            if (operation.serverSequence !== cursor + 1 || ids.has(operation.opId))
-              throw new Error('Invalid committed order')
-            committed = definition.replay(committed, decodeMessage(operation.message))
-            ids.add(operation.opId)
-            cursor = operation.serverSequence
-          }
-          await commit(
-            decodeState({
-              ...state,
-              revision: state.revision + 1,
-              committed,
-              cursor,
-              committedIds: [...ids],
-              pending: state.pending.filter(
-                operation =>
-                  !ids.has(operation.opId) &&
-                  !acknowledged.has(operation.opId) &&
-                  !rejected.has(operation.opId),
-              ),
+      const stateRef = yield* SynchronizedRef.make(state)
+      const closed = yield* Ref.make(false)
+
+      // `SynchronizedRef.modifyEffect` installs the returned state itself, so
+      // persisting must not also set the ref (that would re-enter the lock).
+      const persist = (next: ReplicaState<Shared>, current: ReplicaState<Shared>) =>
+        Effect.tryPromise({
+          try: () => storage.save(next, current.revision),
+          catch: cause => storageError('Could not save the replica', cause),
+        })
+
+      const submit = (message: Message): Effect.Effect<void, ReplicaError> =>
+        Effect.gen(function* () {
+          if (yield* Ref.get(closed))
+            return yield* new ReplicaClosedError({ message: 'Replica is closed' })
+          yield* SynchronizedRef.modifyEffect(stateRef, current =>
+            Effect.gen(function* () {
+              const operation = yield* Effect.try({
+                try: () =>
+                  operationFrom(
+                    {
+                      protocolVersion: 1,
+                      schemaVersion: 1,
+                      documentId,
+                      replicaId,
+                      localSequence: current.nextLocalSequence,
+                      opId: `${replicaId}:${current.nextLocalSequence}`,
+                      baseCursor: current.cursor,
+                      message: encodeMessage(message),
+                    },
+                    documentId,
+                  ),
+                catch: () => new InvalidOutboxError({ message: 'Invalid outbox' }),
+              })
+              const next = yield* Effect.try({
+                try: () =>
+                  decodeState({
+                    ...current,
+                    revision: current.revision + 1,
+                    nextLocalSequence: current.nextLocalSequence + 1,
+                    pending: [...current.pending, operation],
+                  }),
+                catch: cause =>
+                  new InvalidReplicaHistoryError({ message: 'Invalid replica state', cause }),
+              })
+              yield* persist(next, current)
+              return [undefined, next] as const
             }),
           )
         })
-      },
-      close: async () => {
-        if (closed) return
-        closed = true
-        await tail
-        storage.close()
-      },
-    }
-  }
+
+      const synchronize: Replica<Message, Shared>['synchronize'] = Effect.gen(function* () {
+        const transport = yield* Transport
+        const sent = yield* SynchronizedRef.get(stateRef)
+        const response = decodeExchange(yield* transport.exchange(sent.cursor, sent.pending))
+        yield* SynchronizedRef.modifyEffect(stateRef, current =>
+          Effect.gen(function* () {
+            let cursor = current.cursor
+            let committed = current.committed
+            // A checkpoint folds committed history into its snapshot, so the
+            // retained id set starts over from it.
+            const ids =
+              response.checkpoint === undefined ? new Set(current.committedIds) : new Set<string>()
+            if (response.checkpoint !== undefined) {
+              if (response.checkpoint.cursor < cursor)
+                return yield* new CheckpointRegressionError({
+                  cursor,
+                  checkpointCursor: response.checkpoint.cursor,
+                  message: 'Checkpoint is behind the replica',
+                })
+              committed = response.checkpoint.model
+              cursor = response.checkpoint.cursor
+            }
+            const acknowledged = new Set(response.acknowledged ?? [])
+            const rejected = new Set(response.rejected)
+            const sentIds = new Set(sent.pending.map(operation => operation.opId))
+            for (const id of rejected)
+              if (!sentIds.has(id))
+                return yield* new ForeignRejectionError({
+                  opId: id,
+                  message: 'Server rejected an operation that was not sent',
+                })
+            for (const raw of response.operations) {
+              const operation = yield* Effect.try({
+                try: () => committedFrom(raw, documentId),
+                catch: cause =>
+                  new InvalidReplicaHistoryError({ message: 'Invalid committed operation', cause }),
+              })
+              if (operation.serverSequence <= cursor) continue
+              if (operation.serverSequence !== cursor + 1 || ids.has(operation.opId))
+                return yield* new CommittedOrderError({
+                  expected: cursor + 1,
+                  actual: operation.serverSequence,
+                  message: 'Invalid committed order',
+                })
+              committed = definition.replay(committed, decodeMessage(operation.message))
+              ids.add(operation.opId)
+              cursor = operation.serverSequence
+            }
+            const next = yield* Effect.try({
+              try: () =>
+                decodeState({
+                  ...current,
+                  revision: current.revision + 1,
+                  committed,
+                  cursor,
+                  committedIds: [...ids],
+                  pending: current.pending.filter(
+                    operation =>
+                      !ids.has(operation.opId) &&
+                      !acknowledged.has(operation.opId) &&
+                      !rejected.has(operation.opId),
+                  ),
+                }),
+              catch: cause =>
+                new InvalidReplicaHistoryError({ message: 'Invalid replica state', cause }),
+            })
+            yield* persist(next, current)
+            return [undefined, next] as const
+          }),
+        )
+      })
+
+      return {
+        shared: Effect.map(SynchronizedRef.get(stateRef), optimistic),
+        pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
+        cursor: Effect.map(SynchronizedRef.get(stateRef), state => state.cursor),
+        submit,
+        synchronize,
+        close: Effect.gen(function* () {
+          yield* Ref.set(closed, true)
+          yield* Effect.sync(() => storage.close())
+        }),
+      }
+    })
 
   return {
     documentId,

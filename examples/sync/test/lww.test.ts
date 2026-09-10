@@ -5,6 +5,7 @@ import { makeJournal, OperationRejectedError } from 'foldkit-durable'
 import {
   defineSync,
   indexedDb,
+  layerFromPromise,
   lwwRegister,
   openLwwClock,
   type Operation,
@@ -33,6 +34,20 @@ const Sync = defineSync({
 })
 const rename = (counter: number, replicaId: string, value: string | null): Message =>
   Message.Renamed({ title: { stamp: { counter, replicaId }, value } })
+
+/** A promise facade over the Effect replica, so the LWW test reads as before. */
+const openReplica = async (id: string, storage: Parameters<typeof Sync.openReplica>[1]) => {
+  const replica = await Effect.runPromise(Sync.openReplica(id, storage))
+  return {
+    shared: () => Effect.runSync(replica.shared),
+    pending: () => Effect.runSync(replica.pending),
+    cursor: () => Effect.runSync(replica.cursor),
+    submit: (message: Message) => Effect.runPromise(replica.submit(message)),
+    synchronize: (transport: TransportClient) =>
+      Effect.runPromise(Effect.provide(replica.synchronize, layerFromPromise(transport))),
+    close: () => Effect.runPromise(replica.close),
+  }
+}
 
 const openJournal = () => {
   const scope = Effect.runSync(Scope.make())
@@ -105,8 +120,8 @@ it.each(['a', 'b'])(
   async first => {
     const factory = new IDBFactory()
     const { journal, transport } = openJournal()
-    let a = await Sync.openReplica('a', await indexedDb('a', factory))
-    const b = await Sync.openReplica('b', await indexedDb('b', factory))
+    let a = await openReplica('a', await indexedDb('a', factory))
+    const b = await openReplica('b', await indexedDb('b', factory))
     try {
       await a.submit(rename(1, 'a', 'Draft'))
       await a.submit(rename(2, 'a', 'Newer edit'))
@@ -115,7 +130,7 @@ it.each(['a', 'b'])(
       expect(b.shared().title.value).toBe('Stale offline edit')
 
       await a.close()
-      a = await Sync.openReplica('a', await indexedDb('a', factory))
+      a = await openReplica('a', await indexedDb('a', factory))
       expect(a.shared().title).toEqual(rename(2, 'a', 'Newer edit').title)
       expect(a.pending()).toHaveLength(2)
 
@@ -131,7 +146,7 @@ it.each(['a', 'b'])(
       expect(b.pending()).toEqual([])
 
       journal.compact('titles', 3)
-      const late = await Sync.openReplica('late', await indexedDb('late', factory))
+      const late = await openReplica('late', await indexedDb('late', factory))
       try {
         await late.submit(rename(1, 'late', 'Late offline edit'))
         await late.synchronize(transport())
@@ -151,7 +166,7 @@ it.each(['a', 'b'])(
 
 it('authorization still rejects a winning write and tombstones survive delayed edits', async () => {
   const { journal, transport } = openJournal()
-  const replica = await Sync.openReplica('a', await indexedDb('a', new IDBFactory()))
+  const replica = await openReplica('a', await indexedDb('a', new IDBFactory()))
   try {
     await replica.submit(rename(2, 'a', null))
     await replica.synchronize(transport())
@@ -185,7 +200,7 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
     })
   const { journal, transport } = openJournal()
   let clock = await openClock()
-  let replica = await Sync.openReplica('a', await indexedDb('a', factory))
+  let replica = await openReplica('a', await indexedDb('a', factory))
   try {
     const refused = await clock.next(20)
     await replica.submit(Message.Renamed({ title: { stamp: refused, value: 'Refused' } }))
@@ -199,7 +214,7 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
     await clock.close()
     await replica.close()
     clock = await openClock()
-    replica = await Sync.openReplica('a', await indexedDb('a', factory))
+    replica = await openReplica('a', await indexedDb('a', factory))
 
     const stamp = await clock.next(replica.shared().title.stamp.counter)
     expect(stamp).toEqual({ counter: 23, replicaId: 'a' })

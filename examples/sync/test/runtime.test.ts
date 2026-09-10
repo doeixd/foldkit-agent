@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Effect } from 'effect'
 import { indexedDb } from 'foldkit-sync'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -20,13 +21,15 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
   const held = new Promise<void>(resolve => {
     release = resolve
   })
-  const replica = await Sync.openReplica('a', {
-    ...storage,
-    save: async (state, revision) => {
-      if (revision !== null) await held
-      await storage.save(state, revision)
-    },
-  })
+  const replica = await Effect.runPromise(
+    Sync.openReplica('a', {
+      ...storage,
+      save: async (state, revision) => {
+        if (revision !== null) await held
+        await storage.save(state, revision)
+      },
+    }),
+  )
   const container = document.createElement('div')
   container.id = 'sync-runtime'
   document.body.appendChild(container)
@@ -39,11 +42,11 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
     release()
     await vi.waitFor(() => expect(document.body.textContent).toContain('Persisted first'))
     expect(document.body.textContent).toContain('Selection: a')
-    expect(replica.pending()).toHaveLength(1)
+    expect(Effect.runSync(replica.pending)).toHaveLength(1)
   } finally {
     release()
     runtime.dispose()
-    await replica.close()
+    await Effect.runPromise(replica.close)
     container.remove()
   }
 })
