@@ -34,7 +34,9 @@ await replica.synchronize(transport)
   Message schema, and a Message the contract does not call durable is refused.
 - Presence (`createPresence`): an ephemeral, TTL'd peer registry, deliberately
   outside the durable log. A peer that stops refreshing is dropped, not
-  replayed.
+  replayed. It can travel over a socket — `socketPresenceChannel` on the client
+  and `servePresence` fanning through a `createPresenceHub` on the server — or
+  in-process via `loopbackPresenceChannel`.
 - The transport seam (`Transport`): an Effect service with a loopback layer, a
   bridge to and from the promise client the replica speaks, and a WebSocket
   client layer that queues until the socket opens. `serveSocket` is the server
@@ -46,8 +48,8 @@ await replica.synchronize(transport)
 - IndexedDB is the only storage adapter.
 - It assumes an authoritative, single-writer-per-document server that orders
   operations; there is no peer-to-peer or CRDT merge.
-- Presence ships an in-process channel (`loopbackPresenceChannel`). Binding
-  `serveSocket` to a platform WebSocket server is left to the application; the
-  sync example shows a `ws` one.
+- Binding the socket transport and presence server to a platform WebSocket
+  server is left to the application; the sync example shows a `ws` one for the
+  transport (presence over `ws` is not wired there yet).
 - Unpublished: `private` until an application other than the sync spike depends
   on the API.

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { createPresence, loopbackPresenceChannel } from '../src/index.js'
+import {
+  createPresence,
+  createPresenceHub,
+  loopbackPresenceChannel,
+  servePresence,
+  socketPresenceChannel,
+} from '../src/index.js'
+import { socketPair } from './sockets.js'
 
 interface Cursor {
   readonly cursor: number
@@ -85,5 +92,46 @@ describe('presence', () => {
     b.close()
     a.set({ cursor: 9 })
     expect(b.peers()).toEqual([])
+  })
+
+  it('carries presence between peers through a hub over sockets', () => {
+    const hub = createPresenceHub<Cursor>()
+    const a = socketPair()
+    const b = socketPair()
+    servePresence(a.server, hub)
+    servePresence(b.server, hub)
+
+    const presenceA = createPresence<Cursor>({
+      id: 'a',
+      ttl: 100,
+      channel: socketPresenceChannel(a.client),
+    })
+    const presenceB = createPresence<Cursor>({
+      id: 'b',
+      ttl: 100,
+      channel: socketPresenceChannel(b.client),
+    })
+
+    presenceA.set({ cursor: 1 })
+    expect(presenceB.peers().map(peer => [peer.id, peer.value.cursor])).toEqual([['a', 1]])
+
+    presenceA.leave()
+    expect(presenceB.peers()).toEqual([])
+
+    presenceA.close()
+    presenceB.close()
+  })
+
+  it('ignores messages that are not presence updates', () => {
+    const hub = createPresenceHub<Cursor>()
+    const { client, server } = socketPair()
+    const seen: Array<unknown> = []
+    hub.join(update => seen.push(update))
+    servePresence(server, hub)
+
+    client.send('not json')
+    client.send(JSON.stringify({ id: 'x', cursor: 0, pending: [] }))
+
+    expect(seen).toEqual([])
   })
 })

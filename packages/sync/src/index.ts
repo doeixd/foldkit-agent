@@ -9,9 +9,13 @@
 export { indexedDb, type Storage } from './indexedDb.js'
 export {
   createPresence,
+  createPresenceHub,
   loopbackPresenceChannel,
+  servePresence,
+  socketPresenceChannel,
   type Presence,
   type PresenceChannel,
+  type PresenceHub,
   type PresenceOptions,
   type PresencePeer,
   type PresenceUpdate,

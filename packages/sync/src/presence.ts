@@ -1,3 +1,5 @@
+import type { SocketLike } from './transport.js'
+
 /** One peer's presence. A `null` value means the peer left. */
 export interface PresenceUpdate<Update> {
   readonly id: string
@@ -127,5 +129,71 @@ export const loopbackPresenceChannel = <Update>(): PresenceChannel<Update> => {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+  }
+}
+
+/** Broadcasts presence updates among connected peers. */
+export interface PresenceHub<Update> {
+  /** Registers a peer's send; returns a leave function. */
+  join(send: (update: PresenceUpdate<Update>) => void): () => void
+  /** Fans an update out to every joined peer. */
+  publish(update: PresenceUpdate<Update>): void
+}
+
+export const createPresenceHub = <Update>(): PresenceHub<Update> => {
+  const peers = new Set<(update: PresenceUpdate<Update>) => void>()
+  return {
+    join: send => {
+      peers.add(send)
+      return () => peers.delete(send)
+    },
+    publish: update => {
+      for (const send of [...peers]) send(update)
+    },
+  }
+}
+
+const frameType = 'presence'
+
+/** Decodes a presence frame, ignoring anything else a socket may carry. */
+const decodePresence = <Update>(data: string): PresenceUpdate<Update> | undefined => {
+  let frame: Record<string, unknown>
+  try {
+    frame = JSON.parse(data) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+  const value = frame[frameType]
+  if (typeof value !== 'object' || value === null) return undefined
+  const { id, value: payload } = value as { id?: unknown; value?: unknown }
+  if (typeof id !== 'string') return undefined
+  return { id, value: (payload ?? null) as Update | null }
+}
+
+/** A presence channel carried on a socket, alongside exchange frames. */
+export const socketPresenceChannel = <Update>(socket: SocketLike): PresenceChannel<Update> => ({
+  publish: update => socket.send(JSON.stringify({ [frameType]: update })),
+  subscribe: listener =>
+    socket.onMessage(data => {
+      const update = decodePresence<Update>(data)
+      if (update !== undefined) listener(update)
+    }),
+})
+
+/** Serves presence frames on an accepted socket, fanning them through the hub. */
+export const servePresence = <Update>(
+  socket: SocketLike,
+  hub: PresenceHub<Update>,
+): (() => void) => {
+  const send = (update: PresenceUpdate<Update>): void =>
+    socket.send(JSON.stringify({ [frameType]: update }))
+  const leave = hub.join(send)
+  const off = socket.onMessage(data => {
+    const update = decodePresence<Update>(data)
+    if (update !== undefined) hub.publish(update)
+  })
+  return () => {
+    off()
+    leave()
   }
 }
