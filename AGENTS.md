@@ -103,6 +103,9 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
   empty result is worse than one that throws.
 - **Enforce what you advertise.** Deriving a JSON Schema that says
   `additionalProperties: false` is not validation; the decoder has to agree.
+- **Keep intermediate validators strict too.** Agent Native's Standard Schema
+  stripped excess fields before dispatch, bypassing its strict decoder. Pass
+  `parseOptions: { onExcessProperty: 'error' }` to `toStandardSchemaV1`.
 - **Type a boundary from the side the runtime consumes.** Dispatch decodes, so
   its input type is the schema's *encoded* side. Typing it from the decoded side
   accepted `{value: 42}` and rejected the `{value: '42'}` that works.
