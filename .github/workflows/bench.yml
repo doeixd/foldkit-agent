@@ -1,0 +1,26 @@
+name: Bench
+
+on:
+  schedule:
+    # Weekly on Monday, so the numbers have a stable reference over time.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Prints hz/mean/p99 to the job log. Not a gate: shared runners are too
+      # noisy to fail a build on a timing regression.
+      - run: pnpm bench
