@@ -26,6 +26,10 @@ const openDatabase = (
         request.onupgradeneeded = () => request.result.createObjectStore('replica')
         request.onsuccess = () => resolve(request.result)
         request.onerror = () => reject(request.error)
+        // Without this, a version upgrade blocked by another open connection
+        // never settles and the effect hangs.
+        request.onblocked = () =>
+          reject(new Error('IndexedDB upgrade is blocked by another connection'))
       }),
     catch: cause => storageError('Could not open the storage', cause),
   })

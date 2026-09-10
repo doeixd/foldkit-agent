@@ -1,4 +1,4 @@
-import { Effect, Ref, Schema, SynchronizedRef } from 'effect'
+import { Effect, Exit, Ref, Schema, SynchronizedRef } from 'effect'
 import { StorageError } from './errors.js'
 import type { Storage } from './indexedDb.js'
 
@@ -70,6 +70,10 @@ export const openLwwClock = (options: {
         if (yield* Ref.get(closed)) return yield* new StorageError({ message: 'Clock is closed' })
         return yield* SynchronizedRef.modifyEffect(stateRef, current =>
           Effect.gen(function* () {
+            // Re-check under the lock: a `close` that set the flag while this
+            // allocation was queued must not save to a closed connection.
+            if (yield* Ref.get(closed))
+              return yield* new StorageError({ message: 'Clock is closed' })
             const allocated = yield* Effect.try({
               try: () =>
                 decodeClock({
@@ -95,7 +99,13 @@ export const openLwwClock = (options: {
     })
 
     return { next, close }
-  }).pipe(Effect.tapError(() => options.storage.close))
+  }).pipe(
+    // Close a partially initialized storage on any failure, including a defect,
+    // so a failed open cannot leak the connection.
+    Effect.onExit(exit =>
+      Exit.isSuccess(exit) ? Effect.void : options.storage.close.pipe(Effect.ignore),
+    ),
+  )
 
 /**
  * A schema and reducer helper for a last-writer-wins register.

@@ -262,4 +262,39 @@ describe('a durable LWW clock', () => {
         }),
       ),
     ))
+
+  it('refuses an allocation queued behind a close', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const saved = memory(initial)
+          const entered = yield* Deferred.make<void>()
+          const blocked = yield* Deferred.make<void>()
+          const clock = yield* open({
+            ...saved.storage,
+            save: (next, revision) =>
+              Effect.gen(function* () {
+                yield* Deferred.succeed(entered, undefined)
+                yield* Deferred.await(blocked)
+                yield* saved.storage.save(next, revision)
+              }),
+          })
+          const first = yield* Effect.forkScoped(clock.next())
+          yield* Deferred.await(entered)
+          // Passes the pre-lock check, then queues behind the first allocation.
+          const queued = yield* Effect.forkScoped(clock.next())
+          yield* Effect.yieldNow
+          const closing = yield* Effect.forkScoped(clock.close)
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(blocked, undefined)
+
+          expect(yield* Fiber.join(first)).toEqual({ counter: 1, replicaId: 'a' })
+          expect(yield* Effect.result(Fiber.join(queued))).toMatchObject({
+            _tag: 'Failure',
+            failure: { message: expect.stringContaining('Clock is closed') },
+          })
+          yield* Fiber.join(closing)
+        }),
+      ),
+    ))
 })
