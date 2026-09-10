@@ -1,13 +1,15 @@
 # Benchmarks
 
 `pnpm bench` runs the Vitest benchmarks in `packages/sync/bench` and prints
-hz/mean/p99 per scenario. A weekly [Bench workflow](../.github/workflows/bench.yml)
-runs the same command and prints to the job log; it is not a gate, because shared
-runners are too noisy to fail a build on a timing regression.
+hz/mean/p99 per scenario; `pnpm bench:storage` appends a fixed number of
+operations to a file-backed durable journal and prints a bytes-per-operation
+reading. A weekly [Bench workflow](../.github/workflows/bench.yml) runs both and
+prints to the job log; it is not a gate, because shared runners are too noisy to
+fail a build on a timing regression.
 
 ## Recorded run
 
-- Windows 11, Node 20.20.0, pnpm 10.32.1.
+- Windows 11, Node 22.21.1 (the workspace runtime, via pnpm), pnpm 10.32.1.
 - Committed model of 100 todos; an outbox of `p` local `CreatedTodo`s.
 - Treat the numbers as order-of-magnitude. Re-run locally for your machine.
 
@@ -47,7 +49,7 @@ batch) costs about 1.5 ms for 100 commits and 10 ms for 1000.
 
 `pnpm bench:storage` appends a fixed number of operations to a file-backed
 journal, prints bytes per operation, then compacts every payload and prints the
-size again. Recorded on the same Windows/Node 20 machine:
+size again. Recorded on the same Windows/Node 22 machine:
 
 | | |
 | --- | --- |

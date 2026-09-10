@@ -1,5 +1,5 @@
 import { WebSocketServer, type WebSocket } from 'ws'
-import { serveSocket, type SocketLike } from 'foldkit-sync'
+import { servePresence, serveSocket, type PresenceHub, type SocketLike } from 'foldkit-sync'
 import type { Journal, Principal } from './journal.js'
 
 /** Adapts one `ws` socket to the transport's minimal socket. */
@@ -28,10 +28,12 @@ export interface SyncServer {
  * The principal is derived per connection from the `token` query parameter; a
  * real deployment would validate a bearer token or session cookie instead.
  */
-export const startSyncServer = async (options: {
+export const startSyncServer = async <Presence = unknown>(options: {
   readonly journal: Journal
   /** Maps a connection's token to a principal; `undefined` refuses the socket. */
   readonly authenticate: (token: string | null) => Principal | undefined
+  /** Optional presence hub; each accepted socket joins it. */
+  readonly presence?: PresenceHub<Presence> | undefined
   readonly port?: number
 }): Promise<SyncServer> => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: options.port ?? 0 })
@@ -50,10 +52,16 @@ export const startSyncServer = async (options: {
       return
     }
     const handler = options.journal.transport(principal)
-    const stop = serveSocket(socketLike(socket), {
-      exchange: (cursor, pending) => handler.exchange(cursor, pending),
+    const stops = [
+      serveSocket(socketLike(socket), {
+        exchange: (cursor, pending) => handler.exchange(cursor, pending),
+      }),
+    ]
+    if (options.presence !== undefined)
+      stops.push(servePresence(socketLike(socket), options.presence))
+    socket.on('close', () => {
+      for (const stop of stops) stop()
     })
-    socket.on('close', stop)
   })
 
   return {
