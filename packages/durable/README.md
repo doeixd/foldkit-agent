@@ -68,7 +68,8 @@ const program = Effect.gen(function* () {
 - **A durable effect ledger.** `runEffect(key, run)` reuses recorded successes
   and shares concurrent calls within one journal instance.
 - **Migrations.** The tables are created or upgraded by a transactional
-  `user_version` migration, so an existing database is upgraded in place.
+  `user_version` migration, so an existing database is upgraded in place and an
+  interrupted run is safe to repeat.
 - **Metrics.** `journalMetrics` counts appends, compactions, owner effect runs,
   and coalesced effect runs.
 - **Branded identities.** `DocumentId`, `OpId`, and `ActorId` are

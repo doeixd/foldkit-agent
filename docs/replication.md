@@ -145,12 +145,34 @@ It owns:
 apps, multi-device, collaborative state, or a server-side agent acting on the same
 state the user sees.
 
+## Versions and upgrades
+
+Storage format and application data have separate owners:
+
+- **`foldkit-durable`** tracks its SQLite layout with `user_version` and upgrades
+  it in one transaction. `CREATE ... IF NOT EXISTS` makes a re-run safe, so an
+  interrupted migration completes on the next open. It does not touch your
+  Message, snapshot, or effect payloads; migrating those is the application's job.
+- **`foldkit-sync`** stamps its persisted replica and clock state with a
+  `schemaVersion`. A stored state from a version this build does not understand
+  fails with `UnsupportedReplicaVersionError` or `UnsupportedClockVersionError`,
+  naming the found and supported versions, and the stored bytes are left
+  untouched so the state stays recoverable.
+
+Reconnecting after the server has compacted is not an upgrade: the server sends a
+`checkpoint`, the replica adopts the snapshot, and any edit made while offline is
+rebased onto it. Pending operations and the clock's high-water mark survive, so a
+reconnect cannot reuse a timestamp. A checkpoint behind the replica's cursor is a
+`CheckpointRegressionError`.
+
 ## When not to use these
 
 - You don't need persistence or multiple clients — just use the Foldkit runtime.
 - You want peer-to-peer CRDT replication — this is **server-ordered,
   single-writer-per-document**; `lwwRegister` is the only merge helper.
-- You need Message-schema migration across versions — not provided yet.
+- You need the library to migrate your Message schema across versions — it
+  detects an unsupported persisted version and stops, but rewriting application
+  data is yours to implement.
 - You need a general-purpose database — this is an operation log for Foldkit
   Messages. `foldkit-durable` is Node + SQLite; `foldkit-sync` stores through
   IndexedDB, and requires a server that orders operations.
