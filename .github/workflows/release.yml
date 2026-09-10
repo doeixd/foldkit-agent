@@ -1,7 +1,8 @@
 name: Release
 
 # Publishes every non-private package under `packages/*` to npm. Push a version
-# tag (`v0.1.0`) or run the workflow manually.
+# tag (`v0.1.0`) or run the workflow manually. Publishing needs the `NPM_TOKEN`
+# repository secret; without it the checks run and the publish step is skipped.
 on:
   push:
     tags:
@@ -10,9 +11,14 @@ on:
 
 permissions:
   contents: read
-  # Required for npm provenance, which every package opts into via
-  # `publishConfig.provenance`.
+  # Required for npm provenance, which the publish step opts into via
+  # `NPM_CONFIG_PROVENANCE`.
   id-token: write
+
+# Sourced once so the publish step can skip cleanly when the secret is absent;
+# publishing without it would fail with a 401.
+env:
+  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
 jobs:
   publish:
@@ -39,7 +45,9 @@ jobs:
       # rewrites `workspace:^` peer ranges to real ranges as it packs, so it is
       # the only supported publisher here; `npm publish` would ship the
       # `workspace:` protocol verbatim.
-      - run: pnpm release
+      - name: Publish
+        if: ${{ env.NPM_TOKEN != '' }}
+        run: pnpm release
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: 'true'

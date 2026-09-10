@@ -90,15 +90,17 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the checks before a commit, and
 
 ## Releasing
 
-Nothing is published yet; `v0.1.0` is the first release. `pnpm release` builds,
-then publishes every non-private package. Publishing must use **pnpm**, not npm:
-the adapters declare `foldkit-agent` as a `workspace:^` peer dependency, which
-pnpm rewrites to a real range (`^0.1.0`) when it packs.
+`v0.1.0` is published. `pnpm release` builds, then publishes every non-private
+package. Publishing must use **pnpm**, not npm: the adapters declare
+`foldkit-agent` as a `workspace:^` peer dependency, which pnpm rewrites to a real
+range (`^0.1.0`) when it packs.
 
 Bump the versions, add a [CHANGELOG.md](./CHANGELOG.md) entry, run the four
 checks, then push a `vX.Y.Z` tag. The
-[release workflow](./.github/workflows/release.yml) re-runs the checks and
-publishes with provenance. `foldkit-agent-native` is `private`, so it is skipped.
+[release workflow](./.github/workflows/release.yml) re-runs the checks. It
+publishes with provenance when the `NPM_TOKEN` repository secret is set, and
+otherwise runs the checks and skips publishing.
+`foldkit-agent-native` is `private`, so it is skipped.
 
 ## License
 
