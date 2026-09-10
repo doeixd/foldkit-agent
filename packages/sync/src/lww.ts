@@ -52,6 +52,7 @@ export const openLwwClock = (options: {
 }): Effect.Effect<LwwClock, StorageError> =>
   Effect.gen(function* () {
     const { documentId, replicaId, storage } = options
+    yield* Effect.annotateCurrentSpan({ documentId, replicaId })
     const initial = decodeClock({ schemaVersion: 1, documentId, replicaId, revision: 0 })
     const saved = yield* storage.load()
     const state = yield* Effect.try({
@@ -86,7 +87,7 @@ export const openLwwClock = (options: {
             return [{ counter: allocated.revision, replicaId }, allocated] as const
           }),
         )
-      })
+      }).pipe(Effect.withSpan('Lww.next'))
 
     const close: Effect.Effect<void> = Effect.gen(function* () {
       const alreadyClosed = yield* Ref.modify(closed, current => [current, true] as const)
@@ -96,10 +97,11 @@ export const openLwwClock = (options: {
         Effect.succeed([undefined, current] as const),
       )
       yield* storage.close
-    })
+    }).pipe(Effect.withSpan('Lww.close'))
 
     return { next, close }
   }).pipe(
+    Effect.withSpan('Lww.openClock'),
     // Close a partially initialized storage on any failure, including a defect,
     // so a failed open cannot leak the connection.
     Effect.onExit(exit =>

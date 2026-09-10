@@ -68,6 +68,7 @@ export const createPresence = <Update>(
   Effect.gen(function* () {
     const ttl = Duration.toMillis(options.ttl)
     const peers = yield* Ref.make(new Map<string, PresencePeer<Update>>())
+    const closed = yield* Ref.make(false)
     const listeners = new Set<() => void>()
     /** A subscriber must never fail an update. */
     const notify = (): void => {
@@ -123,16 +124,18 @@ export const createPresence = <Update>(
 
     const set = (value: Update): Effect.Effect<void> =>
       Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return
         yield* put(options.id, value, yield* Clock.currentTimeMillis)
         if (channel !== undefined) yield* channel.publish({ id: options.id, value })
         notify()
-      })
+      }).pipe(Effect.withSpan('Presence.set'))
 
     const leave: Effect.Effect<void> = Effect.gen(function* () {
+      if (yield* Ref.get(closed)) return
       yield* remove(options.id)
       if (channel !== undefined) yield* channel.publish({ id: options.id, value: null })
       notify()
-    })
+    }).pipe(Effect.withSpan('Presence.leave'))
 
     const peerList: Effect.Effect<ReadonlyArray<PresencePeer<Update>>> = Effect.gen(function* () {
       const at = yield* Clock.currentTimeMillis
@@ -141,6 +144,7 @@ export const createPresence = <Update>(
     })
 
     const prune: Effect.Effect<void> = Effect.gen(function* () {
+      if (yield* Ref.get(closed)) return
       const at = yield* Clock.currentTimeMillis
       const changed = yield* Ref.modify(peers, map => {
         let removed = false
@@ -154,23 +158,27 @@ export const createPresence = <Update>(
         return [removed, next] as const
       })
       if (changed) notify()
-    })
+    }).pipe(Effect.withSpan('Presence.prune'))
 
-    const close: Effect.Effect<void> =
-      consuming === undefined ? Effect.void : Fiber.interrupt(consuming).pipe(Effect.asVoid)
+    const close: Effect.Effect<void> = Effect.gen(function* () {
+      if (yield* Ref.get(closed)) return
+      yield* Ref.set(closed, true)
+      if (consuming !== undefined) yield* Fiber.interrupt(consuming)
+      yield* Effect.sync(() => listeners.clear())
+    }).pipe(Effect.withSpan('Presence.close'))
 
     return {
       set,
       leave,
       peers: peerList,
       prune,
-      subscribe: listener => {
+      subscribe: (listener: () => void) => {
         listeners.add(listener)
         return () => listeners.delete(listener)
       },
       close,
     }
-  })
+  }).pipe(Effect.withSpan('Presence.create'))
 
 /** An in-process channel, for tests and single-process demos. */
 export const loopbackPresenceChannel = <Update>(): Effect.Effect<PresenceChannel<Update>> =>

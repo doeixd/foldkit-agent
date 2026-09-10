@@ -239,4 +239,16 @@ describe('presence', () => {
         expect(yield* b.peers).toEqual([])
       }),
     ))
+
+  it('ignores mutations after close', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const presence = yield* make({ id: 'a', ttl: '100 millis', channel })
+
+        yield* presence.close
+        yield* presence.set({ cursor: 1 })
+        expect(yield* presence.peers).toEqual([])
+      }),
+    ))
 })
