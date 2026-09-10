@@ -31,14 +31,16 @@
     "typecheck": "tsc -b"
   },
   "peerDependencies": {
-    "foldkit-agent": "workspace:^",
+    "@agent-native/core": "0.177.1",
     "effect": "^4.0.0-rc.112",
-    "foldkit": "^0.158.2"
+    "foldkit": "^0.158.2",
+    "foldkit-agent": "workspace:^"
   },
   "devDependencies": {
-    "foldkit-agent": "workspace:*",
+    "@agent-native/core": "0.177.1",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
+    "foldkit-agent": "workspace:*",
     "tsdown": "^0.23.0",
     "typescript": "^5.7.2"
   },

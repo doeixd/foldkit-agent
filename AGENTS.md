@@ -78,6 +78,10 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
 
 **External APIs**
 
+- **Compile adapters against the real peer types.** The Agent Native README
+  registration did not type-check: its tool requires an object schema, while
+  our local descriptor only promised `Record<string, unknown>`.
+
 - **Read the spec before writing the client, and again before writing its fake.**
   The WebMCP adapter passed the registration signal on the tool descriptor
   instead of in `registerTool`'s second argument, so unregistering did nothing.

@@ -2,9 +2,9 @@
 
 Compiles a [`foldkit-agent`](../agent) contract into Agent Native actions.
 
-**This is an unpublished prototype.** Package-level framework probes and unit
-tests exist, but integration in a running Agent Native app is still unverified.
-See the limits below.
+**This is an unpublished prototype**, checked against `@agent-native/core@0.177.1`.
+The integration suite uses the real package registry, tool runtime, and schema
+wrapper. Full HTTP/MCP/A2A deployments remain outside this spike.
 
 ## What it does
 
@@ -67,15 +67,41 @@ itself, so identity has to survive — and both helpers return that same schema,
 sharing one `~standard`, so calling them in turn leaves a single object carrying
 `jsonSchema` and `validate` alike. That is what this package does.
 
-## Limits
+## What the spike proves
 
-- **Only partly verified.** Against the published `@agent-native/core@0.177.1`:
-  the imports resolve, `registerPackageActions` accepts what this produces, and
-  `defineAction` accepts an Effect-derived Standard Schema and derives its
-  parameters from it. What is **not** verified is whether every surface — in-app
-  assistant, MCP, A2A, HTTP, CLI — reads the package registry, and whether
-  app-local actions win a collision in a running app.
-- Agent Native assumes Postgres, Nitro and React. None of that is exercised.
-- No HTTP method configuration, no `useActionQuery`, no UI, no deep links.
-- The private package flag is deliberate: this should not be published until it
-  has been run against the real thing.
+Run `pnpm exec vitest run packages/agent-native/test/framework.test.ts` at the
+repository root. No LLM credentials, database, or network server are needed.
+
+| Framework surface | Executable evidence |
+| --- | --- |
+| Package registry | `registerPackageActions` + `autoDiscoverActions` discovers the adapter entry. An actual app-local action file wins a name collision. |
+| Agent tool runtime | `actionsToEngineTools` advertises the encoded schema; `executeAgentToolCall` changes the Foldkit Model for an authorized caller and refuses another caller. |
+| Schema wrapper | `defineAction` derives parameters, preserves transforming input for one decode in Foldkit, and rejects extra fields. |
+
+The framework is a development dependency and a pinned peer of this adapter.
+It is not a dependency of `foldkit-agent`. The public adapter types are checked
+against the real `ActionTool` type; only object input schemas are supported,
+because the framework omits other input shapes from its tool list.
+
+## Limits and reuse decision
+
+The registry and agent tool runtime can be reused without replacing Foldkit's
+state machine. HTTP, MCP, A2A, CLI, UI queries, auth sessions, and deep links
+still need their framework host and deployment wiring; this suite does not
+claim an end-to-end test of those surfaces. Keep the independent MCP/A2A
+adapters and direct WebMCP adapter.
+
+The registry is static: it describes all declared capabilities, while Foldkit
+checks availability at invocation time. The application maps a verified caller
+to a principal when binding a server-held Runtime. Page-local state still belongs
+to WebMCP; no browser RPC bridge is introduced.
+
+The framework's package registry retains the first registration of a name and
+skips names inherited from `Object.prototype`, including `__proto__`. Avoid
+those names and restart the host after changing a registered contract. The
+adapter's own returned record preserves these keys, but cannot fix that
+downstream registry behavior.
+
+The package stays private pending a deployment test. This completes the bounded
+proof of concept in [issue #22](https://github.com/doeixd/foldkit-agent/issues/22),
+not a claim that every Agent Native subsystem is independently reusable.

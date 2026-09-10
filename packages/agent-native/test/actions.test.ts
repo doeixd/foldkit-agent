@@ -114,6 +114,22 @@ beforeEach(() => {
 })
 
 describe('compiling a contract into actions', () => {
+  it('rejects non-object inputs that the framework would omit from its tool list', () => {
+    const definition = Agent.define({
+      messages: Agent.expose(Message, {
+        Shouted: {
+          description: 'Shout',
+          input: Schema.String,
+          toMessage: text => ({ text }),
+        },
+      }),
+    })
+
+    expect(() => AgentNative.actions({ definition, resolveRuntime: makeAgent })).toThrow(
+      'requires an object input schema',
+    )
+  })
+
   it('produces one action per exposed capability', () => {
     expect(Object.keys(actionsFor())).toEqual(['create_todo', 'delete_todo', 'set_limit', 'shout'])
   })
