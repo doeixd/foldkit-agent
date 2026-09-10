@@ -122,7 +122,20 @@ export const openReplica = async (
       await enqueue(async () => {
         let cursor = state.cursor
         let committed = state.committed
-        const ids = new Set(state.committedIds)
+        // A checkpoint folds committed history into its snapshot, so the
+        // retained id set starts over from it. Ops at or before its cursor are
+        // already in the model; later ones are still applied below.
+        const ids =
+          response.checkpoint === undefined ? new Set(state.committedIds) : new Set<string>()
+        if (response.checkpoint !== undefined) {
+          if (response.checkpoint.cursor < cursor)
+            throw new Error('Checkpoint is behind the replica')
+          committed = response.checkpoint.model
+          cursor = response.checkpoint.cursor
+        }
+        // A checkpoint covers no log rows, so an operation the server committed
+        // before compacting it would otherwise stay pending and replay twice.
+        const acknowledged = new Set(response.acknowledged ?? [])
         const rejected = new Set(response.rejected)
         const sentIds = new Set(sent.pending.map(operation => operation.opId))
         if ([...rejected].some(id => !sentIds.has(id))) {
@@ -145,7 +158,10 @@ export const openReplica = async (
             cursor,
             committedIds: [...ids],
             pending: state.pending.filter(
-              operation => !ids.has(operation.opId) && !rejected.has(operation.opId),
+              operation =>
+                !ids.has(operation.opId) &&
+                !acknowledged.has(operation.opId) &&
+                !rejected.has(operation.opId),
             ),
           }),
         )

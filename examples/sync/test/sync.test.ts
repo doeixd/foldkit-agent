@@ -15,7 +15,7 @@ const created = (id: string, title = id) => Message.CreatedTodo({ id, title })
 const operation = (
   replicaId: string,
   localSequence: number,
-  message = created(replicaId),
+  message: Message = created(replicaId),
 ): Operation => ({
   protocolVersion: 1,
   schemaVersion: 1,
@@ -122,6 +122,29 @@ describe('the journal', () => {
       'Unauthenticated',
     )
     expect(server.snapshot('todos').cursor).toBe(0)
+  })
+
+  it('compacts committed payloads while keeping identity and the snapshot', () => {
+    server.append(operation('a', 1, created('a')), principal)
+    server.append(operation('a', 2, created('b')), principal)
+    server.append(operation('a', 3, created('c')), principal)
+    const before = server.snapshot('todos')
+    server.compact('todos', 2)
+
+    // The compacted prefix lives only in the snapshot now.
+    expect(server.read('todos', 0).map(op => op.opId)).toEqual(['a:3'])
+    expect(server.snapshot('todos')).toEqual(before)
+
+    // A retransmission of a compacted operation is still idempotent.
+    expect(server.append(operation('a', 1, created('a')), principal).serverSequence).toBe(1)
+    expect(server.snapshot('todos')).toEqual(before)
+  })
+
+  it('refuses a compaction cursor that moves backwards or past the snapshot', () => {
+    server.append(operation('a', 1, created('a')), principal)
+    expect(() => server.compact('todos', 2)).toThrow('Invalid compaction cursor')
+    server.compact('todos', 1)
+    expect(() => server.compact('todos', 0)).toThrow('Invalid compaction cursor')
   })
 })
 
@@ -281,6 +304,104 @@ describe('local durability and reconciliation', () => {
     expect(a.cursor()).toBe(0)
     expect(a.shared().todos).toEqual([{ id: 'local', title: 'local' }])
     expect(a.pending().map(op => op.opId)).toEqual(['a:1'])
+  })
+
+  it('catches a new replica up from a checkpoint after history is compacted', async () => {
+    server.append(operation('seed', 1, created('a')), principal)
+    server.append(
+      operation('seed', 2, Message.RenamedTodo({ id: 'a', title: 'renamed' })),
+      principal,
+    )
+    server.append(operation('seed', 3, created('b')), principal)
+    const expected = server.snapshot('todos').model
+    server.compact('todos', 2)
+
+    const a = await open('a')
+    await a.synchronize(server.transport(principal))
+
+    // The retained tail starts at sequence 3, so replaying it alone fails the
+    // contiguity check; the checkpoint is what makes this converge.
+    expect(a.cursor()).toBe(3)
+    expect(a.shared()).toEqual(expected)
+    expect(a.pending()).toEqual([])
+  })
+
+  it('sends the retained tail, not a checkpoint, to a replica above the floor', async () => {
+    server.append(operation('seed', 1, created('a')), principal)
+    const a = await open('a')
+    await a.synchronize(server.transport(principal))
+    expect(a.cursor()).toBe(1)
+
+    server.append(operation('seed', 2, created('b')), principal)
+    server.append(operation('seed', 3, created('c')), principal)
+    server.compact('todos', 1)
+    await a.synchronize(server.transport(principal))
+
+    expect(a.cursor()).toBe(3)
+    expect(a.shared().todos.map(todo => todo.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('acknowledges a pending operation that compaction already folded in', async () => {
+    const a = await open('a')
+    await a.submit(created('todo'))
+    await expect(
+      a.synchronize({
+        exchange: async (cursor, pending) => {
+          await server.transport(principal).exchange(cursor, pending)
+          throw new Error('connection lost')
+        },
+      }),
+    ).rejects.toThrow('connection lost')
+    // The server committed a:1 before the reply was lost, then compacted it, so
+    // the replica cannot rediscover the acknowledgement from the log.
+    server.compact('todos', 1)
+
+    await a.synchronize(server.transport(principal))
+
+    expect(a.cursor()).toBe(1)
+    expect(a.pending()).toEqual([])
+    expect(a.shared()).toEqual(server.snapshot('todos').model)
+  })
+
+  it('reaches the same state from a compacted checkpoint as from full replay', async () => {
+    server.append(operation('seed', 1, created('a')), principal)
+    server.append(operation('seed', 2, Message.RenamedTodo({ id: 'a', title: 'first' })), principal)
+    const replayed = await open('replayed')
+    await replayed.synchronize(server.transport(principal))
+
+    server.append(
+      operation('seed', 3, Message.RenamedTodo({ id: 'a', title: 'second' })),
+      principal,
+    )
+    await replayed.synchronize(server.transport(principal))
+    server.compact('todos', 3)
+
+    const checkpointed = await open('checkpointed')
+    await checkpointed.synchronize(server.transport(principal))
+
+    expect(checkpointed.cursor()).toBe(replayed.cursor())
+    expect(checkpointed.shared()).toEqual(replayed.shared())
+  })
+
+  it('refuses a checkpoint older than the replica', async () => {
+    server.append(operation('seed', 1, created('a')), principal)
+    const a = await open('a')
+    await a.synchronize(server.transport(principal))
+    expect(a.cursor()).toBe(1)
+
+    await expect(
+      a.synchronize({
+        exchange: async () => ({
+          operations: [],
+          rejected: [],
+          checkpoint: { cursor: 0, model: { todos: [] } },
+        }),
+      }),
+    ).rejects.toThrow('Checkpoint is behind the replica')
+
+    // The refused exchange left durable state where it was.
+    expect(a.cursor()).toBe(1)
+    expect(a.shared().todos).toEqual([{ id: 'a', title: 'a' }])
   })
 })
 

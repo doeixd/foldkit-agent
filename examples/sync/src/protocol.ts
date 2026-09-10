@@ -60,9 +60,18 @@ export const operationFrom = (input: unknown, documentId: string): Operation =>
 export const committedFrom = (input: unknown, documentId: string): Committed =>
   validate(decodeCommitted(input), documentId)
 
+const Checkpoint = Schema.Struct({
+  cursor: Sequence,
+  model: Shared,
+})
+export type Checkpoint = typeof Checkpoint.Type
 const Exchange = Schema.Struct({
   operations: Schema.Array(Schema.Unknown),
   rejected: Schema.Array(Schema.NonEmptyString),
+  /** Sends from the request that are durably committed, so the replica can drop them. */
+  acknowledged: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  /** The snapshot a replica predating compaction adopts in place of the log. */
+  checkpoint: Schema.optional(Checkpoint),
 })
 export type Exchange = typeof Exchange.Type
 export const decodeExchange = Schema.decodeUnknownSync(Exchange, { onExcessProperty: 'error' })
