@@ -85,11 +85,45 @@ order, independent of locale. This is logical ordering, not wall-clock time.
 The rule follows the total-order register model described in
 [Replicated Data Types: Specification, Verification, Optimality](https://www.microsoft.com/en-us/research/publication/replicated-data-types-specification-verification-optimality/).
 
-Allocate stamps **before dispatch**, never in `update` or replay. Counters are
-nonnegative safe integers. For a new write, advance beyond both observed and
-locally issued counters. Persist that local high-water mark even if a write is
-refused, and never reuse a replica id with reset counters. Allocation is still
-application-owned; the helper does not supply a durable logical clock.
+Allocate stamps **before dispatch**, never in `update` or replay. `openLwwClock`
+persists a counter independently of the outbox, so a rejected or unsubmitted
+write cannot cause timestamp reuse after reload:
+
+```ts
+import { indexedDb, openLwwClock } from 'foldkit-sync'
+
+const clock = await openLwwClock({
+  documentId: 'todos',
+  replicaId: 'tab-a',
+  storage: await indexedDb('todos-tab-a-clock'),
+})
+try {
+  const stamp = await clock.next(replica.shared().title.stamp.counter)
+  await replica.submit({ _tag: 'Renamed', title: { stamp, value: 'Milk' } })
+} finally {
+  await clock.close()
+}
+```
+
+Use a **separate database** from the replica's outbox, with one clock per
+document/writer. `next(observedCounter)` returns only after persisting a counter
+greater than both its saved value and the supplied observation. Pass the latest
+observed counter for the field being edited; when causality spans several
+registers, pass their maximum. Calling `next()` without an observation advances
+only the saved local counter. The clock does not inspect application state.
+
+Allocations on one handle are serialized. Separate handles use storage's
+compare-and-swap check; a stale handle fails and must be closed and reopened.
+Storage failures reject allocation without returning a stamp. Counter gaps after
+a crash or failed submission are harmless. Counters are nonnegative safe
+integers; exhaustion fails before writing. `close()` waits for accepted
+allocations and refuses new ones. Opening takes ownership of storage and closes
+it on initialization failure too.
+
+Keep the clock database across reloads and outbox resets. If it is lost or
+deleted, use a fresh replica id instead of resetting the same writer's counter.
+For applications that allocate stamps themselves, preserve this same durable
+high-water mark, including refused writes.
 
 A stamp identifies one immutable write within a register. Repeated delivery of
 the same value is harmless; different values with the same stamp throw. Value
@@ -109,6 +143,6 @@ identity. Applications must enforce writer ownership and clock policy at admissi
 where needed. A losing write can still trigger a Command if the application's
 update produces one; this helper only resolves state.
 
-This first M8 slice does not change the todo example's persisted schema or claim
-arbitrary Messages commute. Sets, counters, collaborative text, and automatic
-stamp allocation remain future work.
+These M8 helpers do not change the todo example's persisted schema or claim
+arbitrary Messages commute. Specialized sets, counters and collaborative text
+remain future work.

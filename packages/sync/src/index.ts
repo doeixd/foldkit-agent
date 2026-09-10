@@ -7,7 +7,7 @@
  * journal provides authoritative order.
  */
 export { indexedDb, type Storage } from './indexedDb.js'
-export { lwwRegister } from './lww.js'
+export { lwwRegister, openLwwClock, type LwwClock, type LwwClockState } from './lww.js'
 export {
   createPresence,
   createPresenceHub,
