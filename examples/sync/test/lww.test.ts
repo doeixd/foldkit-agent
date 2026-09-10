@@ -6,6 +6,7 @@ import {
   defineSync,
   indexedDb,
   lwwRegister,
+  openLwwClock,
   type Operation,
   type TransportClient,
 } from 'foldkit-sync'
@@ -158,5 +159,76 @@ it('authorization still rejects a winning write and tombstones survive delayed e
   } finally {
     await replica.close()
     journal.close()
+  }
+})
+
+it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', async () => {
+  const factory = new IDBFactory()
+  const openClock = async () =>
+    openLwwClock({
+      documentId: 'titles',
+      replicaId: 'a',
+      storage: await indexedDb('a-clock', factory),
+    })
+  const { journal, transport } = openJournal()
+  let clock = await openClock()
+  let replica = await Sync.openReplica('a', await indexedDb('a', factory))
+  try {
+    const refused = await clock.next(20)
+    await replica.submit(Message.Renamed({ title: { stamp: refused, value: 'Refused' } }))
+    await replica.synchronize(transport(false))
+    expect(replica.shared()).toEqual(empty)
+    expect(replica.pending()).toEqual([])
+    expect(journal.load('titles').cursor).toBe(0)
+
+    const unsubmitted = await clock.next()
+    expect(unsubmitted.counter).toBe(22)
+    await clock.close()
+    await replica.close()
+    clock = await openClock()
+    replica = await Sync.openReplica('a', await indexedDb('a', factory))
+
+    const stamp = await clock.next(replica.shared().title.stamp.counter)
+    expect(stamp).toEqual({ counter: 23, replicaId: 'a' })
+    await replica.submit(Message.Renamed({ title: { stamp, value: 'Accepted' } }))
+    await replica.synchronize(transport())
+    expect(journal.load('titles')).toEqual({
+      cursor: 1,
+      snapshot: { title: { stamp, value: 'Accepted' } },
+    })
+  } finally {
+    await clock.close()
+    await replica.close()
+    journal.close()
+  }
+})
+
+it('IndexedDB admits only one clock writer at a saved revision', async () => {
+  const factory = new IDBFactory()
+  const openClock = async () =>
+    openLwwClock({
+      documentId: 'titles',
+      replicaId: 'a',
+      storage: await indexedDb('clock', factory),
+    })
+  const first = await openClock()
+  const second = await openClock()
+  try {
+    const results = await Promise.allSettled([first.next(), second.next()])
+    expect(results.filter(result => result.status === 'fulfilled')).toEqual([
+      { status: 'fulfilled', value: { counter: 1, replicaId: 'a' } },
+    ])
+    const failures = results.filter(result => result.status === 'rejected')
+    expect(failures).toHaveLength(1)
+    expect(failures[0]?.reason).toEqual(new Error('Replica was changed by another writer'))
+  } finally {
+    await first.close()
+    await second.close()
+  }
+  const reopened = await openClock()
+  try {
+    expect(await reopened.next()).toEqual({ counter: 2, replicaId: 'a' })
+  } finally {
+    await reopened.close()
   }
 })
