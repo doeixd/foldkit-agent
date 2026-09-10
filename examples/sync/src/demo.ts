@@ -55,6 +55,10 @@ await alice.synchronize(transport)
 await bob.synchronize(transport)
 assert.deepEqual(alice.shared(), bob.shared())
 assert.deepEqual(alice.shared(), server.snapshot('todos').model)
+assert.deepEqual(alice.shared().todos, [
+  { id: 'b', title: 'Bob offline' },
+  { id: 'a', title: 'Renamed by agent' },
+])
 console.log(
   'Recovered an offline outbox, converged two replicas, and replayed a server agent Message.',
 )
