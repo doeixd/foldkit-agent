@@ -387,6 +387,25 @@ describe('the replica', () => {
     expect(saved.committedIds.length).toBeLessThan(1100)
   })
 
+  it('recovers a long offline outbox and converges on the committed order', async () => {
+    const replica = await open('a')
+    const count = 500
+    for (let localSequence = 1; localSequence <= count; localSequence += 1)
+      await submit(replica, created(`t${localSequence}`))
+    expect(pending(replica)).toHaveLength(count)
+
+    // The server commits the whole outbox in the order it was sent.
+    const operations = Array.from({ length: count }, (_, index) =>
+      committed('a', index + 1, index + 1, created(`t${index + 1}`)),
+    )
+    await sync(replica, { exchange: async () => ({ operations, rejected: [] }) })
+
+    expect(pending(replica)).toEqual([])
+    expect(cursor(replica)).toBe(count)
+    expect(shared(replica).todos).toHaveLength(count)
+    await close(replica)
+  })
+
   it('reports a refusal without exposing internals', async () => {
     const replica = await open('a')
     await submit(replica, created('t'))

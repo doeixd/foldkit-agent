@@ -43,6 +43,31 @@ outbox identity checks need:
 Reconnect/rebase (open a replica with a 100-op outbox, then adopt a committed
 batch) costs about 1.5 ms for 100 commits and 10 ms for 1000.
 
+## Durable append and storage
+
+`pnpm bench:storage` appends a fixed number of operations to a file-backed
+journal, prints bytes per operation, then compacts every payload and prints the
+size again. Recorded on the same Windows/Node 20 machine:
+
+| | |
+| --- | --- |
+| operations | 5,000 |
+| append | 5.0 ms/op (synchronous; dominated by Windows fsync) |
+| storage | 104 B/op |
+| after compacting all payloads | unchanged (520,192 bytes) |
+| heap / rss | 36 MB / 158 MB |
+
+Compaction drops payloads but does not shrink the file: identity rows remain and
+SQLite keeps freed pages, so storage tracks the number of operations, not the
+payload bytes compacted away. That matches the [retention policy](../packages/durable/README.md#retention) —
+bounding storage means rotating the journal. Append is a synchronous
+transaction, so the per-op time is the platform's fsync; CI's `ubuntu` runner is
+faster than this laptop.
+
+A long offline outbox is also exercised deterministically in CI: `sync.test.ts`'s
+`recovers a long offline outbox and converges on the committed order` submits 500
+operations offline and reconciles them in one exchange.
+
 ## Initial supported limits
 
 With one replica per document, from the recorded run:
@@ -53,5 +78,8 @@ With one replica per document, from the recorded run:
   should checkpoint its own work rather than rely on the outbox alone.
 - **Reconcile batch.** A 1,000-commit batch reconciles in ~10 ms. Larger batches
   should be paginated by the transport.
-- These are `foldkit-sync`'s local costs. `foldkit-durable`'s append and
-  compaction costs are not measured here.
+- **Durable storage.** ~104 B per operation on the recorded run, and the file
+  does not shrink on compaction, so storage grows with the number of operations.
+  Rotate the journal per its [retention policy](../packages/durable/README.md#retention).
+- These are `foldkit-sync`'s local costs and one `foldkit-durable` append/storage
+  reading.

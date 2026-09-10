@@ -21,6 +21,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Prints hz/mean/p99 to the job log. Not a gate: shared runners are too
-      # noisy to fail a build on a timing regression.
+      # Prints hz/mean/p99 and the durable bytes-per-operation reading to the
+      # job log. Not a gate: shared runners are too noisy to fail a build on a
+      # timing regression.
       - run: pnpm bench
+      - run: pnpm bench:storage
