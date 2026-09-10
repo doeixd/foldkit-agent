@@ -165,6 +165,28 @@ rebased onto it. Pending operations and the clock's high-water mark survive, so 
 reconnect cannot reuse a timestamp. A checkpoint behind the replica's cursor is a
 `CheckpointRegressionError`.
 
+## Recovery
+
+Failures are tagged errors, and neither package overwrites state it cannot read.
+What an application does next:
+
+- **Storage evicted or unreadable.** `openReplica` sees no saved state and
+  starts at cursor 0; the first exchange adopts the server's `checkpoint`. Edits
+  that were only in the evicted outbox are gone, so keep anything irreplaceable
+  outside replica storage and confirm before discarding it.
+- **A stale writer.** `Storage.save` compare-and-swaps on the saved revision. A
+  second replica or tab writing the same storage fails with a `StorageError`
+  ("Replica was changed by another writer"); give each tab its own storage and
+  `replicaId`.
+- **Malformed persisted data.** `InvalidReplicaHistoryError`, `InvalidOutboxError`,
+  or a clock `StorageError` means the bytes do not match the schema. The stored
+  value is left intact, so the UI can offer a reset instead of silently losing
+  history.
+- **Unsupported versions.** `UnsupportedReplicaVersionError` and
+  `UnsupportedClockVersionError` name the found and supported versions and
+  preserve the data. An older build should not open newer storage; upgrade the
+  application instead.
+
 ## When not to use these
 
 - You don't need persistence or multiple clients — just use the Foldkit runtime.
