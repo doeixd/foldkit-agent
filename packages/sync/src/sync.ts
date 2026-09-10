@@ -257,51 +257,56 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         })
 
       const submit = (message: Message): Effect.Effect<void, ReplicaError> =>
-        Effect.gen(function* () {
-          if (yield* Ref.get(closed))
-            return yield* new ReplicaClosedError({ message: 'Replica is closed' })
-          yield* SynchronizedRef.modifyEffect(stateRef, current =>
-            Effect.gen(function* () {
-              const operation = yield* Effect.try({
-                try: () =>
-                  operationFrom(
-                    {
-                      protocolVersion: 1,
-                      schemaVersion: 1,
-                      documentId,
-                      replicaId,
-                      localSequence: current.nextLocalSequence,
-                      opId: `${replicaId}:${current.nextLocalSequence}`,
-                      baseCursor: current.cursor,
-                      message: encodeMessage(message),
-                    },
+        // The closed check belongs inside the lock: a `close` between an outer
+        // check and acquiring the lock would otherwise still persist.
+        SynchronizedRef.modifyEffect(stateRef, current =>
+          Effect.gen(function* () {
+            if (yield* Ref.get(closed))
+              return yield* new ReplicaClosedError({ message: 'Replica is closed' })
+            const operation = yield* Effect.try({
+              try: () =>
+                operationFrom(
+                  {
+                    protocolVersion: 1,
+                    schemaVersion: 1,
                     documentId,
-                  ),
-                catch: () => new InvalidOutboxError({ message: 'Invalid outbox' }),
-              })
-              const next = yield* Effect.try({
-                try: () =>
-                  decodeState({
-                    ...current,
-                    revision: current.revision + 1,
-                    nextLocalSequence: current.nextLocalSequence + 1,
-                    pending: [...current.pending, operation],
-                  }),
-                catch: cause =>
-                  new InvalidReplicaHistoryError({ message: 'Invalid replica state', cause }),
-              })
-              yield* persist(next, current)
-              return [undefined, next] as const
-            }),
-          )
-        })
+                    replicaId,
+                    localSequence: current.nextLocalSequence,
+                    opId: `${replicaId}:${current.nextLocalSequence}`,
+                    baseCursor: current.cursor,
+                    message: encodeMessage(message),
+                  },
+                  documentId,
+                ),
+              catch: () => new InvalidOutboxError({ message: 'Invalid outbox' }),
+            })
+            const next = yield* Effect.try({
+              try: () =>
+                decodeState({
+                  ...current,
+                  revision: current.revision + 1,
+                  nextLocalSequence: current.nextLocalSequence + 1,
+                  pending: [...current.pending, operation],
+                }),
+              catch: cause =>
+                new InvalidReplicaHistoryError({ message: 'Invalid replica state', cause }),
+            })
+            yield* persist(next, current)
+            return [undefined, next] as const
+          }),
+        )
 
       const synchronize: Replica<Message, Shared>['synchronize'] = Effect.gen(function* () {
         const transport = yield* Transport
+        if (yield* Ref.get(closed))
+          return yield* new ReplicaClosedError({ message: 'Replica is closed' })
         const sent = yield* SynchronizedRef.get(stateRef)
         const response = decodeExchange(yield* transport.exchange(sent.cursor, sent.pending))
         yield* SynchronizedRef.modifyEffect(stateRef, current =>
           Effect.gen(function* () {
+            // A `close` during the exchange must not persist its result.
+            if (yield* Ref.get(closed))
+              return yield* new ReplicaClosedError({ message: 'Replica is closed' })
             let cursor = current.cursor
             let committed = current.committed
             // A checkpoint folds committed history into its snapshot, so the

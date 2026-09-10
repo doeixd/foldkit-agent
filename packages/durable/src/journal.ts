@@ -180,11 +180,18 @@ export const makeJournalLayer = <Operation, Snapshot, Principal>(
 
 const makeShapeEffect = <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
-): Effect.Effect<Journal<Operation, Snapshot, Principal>, JournalError, SqlClient.SqlClient> =>
+): Effect.Effect<
+  Journal<Operation, Snapshot, Principal>,
+  JournalError,
+  SqlClient.SqlClient | Scope.Scope
+> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* migrate(sql)
     const changes = yield* PubSub.unbounded<string>()
+    // Ending the journal ends its subscription stream, so a forked subscriber
+    // cannot outlive the connection.
+    yield* Effect.addFinalizer(() => PubSub.shutdown(changes))
     const inFlight = yield* SynchronizedRef.make(
       new Map<string, Deferred.Deferred<unknown, unknown>>(),
     )
@@ -314,9 +321,15 @@ const makeShape = <Operation, Snapshot, Principal>(
       try: () => options.operation.decode(input),
       catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
     })
-    const opId = options.opId(operation)
+    const opId = yield* Effect.try({
+      try: () => options.opId(operation),
+      catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+    })
     yield* Effect.annotateCurrentSpan({ key, opId })
-    const actorId = options.actorId(principal)
+    const actorId = yield* Effect.try({
+      try: () => options.actorId(principal),
+      catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+    })
     const encoded = yield* Effect.try({
       try: () => JSON.stringify(options.operation.encode(operation)),
       catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
@@ -361,17 +374,21 @@ const makeShape = <Operation, Snapshot, Principal>(
             try: () => options.validate?.({ key, principal, operation, snapshot, cursor }),
             catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
           })
-          if (
-            options.authorize !== undefined &&
-            !options.authorize({ key, principal, operation, snapshot })
-          )
+          const allowed = yield* Effect.try({
+            try: () => options.authorize?.({ key, principal, operation, snapshot }) ?? true,
+            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+          })
+          if (!allowed)
             return yield* Effect.fail(
               new OperationRejectedError({
                 opId,
                 message: `Operation "${opId}" was refused by authorization`,
               }),
             )
-          const reduced = options.reduce(snapshot, operation)
+          const reduced = yield* Effect.try({
+            try: () => options.reduce(snapshot, operation),
+            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+          })
           const sequence = cursor + 1
           const encodedSnapshot = yield* Effect.try({
             try: () => JSON.stringify(options.snapshot.encode(reduced)),
@@ -452,10 +469,17 @@ const makeShape = <Operation, Snapshot, Principal>(
     result: unknown,
     error: string | undefined,
   ): Effect.Effect<void, JournalError> =>
-    sql`INSERT INTO effects (key, status, result, error) VALUES (${key}, ${status}, ${result === undefined ? null : JSON.stringify(result)}, ${error ?? null}) ON CONFLICT(key) DO UPDATE SET status = excluded.status, result = excluded.result, error = excluded.error`.pipe(
-      Effect.mapError(cause => journalError('Could not record the effect', cause)),
-      Effect.asVoid,
-    )
+    Effect.gen(function* () {
+      // Encode before the statement so a non-serializable result is a typed
+      // failure, not a defect.
+      const encoded = yield* Effect.try({
+        try: () => (result === undefined ? null : JSON.stringify(result)),
+        catch: cause => journalError('Could not record the effect', cause),
+      })
+      yield* sql`INSERT INTO effects (key, status, result, error) VALUES (${key}, ${status}, ${encoded}, ${error ?? null}) ON CONFLICT(key) DO UPDATE SET status = excluded.status, result = excluded.result, error = excluded.error`.pipe(
+        Effect.mapError(cause => journalError('Could not record the effect', cause)),
+      )
+    })
 
   const runEffect: Shape['runEffect'] = <Result, E>(key: string, run: Effect.Effect<Result, E>) =>
     Effect.gen(function* () {

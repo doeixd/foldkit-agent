@@ -291,4 +291,39 @@ describe('the replica', () => {
 
     await expect(submit(replica, created('t'))).rejects.toThrow('Replica is closed')
   })
+
+  it('refuses a submit that was queued when the replica closed', async () => {
+    let reached!: () => void
+    const atSave = new Promise<void>(resolve => {
+      reached = resolve
+    })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    let saves = 0
+    const storage = memoryStorage()
+    const replica = await open('a', {
+      ...storage,
+      save: async (state, revision) => {
+        saves += 1
+        if (saves === 2) {
+          reached()
+          await gate
+        }
+        await storage.save(state, revision)
+      },
+    })
+
+    // The first submit holds the state lock inside its save; the second queues
+    // behind it, then sees the close when it finally acquires the lock.
+    const first = submit(replica, created('first'))
+    await atSave
+    const queued = submit(replica, created('second'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await close(replica)
+    release()
+    await first
+    await expect(queued).rejects.toThrow('Replica is closed')
+  })
 })

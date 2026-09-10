@@ -75,7 +75,9 @@ const docA = documentId('a')
 const docB = documentId('b')
 const missing = documentId('missing')
 
-type Hooks = Pick<JournalOptions<Operation, Snapshot, Principal>, 'validate' | 'authorize'>
+type Hooks = Partial<
+  Pick<JournalOptions<Operation, Snapshot, Principal>, 'validate' | 'authorize' | 'reduce'>
+>
 
 const base = {
   operation,
@@ -216,6 +218,40 @@ describe('a durable journal', () => {
         expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a', 'b'] }, cursor: 2 })
       },
       { authorize: ({ operation }) => operation.kind === 'add' },
+    ))
+
+  it('maps a throwing authorization policy to a typed refusal', () =>
+    withJournal(
+      function* (journal) {
+        const result = yield* Effect.result(journal.append(todos, add(1, 'a'), principal))
+        expect(result).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'InvalidOperationError' },
+        })
+        expect((yield* journal.load(todos)).cursor).toBe(0)
+      },
+      {
+        authorize: () => {
+          throw new Error('policy exploded')
+        },
+      },
+    ))
+
+  it('maps a throwing reducer to a typed failure without committing', () =>
+    withJournal(
+      function* (journal) {
+        const result = yield* Effect.result(journal.append(todos, add(1, 'a'), principal))
+        expect(result).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'InvalidOperationError' },
+        })
+        expect((yield* journal.load(todos)).cursor).toBe(0)
+      },
+      {
+        reduce: () => {
+          throw new Error('reduce exploded')
+        },
+      },
     ))
 
   it('compacts payloads while keeping identity and the snapshot', () =>
