@@ -8,8 +8,10 @@ type AgentRuntime = Agent.AgentRuntime<any, any, any, any, any>
 /**
  * The request context Agent Native hands an action.
  *
- * Declared locally: the prototype does not depend on the framework, and only
- * these fields are used.
+ * Deliberately narrower than the framework's own `ActionRunContext`: the
+ * adapter promises only the identity a principal mapper needs, so its public
+ * surface does not grow with the framework's context. The framework still
+ * passes its full context through at runtime.
  */
 export interface ActionRunContext {
   readonly userEmail?: string | undefined
