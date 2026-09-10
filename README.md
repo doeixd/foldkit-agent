@@ -24,6 +24,10 @@ durable log that replicates the same Messages.
 
 `packages/agent-native` is a private prototype and is not published.
 
+New to the state side? [Replicated state](./docs/replication.md) explains what
+`foldkit-durable` and `foldkit-sync` do, how they fit together, and when to reach
+for them.
+
 ## Install
 
 ```bash
@@ -40,6 +44,14 @@ requires Node 22 for `node:sqlite`.
 
 ## How they fit together
 
+There are two independent extensions to the same state machine:
+
+- **Agents.** `foldkit-agent` projects *what an agent may see and do* from the
+  Model and Message union; the adapters turn that contract into tools.
+- **Replicated state.** `foldkit-durable` orders and persists *the same Messages*
+  on a server, and `foldkit-sync` keeps an offline-first replica on each client,
+  so devices converge.
+
 ```text
                   Foldkit application
           Model · Message · update · Commands
@@ -53,12 +65,10 @@ requires Node 22 for `node:sqlite`.
         webmcp       mcp     a2a
 ```
 
-The agent contract projects *what an agent may see and do* from the application;
-the durable log orders and persists *the same Messages* so replicas converge.
-Neither reimplements `update`.
-
-Each package has its own README for its API. `foldkit-agent` also has a long
-[design rationale](./packages/agent/DESIGN.md).
+Neither reimplements `update`: the agent layer projects it, and the replication
+layer replays the same Messages through a shared reducer. Each package has its
+own README; the [replication guide](./docs/replication.md) and the `foldkit-agent`
+[design rationale](./packages/agent/DESIGN.md) go deeper.
 
 ## Repository layout
 

@@ -4,6 +4,12 @@ A local-first replica of a shared Foldkit projection. The application's Message
 union and `update` stay authoritative; sync wraps them rather than introducing a
 second reducer.
 
+It is the **client half** of [replicated Foldkit state](https://github.com/doeixd/foldkit-plus/blob/main/docs/replication.md).
+Reach for it when clients must keep working offline and converge later, with
+`foldkit-durable` (or any server that orders operations) as the authority. The
+[guide](https://github.com/doeixd/foldkit-plus/blob/main/docs/replication.md) covers the mental model and when not to use
+it.
+
 ```ts
 import { Effect } from 'effect'
 import { defineSync, indexedDb, layerFromPromise } from 'foldkit-sync'

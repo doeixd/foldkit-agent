@@ -5,6 +5,12 @@ A durable, ordered operation log with a snapshot and cursor per key, backed by
 `@effect/sql-sqlite-node`. Storage and ordering only; application semantics stay
 in the `reduce` the caller supplies.
 
+It is the **server half** of [replicated Foldkit state](https://github.com/doeixd/foldkit-plus/blob/main/docs/replication.md).
+Reach for it when a server must sequence operations from many clients, replay or
+compact them, and run side effects exactly once; `foldkit-sync` is the client
+half. The [guide](https://github.com/doeixd/foldkit-plus/blob/main/docs/replication.md) covers the mental model and when not
+to use it.
+
 ```ts
 import { Config, Effect } from 'effect'
 import { actorId, documentId, makeJournal, opId } from 'foldkit-durable'
