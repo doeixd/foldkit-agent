@@ -31,3 +31,7 @@ jobs:
       # Also proves the example runs against the packages' published entry
       # points, which is how it imports them.
       - run: pnpm demo
+
+      # And that every package still packs with those entry points, which is
+      # what a release actually publishes.
+      - run: pnpm pack:check

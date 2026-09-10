@@ -1,0 +1,45 @@
+name: Release
+
+# Publishes every non-private package under `packages/*` to npm. Push a version
+# tag (`v0.1.0`) or run the workflow manually.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for npm provenance, which every package opts into via
+  # `publishConfig.provenance`.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # Never publish an unverified tree.
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # `pnpm release` builds, then publishes with `--access public`. pnpm
+      # rewrites `workspace:^` peer ranges to real ranges as it packs, so it is
+      # the only supported publisher here; `npm publish` would ship the
+      # `workspace:` protocol verbatim.
+      - run: pnpm release
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'

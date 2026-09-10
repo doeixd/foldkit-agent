@@ -33,6 +33,8 @@ implemented in this repository:
 | [`foldkit-agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
 | [`foldkit-agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
 | [`foldkit-agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
+| [`foldkit-durable`](./packages/durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
+| [`foldkit-sync`](./packages/sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
 
 It is deliberately built on Foldkit's existing architecture rather than
 introducing a second application-action system.
@@ -213,6 +215,12 @@ External MCP:
 
 ```bash
 pnpm add foldkit-agent foldkit-agent-mcp
+```
+
+Offline, multiplayer, or remote-agent state:
+
+```bash
+pnpm add foldkit-durable foldkit-sync
 ```
 
 # Quick start
@@ -1789,7 +1797,7 @@ WebMCP is particularly compelling because it can expose these capabilities direc
 
 `foldkit-agent` projects an application's Message union to agents. The same
 union, run over a durable ordered log, also supports offline, multiplayer, and
-remote-agent state. That half lives in two prototype packages:
+remote-agent state. That half lives in two packages:
 
 | Package | What it is |
 | --- | --- |
@@ -1811,9 +1819,9 @@ availability and authorization are checked before commit; compaction and
 checkpoints never change the logical state; presence never enters the log; and a
 server-authority effect runs at most once per operation.
 
-Both packages are `private` prototypes. There is no CRDT merge, no
-Message-schema migration, and the command-authority taxonomy is only partly
-expressed (effects are declared per Message). See
+Both packages are published. There is no CRDT merge, no Message-schema
+migration, and the command-authority taxonomy is only partly expressed
+(effects are declared per Message). See
 [issue #42](https://github.com/doeixd/foldkit-agent/issues/42) for the roadmap.
 
 ## Repository
@@ -1823,9 +1831,9 @@ packages/agent          foldkit-agent
 packages/agent-webmcp   foldkit-agent-webmcp
 packages/agent-mcp      foldkit-agent-mcp
 packages/agent-a2a      foldkit-agent-a2a
-packages/agent-native   foldkit-agent-native (prototype, unpublished)
-packages/durable        foldkit-durable (prototype, unpublished)
-packages/sync           foldkit-sync (prototype, unpublished)
+packages/agent-native   foldkit-agent-native (prototype, private)
+packages/durable        foldkit-durable
+packages/sync           foldkit-sync
 examples/todo           a worked example, end to end
 examples/sync           durable messages and ordered replication feasibility spike
 ```
@@ -1843,6 +1851,28 @@ Publish with **pnpm**, not npm. The adapters declare `foldkit-agent` as a
 `workspace:^` peer dependency, which pnpm rewrites to a real range
 (`^0.1.0`) when it packs. `npm publish` would ship the `workspace:` protocol
 verbatim, and every install of that version would fail.
+
+`pnpm pack:check` verifies packing without publishing, and CI runs it on every
+push.
+
+## Releasing
+
+Nothing is published yet; `v0.1.0` is the first release. The machinery is in
+place:
+
+```bash
+pnpm release       # build, then publish every non-private package
+```
+
+1. Bump `version` in each package that changed and add a
+   [`CHANGELOG.md`](./CHANGELOG.md) entry.
+2. Run the four checks locally: `pnpm format:check`, `pnpm typecheck`,
+   `pnpm test`, `pnpm pack:check`.
+3. Tag `vX.Y.Z` and push the tag. The
+   [release workflow](./.github/workflows/release.yml) re-runs the checks and
+   publishes with provenance, using the `NPM_TOKEN` repository secret.
+
+`foldkit-agent-native` is `private`, so `pnpm -r publish` skips it.
 
 [`examples/todo`](./examples/todo) is the shortest path to seeing this work: one
 state machine driven by a human and by an agent, exposed through WebMCP, with

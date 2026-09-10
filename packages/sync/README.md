@@ -5,20 +5,20 @@ union and `update` stay authoritative; sync wraps them rather than introducing a
 second reducer.
 
 ```ts
-import { defineSync, indexedDb } from 'foldkit-sync'
+import { Effect } from 'effect'
+import { defineSync, indexedDb, layerFromPromise } from 'foldkit-sync'
 
-const Sync = defineSync({
-  documentId: 'todos',
-  message: Message,
-  shared: Shared,
-  empty: { todos: [] },
-  durable: message => durableTags.has(message._tag),
-  replay: (shared, message) => replay(shared, message),
-})
+const Sync = defineSync({ ... })
 
-const replica = await Sync.openReplica('tab-1', await indexedDb('todos-tab-1'))
-await replica.submit(Message.CreatedTodo({ id: crypto.randomUUID(), title: 'Milk' }))
-await replica.synchronize(transport)
+const replica = await Effect.runPromise(
+  Sync.openReplica('tab-1', await indexedDb('todos-tab-1')),
+)
+await Effect.runPromise(
+  replica.submit(Message.CreatedTodo({ id: crypto.randomUUID(), title: 'Milk' })),
+)
+await Effect.runPromise(Effect.provide(replica.synchronize, layerFromPromise(transport)))
+
+const shared = Effect.runSync(replica.shared)
 ```
 
 ## What it owns
@@ -34,14 +34,19 @@ await replica.synchronize(transport)
   Message schema, and a Message the contract does not call durable is refused.
 - Presence (`createPresence`): an ephemeral, TTL'd peer registry, deliberately
   outside the durable log. A peer that stops refreshing is dropped, not
-  replayed. It can travel over a socket — `socketPresenceChannel` on the client
-  and `servePresence` fanning through a `createPresenceHub` on the server — or
-  in-process via `loopbackPresenceChannel`.
+  replayed. Every value is decoded through the required `decodeValue` before it
+  is stored, so a hostile peer cannot inject a value your `Update` type does not
+  describe. Presence can travel over a socket — `socketPresenceChannel` on the
+  client and `servePresence` fanning through a `createPresenceHub` on the server
+  — or in-process via `loopbackPresenceChannel`.
 - The transport seam (`Transport`): an Effect service with a loopback layer, a
   bridge to and from the promise client the replica speaks, and a WebSocket
-  client layer that queues until the socket opens. `serveSocket` is the server
-  side of a connection. A refusal is an exchange result; only a wire failure is
-  a `TransportError`.
+  client layer. The socket reconnects on an exponential, jittered backoff and
+  re-sends queued and in-flight frames with their original ids, so a lost reply
+  is answered rather than dropped; retries (`maxRetries`) and the queue
+  (`maxQueue`) are bounded, and `serveSocket` is the server side of a
+  connection. A refusal is an exchange result; only a wire failure is a
+  `TransportError`.
 
 ## Limits
 
@@ -52,8 +57,6 @@ await replica.synchronize(transport)
 - Binding the socket transport and presence server to a platform WebSocket
   server is left to the application; the sync example shows a `ws` one for the
   transport (presence over `ws` is not wired there yet).
-- Unpublished: `private` until an application other than the sync spike depends
-  on the API.
 
 ## Last-writer-wins fields (M8, experimental)
 
@@ -90,6 +93,7 @@ persists a counter independently of the outbox, so a rejected or unsubmitted
 write cannot cause timestamp reuse after reload:
 
 ```ts
+import { Effect } from 'effect'
 import { indexedDb, openLwwClock } from 'foldkit-sync'
 
 const clock = await openLwwClock({
@@ -98,8 +102,10 @@ const clock = await openLwwClock({
   storage: await indexedDb('todos-tab-a-clock'),
 })
 try {
-  const stamp = await clock.next(replica.shared().title.stamp.counter)
-  await replica.submit({ _tag: 'Renamed', title: { stamp, value: 'Milk' } })
+  const stamp = await clock.next(Effect.runSync(replica.shared).title.stamp.counter)
+  await Effect.runPromise(
+    replica.submit({ _tag: 'Renamed', title: { stamp, value: 'Milk' } }),
+  )
 } finally {
   await clock.close()
 }
