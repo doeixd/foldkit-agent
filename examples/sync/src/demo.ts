@@ -32,15 +32,21 @@ const agent = Agent.bind({
   host: {
     model: () => server.snapshot('todos').model,
     dispatch: (message: typeof Message.Type) => {
+      // The agent is its own replica, but has no persisted outbox here. The
+      // document cursor only ever advances, so deriving its sequence from that
+      // keeps each dispatch's identity unique without a second counter to keep
+      // in sync. Hard-coding `agent:1` made the second dispatch collide and the
+      // journal reject it as an identity conflict.
+      const baseCursor = server.snapshot('todos').cursor
       server.append(
         {
           protocolVersion: 1,
           schemaVersion: 1,
           documentId: 'todos',
           replicaId: 'agent',
-          opId: 'agent:1',
-          localSequence: 1,
-          baseCursor: server.snapshot('todos').cursor,
+          opId: `agent:${baseCursor + 1}`,
+          localSequence: baseCursor + 1,
+          baseCursor,
           message,
         },
         principal,
@@ -51,16 +57,19 @@ const agent = Agent.bind({
 await Effect.runPromise(
   agent.messages.dispatch('rename_todo', { id: 'a', title: 'Renamed by agent' }),
 )
+await Effect.runPromise(
+  agent.messages.dispatch('rename_todo', { id: 'b', title: 'Renamed by agent too' }),
+)
 await alice.synchronize(transport)
 await bob.synchronize(transport)
 assert.deepEqual(alice.shared(), bob.shared())
 assert.deepEqual(alice.shared(), server.snapshot('todos').model)
 assert.deepEqual(alice.shared().todos, [
-  { id: 'b', title: 'Bob offline' },
+  { id: 'b', title: 'Renamed by agent too' },
   { id: 'a', title: 'Renamed by agent' },
 ])
 console.log(
-  'Recovered an offline outbox, converged two replicas, and replayed a server agent Message.',
+  'Recovered an offline outbox, converged two replicas, and replayed two server agent Messages.',
 )
 console.log(JSON.stringify(alice.shared()))
 await alice.close()
