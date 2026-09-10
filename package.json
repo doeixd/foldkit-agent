@@ -25,7 +25,7 @@
     "format": "prettier --write \"**/*.{ts,json,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,json,yaml}\"",
     "pack:check": "pnpm build && pnpm -r --filter \"./packages/*\" exec pnpm pack",
-    "release": "pnpm build && pnpm -r --filter './packages/*' publish --access public"
+    "release": "pnpm build && pnpm -r --filter \"./packages/*\" publish --access public"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
