@@ -61,6 +61,50 @@ export const toPromise = (transport: TransportShape): TransportClient => ({
   exchange: (cursor, pending) => Effect.runPromise(transport.exchange(cursor, pending)),
 })
 
+/**
+ * Serves one accepted socket, answering each exchange frame.
+ *
+ * The counterpart to `layerSocket`: the handler returns the exchange result, or
+ * throws and the failure is written back as an error frame. Returns a function
+ * that stops serving.
+ */
+export const serveSocket = (
+  socket: SocketLike,
+  options: {
+    readonly exchange: (
+      cursor: number,
+      pending: ReadonlyArray<Operation>,
+    ) => unknown | Promise<unknown>
+  },
+): (() => void) => {
+  const stopMessage = socket.onMessage(data => {
+    let frame: ExchangeFrame
+    try {
+      frame = JSON.parse(data) as ExchangeFrame
+    } catch {
+      return
+    }
+    void (async () => {
+      try {
+        const result = await options.exchange(frame.cursor, frame.pending)
+        socket.send(JSON.stringify({ id: frame.id, result } satisfies ExchangeReply))
+      } catch (error) {
+        socket.send(
+          JSON.stringify({
+            id: frame.id,
+            error: error instanceof Error ? error.message : String(error),
+          } satisfies ExchangeReply),
+        )
+      }
+    })()
+  })
+  const stopClose = socket.onClose(() => stopMessage())
+  return () => {
+    stopMessage()
+    stopClose()
+  }
+}
+
 /** The minimal socket the layer needs; the global `WebSocket` satisfies it. */
 export interface SocketLike {
   send(data: string): void

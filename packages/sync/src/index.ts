@@ -20,6 +20,7 @@ export {
   layerFromPromise,
   layerLoopback,
   layerSocket,
+  serveSocket,
   toPromise,
   Transport,
   TransportError,

@@ -4,6 +4,7 @@ import {
   layerFromPromise,
   layerLoopback,
   layerSocket,
+  serveSocket,
   toPromise,
   Transport,
   type SocketLike,
@@ -153,6 +154,30 @@ describe('the socket transport', () => {
         program.pipe(Effect.provide(layerSocket({ url: 'ws://test', makeSocket: () => client }))),
       ),
     ).toEqual(['first', 'second'])
+  })
+
+  it('answers the client when the far socket is served', async () => {
+    const { client, server } = socketPair()
+    serveSocket(server, { exchange: (cursor, pending) => ({ cursor, pending }) })
+
+    expect(await Effect.runPromise(withSocket(client))).toMatchObject({
+      _tag: 'Success',
+      success: { cursor: 0, pending: [] },
+    })
+  })
+
+  it('returns a handler failure to the client as a transport error', async () => {
+    const { client, server } = socketPair()
+    serveSocket(server, {
+      exchange: () => {
+        throw new Error('handler down')
+      },
+    })
+
+    expect(await Effect.runPromise(withSocket(client))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'SyncTransportError', message: 'handler down' },
+    })
   })
 
   it('fails pending exchanges when the socket closes', async () => {
