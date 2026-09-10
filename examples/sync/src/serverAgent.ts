@@ -34,23 +34,8 @@ export const serverAgentHost = (
     model: () => journal.snapshot(principal.documentId).model,
     principal: () => principal,
     dispatch: (message: Message) => {
-      // The document cursor only advances, so deriving the producer's sequence
-      // from it keeps each dispatch's operation identity unique without a
-      // counter that would have to be persisted alongside the journal.
-      const baseCursor = journal.snapshot(principal.documentId).cursor
-      journal.append(
-        {
-          protocolVersion: 1,
-          schemaVersion: 1,
-          documentId: principal.documentId,
-          replicaId,
-          localSequence: baseCursor + 1,
-          opId: `${replicaId}:${baseCursor + 1}`,
-          baseCursor,
-          message,
-        },
-        principal,
-      )
+      journal.appendAsServer(message, principal, replicaId)
     },
+    subscribe: journal.subscribe,
   }
 }

@@ -208,6 +208,65 @@ describe('the journal', () => {
     })
     expect(committed.actorId).toBe('alice')
   })
+
+  it('sends a checkpoint only below the compaction floor', async () => {
+    server.append(operation('seed', 1, created('a')), principal)
+    server.append(operation('seed', 2, created('b')), principal)
+    server.compact('todos', 1)
+    const transport = server.transport(principal)
+
+    // At the floor the retained tail still covers the range.
+    await expect(transport.exchange(1, [])).resolves.not.toHaveProperty('checkpoint')
+    // Below it the log cannot, so the snapshot is sent instead.
+    await expect(transport.exchange(0, [])).resolves.toMatchObject({ checkpoint: { cursor: 2 } })
+  })
+
+  it('sequences server-authored operations from the cursor', () => {
+    const guarded = openJournal(':memory:')
+    try {
+      const first = guarded.appendAsServer(created('a'), principal, 'server')
+      const second = guarded.appendAsServer(created('b'), principal, 'server')
+
+      expect([first.opId, second.opId]).toEqual(['server:1', 'server:2'])
+      expect([first.serverSequence, second.serverSequence]).toEqual([1, 2])
+      expect(guarded.snapshot('todos').model.todos.map(todo => todo.id)).toEqual(['a', 'b'])
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('notifies subscribers after a commit and stops after unsubscribe', () => {
+    const guarded = openJournal(':memory:')
+    try {
+      let notifications = 0
+      const unsubscribe = guarded.subscribe(() => {
+        notifications += 1
+      })
+
+      guarded.appendAsServer(created('a'), principal, 'server')
+      expect(notifications).toBe(1)
+
+      unsubscribe()
+      guarded.appendAsServer(created('b'), principal, 'server')
+      expect(notifications).toBe(1)
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('keeps committing when a subscriber throws', () => {
+    const guarded = openJournal(':memory:')
+    try {
+      guarded.subscribe(() => {
+        throw new Error('subscriber failed')
+      })
+
+      expect(() => guarded.appendAsServer(created('a'), principal, 'server')).not.toThrow()
+      expect(guarded.snapshot('todos').cursor).toBe(1)
+    } finally {
+      guarded.close()
+    }
+  })
 })
 
 describe('local durability and reconciliation', () => {

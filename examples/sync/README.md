@@ -40,7 +40,7 @@ Compaction drops committed payloads but keeps one identity row per operation so 
 
 An `AgentRuntime` bound to the journal (`serverAgentHost`) is an ordinary producer: a capability dispatch becomes one operation authored by a dedicated replica, under the caller's authenticated principal. The contract's `authorize` is the typed refusal a caller sees; the journal policy underneath is the authoritative backstop, so a binding that diverges from it fails loudly instead of committing. That backstop refusal is a host throw, which the agent runtime turns into a defect rather than a typed dispatch failure, so an adapter reports it as an unexpected error; a capability that wants a clean refusal declares `authorize`.
 
-The MCP handler is exercised over that runtime in a transport-free test: an initialize plus a `tools/call` commits one durable operation, and a browser replica converges on it. No HTTP, A2A, or Agent Native transport is wired in this example, and the MCP adapter is a test-only dependency.
+The MCP handler is exercised over that runtime in a transport-free test: an initialize plus a `tools/call` commits one durable operation, and a browser replica converges on it. The host supplies `subscribe` (backed by the journal announcing each commit), so the handler can follow the authoritative Model. No HTTP, A2A, or Agent Native transport is wired in this example, and the MCP adapter is a test-only dependency.
 
 ## Replay and the runtime boundary
 

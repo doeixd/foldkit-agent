@@ -30,7 +30,7 @@ export interface JournalPolicy {
 }
 
 /** The application's policy refused an operation; nothing was committed. */
-export class OperationRejectedError extends Error {
+class OperationRejectedError extends Error {
   override readonly name = 'OperationRejectedError'
   constructor(readonly opId: string) {
     super(`Operation "${opId}" was refused by authorization`)
@@ -68,6 +68,21 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
       .prepare('SELECT compact_before FROM documents WHERE id = ?')
       .get(documentId)
     return row === undefined ? 0 : Number(row.compact_before)
+  }
+  const listeners = new Set<() => void>()
+  /** A subscriber must never fail a commit. */
+  const notify = (): void => {
+    for (const listener of [...listeners]) {
+      try {
+        listener()
+      } catch {
+        // Deliberately swallowed.
+      }
+    }
+  }
+  const subscribe = (listener: () => void): (() => void) => {
+    listeners.add(listener)
+    return () => listeners.delete(listener)
   }
   const append = (input: unknown, principal: Principal): Committed => {
     const operation = operationFrom(input, principal.documentId)
@@ -134,11 +149,38 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
         )
         .run(operation.documentId, committed.serverSequence, JSON.stringify(model))
       database.exec('COMMIT')
+      // Announced only when the Model changed; a duplicate append changed nothing.
+      notify()
       return committed
     } catch (error) {
       database.exec('ROLLBACK')
       throw error
     }
+  }
+  /**
+   * Appends a Message a server-side producer authored, sequencing it from the
+   * authoritative cursor.
+   *
+   * A server producer has no local outbox and no persisted sequence, so it
+   * cannot supply a genuine per-replica counter. The cursor only advances, which
+   * keeps the operation identity unique and survives a restart; `producer`
+   * labels who authored it in the log.
+   */
+  const appendAsServer = (message: Message, principal: Principal, producer: string): Committed => {
+    const baseCursor = readSnapshot(principal.documentId).cursor
+    return append(
+      {
+        protocolVersion: 1,
+        schemaVersion: 1,
+        documentId: principal.documentId,
+        replicaId: producer,
+        localSequence: baseCursor + 1,
+        opId: `${producer}:${baseCursor + 1}`,
+        baseCursor,
+        message,
+      },
+      principal,
+    )
   }
   const compact = (documentId: string, through: number): void => {
     const { cursor } = readSnapshot(documentId)
@@ -175,6 +217,8 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
   }
   return {
     append,
+    appendAsServer,
+    subscribe,
     read,
     compact,
     snapshot: readSnapshot,
