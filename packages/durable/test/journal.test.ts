@@ -355,6 +355,43 @@ describe('a durable journal', () => {
     }
   })
 
+  it('completes a migration that did not finish, without losing existing data', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'foldkit-resume-'))
+    const path = join(directory, 'journal.sqlite')
+    try {
+      // What a non-transactional migration would leave: version 0, the
+      // documents table, and no operations or effects tables.
+      const partial = new DatabaseSync(path)
+      partial.exec(`
+        CREATE TABLE documents (
+          key TEXT PRIMARY KEY, cursor INTEGER NOT NULL, snapshot TEXT NOT NULL,
+          compact_before INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO documents (key, cursor, snapshot) VALUES ('todos', 0, '{"ids":[]}');
+      `)
+      partial.close()
+
+      await withJournal(
+        function* (journal) {
+          expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: [] }, cursor: 0 })
+          yield* journal.append(todos, add(1, 'a'), principal)
+          expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
+        },
+        {},
+        path,
+      )
+
+      const migrated = new DatabaseSync(path)
+      try {
+        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 1 })
+      } finally {
+        migrated.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('notifies subscribers after a commit and stops after unsubscribe', () =>
     withJournal(function* (journal) {
       const seen: string[] = []
