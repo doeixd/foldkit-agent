@@ -6,6 +6,7 @@
     { "path": "./packages/agent-mcp" },
     { "path": "./packages/agent-a2a" },
     { "path": "./packages/agent-native" },
-    { "path": "./examples/todo" }
+    { "path": "./examples/todo" },
+    { "path": "./examples/sync" }
   ]
 }

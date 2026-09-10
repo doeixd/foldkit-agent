@@ -16,7 +16,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "vitest run",
-    "demo": "pnpm build && pnpm --filter foldkit-agent-example-todo demo",
+    "demo": "pnpm build && pnpm --filter foldkit-agent-example-todo demo && pnpm --filter foldkit-agent-example-sync demo",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "format": "prettier --write \"**/*.{ts,json,yaml}\"",
