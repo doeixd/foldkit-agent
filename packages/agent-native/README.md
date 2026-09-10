@@ -46,6 +46,16 @@ The action layer adds no authority of its own either. Availability,
 authorization and input validation all still happen in the contract, and the
 tests assert that an action refuses exactly what the contract refuses.
 
+## What `run` returns
+
+`run` never throws for a contract failure. Unavailable, unauthorized, a failed
+completion, or input the runtime itself rejects all resolve to
+`{ ok: false, message }`; Agent Native records the call as completed and
+serializes that object as the tool output. A surface that decides success from
+the action's status alone therefore reads a refusal as a success -- read `ok`
+instead. Only a host defect is caught, and it is flattened to a generic message
+so application internals never reach the caller.
+
 ## The schema bridge
 
 The adapter exposes the encoded input schema as a Standard Schema validator,
