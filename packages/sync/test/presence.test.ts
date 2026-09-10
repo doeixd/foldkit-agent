@@ -1,3 +1,4 @@
+import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   createPresence,
@@ -5,6 +6,7 @@ import {
   loopbackPresenceChannel,
   servePresence,
   socketPresenceChannel,
+  type PresenceOptions,
 } from '../src/index.js'
 import { socketPair } from './sockets.js'
 
@@ -12,10 +14,14 @@ interface Cursor {
   readonly cursor: number
 }
 
+const decodeCursor = Schema.decodeUnknownSync(Schema.Struct({ cursor: Schema.Number }))
+const make = (options: Omit<PresenceOptions<Cursor>, 'decodeValue'>) =>
+  createPresence<Cursor>({ decodeValue: decodeCursor, ...options })
+
 describe('presence', () => {
   it('expires a peer that stops refreshing after its ttl', () => {
     let clock = 0
-    const presence = createPresence<Cursor>({ id: 'a', ttl: 100, now: () => clock })
+    const presence = make({ id: 'a', ttl: 100, now: () => clock })
 
     presence.set({ cursor: 1 })
     expect(presence.peers()).toHaveLength(1)
@@ -29,7 +35,7 @@ describe('presence', () => {
 
   it('keeps a peer live while it refreshes before the ttl', () => {
     let clock = 0
-    const presence = createPresence<Cursor>({ id: 'a', ttl: 100, now: () => clock })
+    const presence = make({ id: 'a', ttl: 100, now: () => clock })
 
     presence.set({ cursor: 1 })
     clock = 90
@@ -44,7 +50,7 @@ describe('presence', () => {
 
   it('prunes expired peers and notifies only when something went', () => {
     let clock = 0
-    const presence = createPresence<Cursor>({ id: 'a', ttl: 100, now: () => clock })
+    const presence = make({ id: 'a', ttl: 100, now: () => clock })
     let notifications = 0
     presence.subscribe(() => {
       notifications += 1
@@ -65,8 +71,8 @@ describe('presence', () => {
   it('broadcasts to other peers over the channel and drops a departure', () => {
     let clock = 0
     const channel = loopbackPresenceChannel<Cursor>()
-    const a = createPresence<Cursor>({ id: 'a', ttl: 100, channel, now: () => clock })
-    const b = createPresence<Cursor>({ id: 'b', ttl: 100, channel, now: () => clock })
+    const a = make({ id: 'a', ttl: 100, channel, now: () => clock })
+    const b = make({ id: 'b', ttl: 100, channel, now: () => clock })
 
     a.set({ cursor: 3 })
     expect(b.peers()).toEqual([{ id: 'a', value: { cursor: 3 }, updatedAt: 0 }])
@@ -81,8 +87,8 @@ describe('presence', () => {
 
   it('notifies subscribers, stops on unsubscribe, and survives a throwing one', () => {
     const channel = loopbackPresenceChannel<Cursor>()
-    const a = createPresence<Cursor>({ id: 'a', ttl: 100, channel })
-    const b = createPresence<Cursor>({ id: 'b', ttl: 100, channel })
+    const a = make({ id: 'a', ttl: 100, channel })
+    const b = make({ id: 'b', ttl: 100, channel })
     b.subscribe(() => {
       throw new Error('subscriber failed')
     })
@@ -101,8 +107,8 @@ describe('presence', () => {
 
   it('stops receiving once closed', () => {
     const channel = loopbackPresenceChannel<Cursor>()
-    const a = createPresence<Cursor>({ id: 'a', ttl: 100, channel })
-    const b = createPresence<Cursor>({ id: 'b', ttl: 100, channel })
+    const a = make({ id: 'a', ttl: 100, channel })
+    const b = make({ id: 'b', ttl: 100, channel })
 
     b.close()
     a.set({ cursor: 9 })
@@ -116,12 +122,12 @@ describe('presence', () => {
     servePresence(a.server, hub)
     servePresence(b.server, hub)
 
-    const presenceA = createPresence<Cursor>({
+    const presenceA = make({
       id: 'a',
       ttl: 100,
       channel: socketPresenceChannel(a.client),
     })
-    const presenceB = createPresence<Cursor>({
+    const presenceB = make({
       id: 'b',
       ttl: 100,
       channel: socketPresenceChannel(b.client),
@@ -161,5 +167,15 @@ describe('presence', () => {
     hub.publish({ id: 'a', value: { cursor: 1 } })
 
     expect(seen).toEqual(['a'])
+  })
+
+  it('drops a peer value that fails the contract', () => {
+    const channel = loopbackPresenceChannel<Cursor>()
+    const b = make({ id: 'b', ttl: 100, channel })
+
+    // A hostile peer bypasses the typed publish with a wrong-shaped value.
+    channel.publish({ id: 'a', value: { cursor: 'not a number' } as unknown as Cursor })
+
+    expect(b.peers()).toEqual([])
   })
 })

@@ -9,7 +9,7 @@ import {
   type Replica,
   type TransportClient,
 } from 'foldkit-sync'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
 import { Message, type Shared } from './app.js'
 import { openJournal, type Principal } from './journal.js'
 import { serverAgentHost } from './serverAgent.js'
@@ -70,17 +70,21 @@ assert.deepEqual(shared(alice).todos, [
 // or replayed. An injected clock makes the TTL deterministic.
 let clock = 1_000
 const presence = loopbackPresenceChannel<{ selectedTodoId: string }>()
+const SelectedTodoPresence = Schema.Struct({ selectedTodoId: Schema.String })
+const decodeSelectedTodo = Schema.decodeUnknownSync(SelectedTodoPresence)
 const alicePresence = createPresence<{ selectedTodoId: string }>({
   id: 'alice',
   ttl: 5_000,
   channel: presence,
   now: () => clock,
+  decodeValue: decodeSelectedTodo,
 })
 const bobPresence = createPresence<{ selectedTodoId: string }>({
   id: 'bob',
   ttl: 5_000,
   channel: presence,
   now: () => clock,
+  decodeValue: decodeSelectedTodo,
 })
 alicePresence.set({ selectedTodoId: 'a' })
 assert.deepEqual(

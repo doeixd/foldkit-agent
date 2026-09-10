@@ -22,6 +22,12 @@ export interface PresenceOptions<Update> {
   readonly id: string
   /** Milliseconds without an update before a peer is dropped. */
   readonly ttl: number
+  /**
+   * Validates the untrusted value a peer sends before it is stored. Presence
+   * crosses a wire, so this is required rather than trusting the type
+   * parameter; a value it rejects is dropped.
+   */
+  readonly decodeValue: (value: unknown) => Update
   readonly channel?: PresenceChannel<Update> | undefined
   /** Injectable clock, for tests. */
   readonly now?: (() => number) | undefined
@@ -76,7 +82,14 @@ export const createPresence = <Update>(options: PresenceOptions<Update>): Presen
       if (peers.delete(update.id)) notify()
       return
     }
-    peers.set(update.id, { id: update.id, value: update.value, updatedAt: now() })
+    let value: Update
+    try {
+      value = options.decodeValue(update.value)
+    } catch {
+      // A peer's value that fails the contract is dropped, never stored.
+      return
+    }
+    peers.set(update.id, { id: update.id, value, updatedAt: now() })
     notify()
   }
   const unsubscribe = options.channel?.subscribe(receive)
