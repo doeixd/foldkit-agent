@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { decodeShared, decodeMessage, replay, type Shared } from './app.js'
+import { decodeShared, decodeMessage, replay, type Message, type Shared } from './app.js'
 import { committedFrom, operationFrom, type Committed, type Transport } from './protocol.js'
 
 // Vite 5's module resolver predates the node:sqlite built-in.
@@ -14,7 +14,31 @@ export interface Principal {
   readonly canWrite: boolean
 }
 
-export const openJournal = (path: string) => {
+/** What the application's authorization policy sees before an operation commits. */
+export interface AuthorizationRequest {
+  readonly principal: Principal
+  readonly message: Message
+  readonly model: Shared
+}
+
+/** Decides whether a principal may commit an operation against the current Model. */
+export type Authorize = (request: AuthorizationRequest) => boolean
+
+export interface JournalPolicy {
+  /** Defaults to allowing; an authenticated write still requires `Principal.canWrite`. */
+  readonly authorize?: Authorize
+}
+
+/** The application's policy refused an operation; nothing was committed. */
+export class OperationRejectedError extends Error {
+  override readonly name = 'OperationRejectedError'
+  constructor(readonly opId: string) {
+    super(`Operation "${opId}" was refused by authorization`)
+  }
+}
+
+export const openJournal = (path: string, policy: JournalPolicy = {}) => {
+  const { authorize } = policy
   const database = new DatabaseSync(path)
   database.exec(`
     PRAGMA journal_mode = WAL;
@@ -83,7 +107,11 @@ export const openJournal = (path: string) => {
       const snapshot = readSnapshot(operation.documentId)
       if (operation.baseCursor > snapshot.cursor)
         throw new Error('Operation cursor is ahead of the server')
-      const model = replay(snapshot.model, decodeMessage(operation.message))
+      // Authorized against the authoritative Model, before anything is applied.
+      const message = decodeMessage(operation.message)
+      if (authorize !== undefined && !authorize({ principal, message, model: snapshot.model }))
+        throw new OperationRejectedError(operation.opId)
+      const model = replay(snapshot.model, message)
       const committed = committedFrom(
         { ...operation, serverSequence: snapshot.cursor + 1, actorId: principal.actorId },
         principal.documentId,
@@ -156,10 +184,19 @@ export const openJournal = (path: string) => {
         const rejected: string[] = []
         const acknowledged: string[] = []
         for (const input of pending) {
-          // Validation and identity conflicts fail the exchange; only policy refusals remove an outbox entry.
+          // Validation and identity conflicts fail the exchange; an authorization
+          // refusal is a policy answer, so it removes the outbox entry instead.
           const operation = operationFrom(input, principal.documentId)
-          if (!principal.canWrite) rejected.push(operation.opId)
-          else acknowledged.push(append(operation, principal).opId)
+          if (!principal.canWrite) {
+            rejected.push(operation.opId)
+            continue
+          }
+          try {
+            acknowledged.push(append(operation, principal).opId)
+          } catch (error) {
+            if (error instanceof OperationRejectedError) rejected.push(error.opId)
+            else throw error
+          }
         }
         // The replica's range predates the compacted payloads, so the log cannot
         // fill it in; hand back the snapshot. Pending was still appended above

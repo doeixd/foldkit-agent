@@ -146,6 +146,66 @@ describe('the journal', () => {
     server.compact('todos', 1)
     expect(() => server.compact('todos', 0)).toThrow('Invalid compaction cursor')
   })
+
+  it('denies an operation the policy refuses and commits nothing', () => {
+    const guarded = openJournal(':memory:', {
+      authorize: ({ principal, message }) =>
+        message._tag !== 'DeletedTodo' || principal.actorId === 'owner',
+    })
+    try {
+      guarded.append(operation('a', 1, created('a')), principal)
+      expect(() =>
+        guarded.append(operation('a', 2, Message.DeletedTodo({ id: 'a' })), {
+          ...principal,
+          actorId: 'guest',
+        }),
+      ).toThrow('refused by authorization')
+
+      // The refusal consumed neither the snapshot nor the operation identity.
+      expect(guarded.snapshot('todos')).toEqual({
+        cursor: 1,
+        model: { todos: [{ id: 'a', title: 'a' }] },
+      })
+      guarded.append(operation('a', 2, Message.DeletedTodo({ id: 'a' })), principal)
+      expect(guarded.snapshot('todos')).toEqual({ cursor: 2, model: { todos: [] } })
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('authorizes against the authoritative Model, not the operation', () => {
+    const guarded = openJournal(':memory:', {
+      authorize: ({ message, model }) =>
+        message._tag !== 'RenamedTodo' || model.todos.some(todo => todo.id === message.id),
+    })
+    try {
+      // Nothing to rename yet, so the Model refuses it even though the input is
+      // well-formed.
+      expect(() =>
+        guarded.append(
+          operation('a', 1, Message.RenamedTodo({ id: 'a', title: 'renamed' })),
+          principal,
+        ),
+      ).toThrow('refused by authorization')
+
+      guarded.append(operation('a', 1, created('a')), principal)
+      guarded.append(
+        operation('a', 2, Message.RenamedTodo({ id: 'a', title: 'renamed' })),
+        principal,
+      )
+      expect(guarded.snapshot('todos').model).toEqual({ todos: [{ id: 'a', title: 'renamed' }] })
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('records the transport principal as the actor', () => {
+    const committed = server.append(operation('a', 1, created('a')), {
+      ...principal,
+      actorId: 'alice',
+    })
+    expect(committed.actorId).toBe('alice')
+  })
 })
 
 describe('local durability and reconciliation', () => {
@@ -402,6 +462,25 @@ describe('local durability and reconciliation', () => {
     // The refused exchange left durable state where it was.
     expect(a.cursor()).toBe(1)
     expect(a.shared().todos).toEqual([{ id: 'a', title: 'a' }])
+  })
+
+  it('removes an operation the policy refuses instead of committing it', async () => {
+    const guarded = openJournal(':memory:', {
+      authorize: ({ principal }) => principal.actorId === 'owner',
+    })
+    try {
+      const a = await open('a')
+      await a.submit(created('todo'))
+      await a.synchronize(guarded.transport({ ...principal, actorId: 'guest' }))
+
+      // A policy refusal is a rejected entry, not a failed exchange: the outbox
+      // is cleared and the optimistic projection reverts.
+      expect(a.pending()).toEqual([])
+      expect(a.shared()).toEqual({ todos: [] })
+      expect(guarded.snapshot('todos').cursor).toBe(0)
+    } finally {
+      guarded.close()
+    }
   })
 })
 
