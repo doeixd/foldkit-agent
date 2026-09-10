@@ -31,6 +31,10 @@ journal.read('todos', 0)
 - Compaction drops committed payloads but never changes the state a replay of
   the compacted prefix would produce.
 - A subscriber's failure never fails a commit.
+- `runEffect(key, run)` runs an externally visible effect at most once per key
+  and records the outcome durably; a concurrent call shares the run in flight,
+  and a failed run is left recorded so it may be retried. Key it by the
+  operation that caused it, e.g. `opId + "/command/" + index`.
 
 ## Limits
 

@@ -12,6 +12,8 @@ export {
   OperationRejectedError,
   type AuthorizationRequest,
   type Committed,
+  type EffectRecord,
+  type EffectStatus,
   type Journal,
   type JournalOptions,
   type ValidationRequest,

@@ -248,3 +248,82 @@ describe('a durable journal', () => {
     }
   })
 })
+
+describe('the effect ledger', () => {
+  it('runs an effect once per key and returns the recorded result', async () => {
+    const journal = open()
+    try {
+      let runs = 0
+      const first = await journal.runEffect('a:1/command/0', async () => {
+        runs += 1
+        return { sent: true }
+      })
+      expect(first).toEqual({ sent: true })
+
+      const second = await journal.runEffect('a:1/command/0', async () => {
+        runs += 1
+        return { sent: false }
+      })
+      expect(second).toEqual({ sent: true })
+      expect(runs).toBe(1)
+      expect(journal.effect('a:1/command/0')).toEqual({
+        key: 'a:1/command/0',
+        status: 'succeeded',
+        result: { sent: true },
+      })
+    } finally {
+      journal.close()
+    }
+  })
+
+  it('shares one run between concurrent calls', async () => {
+    const journal = open()
+    try {
+      let runs = 0
+      const [a, b] = await Promise.all([
+        journal.runEffect('k', async () => {
+          runs += 1
+          return 1
+        }),
+        journal.runEffect('k', async () => {
+          runs += 1
+          return 2
+        }),
+      ])
+      expect(runs).toBe(1)
+      expect([a, b]).toEqual([1, 1])
+    } finally {
+      journal.close()
+    }
+  })
+
+  it('records a failure and allows a retry', async () => {
+    const journal = open()
+    try {
+      await expect(
+        journal.runEffect('k', async () => {
+          throw new Error('service down')
+        }),
+      ).rejects.toThrow('service down')
+      expect(journal.effect('k')).toMatchObject({ status: 'failed', error: 'service down' })
+
+      expect(await journal.runEffect('k', async () => 'recovered')).toBe('recovered')
+      expect(journal.effect('k')).toEqual({ key: 'k', status: 'succeeded', result: 'recovered' })
+    } finally {
+      journal.close()
+    }
+  })
+
+  it('reports no record for an unrun key and keeps keys independent', async () => {
+    const journal = open()
+    try {
+      expect(journal.effect('missing')).toBeUndefined()
+      await journal.runEffect('a', async () => 'a')
+      await journal.runEffect('b', async () => 'b')
+      expect(journal.effect('a')).toMatchObject({ result: 'a' })
+      expect(journal.effect('b')).toMatchObject({ result: 'b' })
+    } finally {
+      journal.close()
+    }
+  })
+})

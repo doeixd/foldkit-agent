@@ -46,6 +46,16 @@ export interface JournalOptions<Operation, Snapshot, Principal> {
   readonly authorize?: (request: AuthorizationRequest<Operation, Snapshot, Principal>) => boolean
 }
 
+export type EffectStatus = 'pending' | 'succeeded' | 'failed'
+
+/** The durable record of one externally visible effect. */
+export interface EffectRecord {
+  readonly key: string
+  readonly status: EffectStatus
+  readonly result?: unknown
+  readonly error?: string
+}
+
 /** The application's policy refused an operation; nothing was committed. */
 export class OperationRejectedError extends Error {
   override readonly name = 'OperationRejectedError'
@@ -61,6 +71,19 @@ export interface Journal<Operation, Snapshot, Principal> {
   read(key: string, after: number): ReadonlyArray<Committed<Operation>>
   append(key: string, input: unknown, principal: Principal): Committed<Operation>
   compact(key: string, through: number): void
+  /** The recorded effect for a key, if it has ever run. */
+  effect(key: string): EffectRecord | undefined
+  /**
+   * Runs an externally visible effect at most once per key, recording the
+   * outcome durably.
+   *
+   * A second call after success returns the recorded result without running
+   * again; a concurrent call awaits the run already in flight; a failed run is
+   * left recorded and may be retried. Key it by the operation that caused it,
+   * for example `opId + "/command/" + index`, so a replay or restart cannot
+   * duplicate the effect. The result must be JSON-compatible.
+   */
+  runEffect<Result>(key: string, run: () => Promise<Result>): Promise<Result>
   /** Notified after each commit that changed a snapshot, with the key. */
   subscribe(listener: (key: string) => void): () => void
   close(): void
@@ -89,6 +112,9 @@ export const createJournal = <Operation, Snapshot, Principal>(
       key TEXT NOT NULL, op_id TEXT NOT NULL, sequence INTEGER NOT NULL,
       actor_id TEXT NOT NULL, input TEXT,
       PRIMARY KEY (key, op_id), UNIQUE (key, sequence)
+    );
+    CREATE TABLE IF NOT EXISTS effects (
+      key TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, error TEXT
     );
   `)
   const load = (key: string): { snapshot: Snapshot; cursor: number } => {
@@ -204,6 +230,52 @@ export const createJournal = <Operation, Snapshot, Principal>(
         actorId: String(row.actor_id),
       }))
   }
+  const inFlight = new Map<string, Promise<unknown>>()
+  const effect = (key: string): EffectRecord | undefined => {
+    const row = database
+      .prepare('SELECT key, status, result, error FROM effects WHERE key = ?')
+      .get(key)
+    if (row === undefined) return undefined
+    return {
+      key: String(row.key),
+      status: String(row.status) as EffectStatus,
+      ...(row.result === null ? {} : { result: JSON.parse(String(row.result)) }),
+      ...(row.error === null ? {} : { error: String(row.error) }),
+    }
+  }
+  const runEffect = <Result>(key: string, run: () => Promise<Result>): Promise<Result> => {
+    const running = inFlight.get(key)
+    if (running !== undefined) return running as Promise<Result>
+    const recorded = effect(key)
+    // The recorded result is the caller's own JSON-compatible value.
+    if (recorded?.status === 'succeeded') return Promise.resolve(recorded.result as Result)
+
+    const promise = (async () => {
+      database
+        .prepare(
+          'INSERT INTO effects (key, status, result, error) VALUES (?, ?, NULL, NULL) ON CONFLICT(key) DO UPDATE SET status = excluded.status, result = NULL, error = NULL',
+        )
+        .run(key, 'pending')
+      try {
+        const result = await run()
+        database
+          .prepare('UPDATE effects SET status = ?, result = ?, error = NULL WHERE key = ?')
+          .run('succeeded', JSON.stringify(result ?? null), key)
+        return result
+      } catch (error) {
+        database
+          .prepare('UPDATE effects SET status = ?, result = NULL, error = ? WHERE key = ?')
+          .run('failed', error instanceof Error ? error.message : String(error), key)
+        throw error
+      }
+    })()
+    inFlight.set(key, promise)
+    void promise.then(
+      () => inFlight.delete(key),
+      () => inFlight.delete(key),
+    )
+    return promise
+  }
   const subscribe = (listener: (key: string) => void): (() => void) => {
     listeners.add(listener)
     return () => listeners.delete(listener)
@@ -214,6 +286,8 @@ export const createJournal = <Operation, Snapshot, Principal>(
     read,
     append,
     compact,
+    effect,
+    runEffect,
     subscribe,
     close: () => database.close(),
   }
