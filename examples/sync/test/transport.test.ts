@@ -1,10 +1,12 @@
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
-import { indexedDb, layerSocket, serveSocket, type SocketLike } from 'foldkit-sync'
-import { expect, it } from 'vitest'
+import { layerSocket, serveSocket, type SocketLike } from 'foldkit-sync'
+import { afterEach, expect, it } from 'vitest'
 import { Message } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
-import { openReplicaEffect } from './helpers.js'
+import { closeStorages, openReplicaEffect, openStorage } from './helpers.js'
+
+afterEach(closeStorages)
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 
@@ -50,7 +52,7 @@ it('converges a replica through the socket transport', async () => {
   serveSocket(server, { exchange: (cursor, pending) => handler.exchange(cursor, pending) })
   const replica = await openReplicaEffect(
     'browser',
-    await Effect.runPromise(indexedDb('browser', new IDBFactory())),
+    await Effect.runPromise(openStorage('browser', new IDBFactory())),
   )
   try {
     // A server-side producer commits one operation the client has not seen.

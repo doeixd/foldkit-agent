@@ -1,4 +1,4 @@
-import { Config, Effect } from 'effect'
+import { Config, Effect, type Scope } from 'effect'
 import { StorageError } from './errors.js'
 
 /** Persists a replica's state with compare-and-swap on its revision. */
@@ -38,7 +38,7 @@ const openDatabase = (
 export const indexedDb = <State = unknown>(
   name: Config.Config<string> | string,
   factory: IDBFactory = globalThis.indexedDB,
-): Effect.Effect<Storage<State>, StorageError> =>
+): Effect.Effect<Storage<State>, StorageError, Scope.Scope> =>
   Effect.gen(function* () {
     const databaseName =
       typeof name === 'string'
@@ -46,7 +46,9 @@ export const indexedDb = <State = unknown>(
         : yield* name.pipe(
             Effect.mapError(cause => storageError('Could not read the storage name', cause)),
           )
-    const database = yield* openDatabase(databaseName, factory)
+    const database = yield* Effect.acquireRelease(openDatabase(databaseName, factory), database =>
+      Effect.sync(() => database.close()),
+    )
     database.onversionchange = () => database.close()
     return {
       load: () =>

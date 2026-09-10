@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import { Effect } from 'effect'
-import { indexedDb } from 'foldkit-sync'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Message } from '../src/app.js'
 import { mountReplica } from '../src/runtime.js'
 import { Sync } from '../src/sync.js'
+import { closeStorages, openStorage } from './helpers.js'
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
+  await closeStorages()
 })
 
 it('runs the wrapped Foldkit application and renders durable changes only after storage commits', async () => {
@@ -16,7 +17,7 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
     setTimeout(() => callback(performance.now()), 0),
   )
   vi.stubGlobal('cancelAnimationFrame', clearTimeout)
-  const storage = await Effect.runPromise(indexedDb('runtime', new IDBFactory()))
+  const storage = await Effect.runPromise(openStorage('runtime', new IDBFactory()))
   let release!: () => void
   const held = new Promise<void>(resolve => {
     release = resolve

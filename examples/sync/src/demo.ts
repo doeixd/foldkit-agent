@@ -9,7 +9,7 @@ import {
   type Replica,
   type TransportClient,
 } from 'foldkit-sync'
-import { Clock, Effect, Layer, Schema, type Scope } from 'effect'
+import { Clock, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 import { Message, type Shared } from './app.js'
 import { openJournal, type Principal } from './journal.js'
@@ -28,15 +28,19 @@ const pending = (replica: TodoReplica) => Effect.runSync(replica.pending)
 const close = (replica: TodoReplica): Promise<void> => Effect.runPromise(replica.close)
 
 const factory = new IDBFactory()
+// The IndexedDB connections share one scope, released at the end of the demo.
+const storageScope = Effect.runSync(Scope.make())
+const openStorage = (name: string, factory: IDBFactory) =>
+  Effect.runPromise(Effect.provideService(indexedDb(name, factory), Scope.Scope, storageScope))
 const server = openJournal(':memory:')
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const transport = server.transport(principal)
-const alice = await open('alice', await Effect.runPromise(indexedDb('alice', factory)))
-let bob = await open('bob', await Effect.runPromise(indexedDb('bob', factory)))
+const alice = await open('alice', await openStorage('alice', factory))
+let bob = await open('bob', await openStorage('bob', factory))
 await submit(alice, Message.CreatedTodo({ id: 'a', title: 'Alice offline' }))
 await submit(bob, Message.CreatedTodo({ id: 'b', title: 'Bob offline' }))
 await close(bob)
-bob = await open('bob', await Effect.runPromise(indexedDb('bob', factory)))
+bob = await open('bob', await openStorage('bob', factory))
 assert.equal(pending(bob).length, 1)
 await synchronize(bob, transport)
 await synchronize(alice, transport)
@@ -117,3 +121,4 @@ console.log(JSON.stringify(shared(alice)))
 await close(alice)
 await close(bob)
 server.close()
+await Effect.runPromise(Scope.close(storageScope, Exit.void))

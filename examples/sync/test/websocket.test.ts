@@ -1,21 +1,22 @@
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
-import { indexedDb, layerSocket } from 'foldkit-sync'
+import { layerSocket } from 'foldkit-sync'
 import { afterEach, expect, it } from 'vitest'
 import { Message } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { startSyncServer, type SyncServer } from '../src/server.js'
-import { openReplicaEffect, type TodoReplica } from './helpers.js'
+import { closeStorages, openReplicaEffect, openStorage, type TodoReplica } from './helpers.js'
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const servers: Array<SyncServer> = []
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(server => server.close()))
+  await closeStorages()
 })
 
 const openReplica = async (id: string): Promise<TodoReplica> =>
-  openReplicaEffect(id, await Effect.runPromise(indexedDb(id, new IDBFactory())))
+  openReplicaEffect(id, await Effect.runPromise(openStorage(id, new IDBFactory())))
 
 const sync = (url: string, replica: TodoReplica): Promise<void> =>
   Effect.runPromise(Effect.provide(replica.synchronize, layerSocket({ url })))

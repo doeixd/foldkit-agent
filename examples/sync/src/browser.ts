@@ -1,11 +1,20 @@
-import { Effect } from 'effect'
+import { Effect, Scope } from 'effect'
 import { indexedDb } from 'foldkit-sync'
 import { Message } from './app.js'
 import { mountReplica } from './runtime.js'
 import { Sync } from './sync.js'
 
+// The connection lives for the page; it is never explicitly released.
+const storageScope = Effect.runSync(Scope.make())
 const replica = await Effect.runPromise(
-  Sync.openReplica('browser', await Effect.runPromise(indexedDb('foldkit-sync-spike'))),
+  Effect.gen(function* () {
+    const storage = yield* Effect.provideService(
+      indexedDb('foldkit-sync-spike'),
+      Scope.Scope,
+      storageScope,
+    )
+    return yield* Sync.openReplica('browser', storage)
+  }),
 )
 const runtime = mountReplica(replica, document.querySelector<HTMLElement>('#sync-app')!)
 document.querySelector<HTMLFormElement>('#create')!.addEventListener('submit', event => {

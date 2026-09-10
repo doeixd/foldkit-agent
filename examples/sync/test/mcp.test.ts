@@ -2,12 +2,13 @@ import { Effect } from 'effect'
 import { Agent } from 'foldkit-agent'
 import { AgentMcp } from 'foldkit-agent-mcp'
 import { IDBFactory } from 'fake-indexeddb'
-import { expect, it } from 'vitest'
-import { indexedDb } from 'foldkit-sync'
+import { afterEach, expect, it } from 'vitest'
 import { Message, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { serverAgentHost } from '../src/serverAgent.js'
-import { openReplica } from './helpers.js'
+import { closeStorages, openReplica, openStorage } from './helpers.js'
+
+afterEach(closeStorages)
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const SyncAgent = Agent.forModel<Shared, Principal>()
@@ -23,7 +24,7 @@ it('commits a durable operation from an MCP tool call and converges a replica', 
   const journal = openJournal(':memory:')
   const replica = await openReplica(
     'browser',
-    await Effect.runPromise(indexedDb('browser', new IDBFactory())),
+    await Effect.runPromise(openStorage('browser', new IDBFactory())),
   )
   try {
     journal.append(

@@ -1,9 +1,39 @@
-import { Effect } from 'effect'
-import { layerFromPromise, type Operation, type Replica, type TransportClient } from 'foldkit-sync'
+import { Effect, Exit, Scope } from 'effect'
+import {
+  indexedDb,
+  layerFromPromise,
+  StorageError,
+  type Operation,
+  type Replica,
+  type Storage,
+  type TransportClient,
+} from 'foldkit-sync'
 import type { Message, Shared } from '../src/app.js'
 import { Sync } from '../src/sync.js'
 
 export type TodoReplica = Replica<Message, Shared>
+
+const scopes: Array<Scope.Closeable> = []
+
+/**
+ * Opens IndexedDB storage in a scope that `closeStorages` releases, so the
+ * connection lives past this call. It mirrors `indexedDb`, minus the scope.
+ */
+export const openStorage = <State = unknown>(
+  name: string,
+  factory?: IDBFactory,
+): Effect.Effect<Storage<State>, StorageError> =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make()
+    scopes.push(scope)
+    return yield* Effect.provideService(indexedDb<State>(name, factory), Scope.Scope, scope)
+  })
+
+/** Releases every storage opened by `openStorage` in this test file. */
+export const closeStorages = (): Promise<void> =>
+  Effect.runPromise(
+    Effect.forEach(scopes.splice(0), scope => Scope.close(scope, Exit.void), { discard: true }),
+  )
 
 /** The Effect-native replica, for tests that embed it in the Foldkit runtime. */
 export const openReplicaEffect = (

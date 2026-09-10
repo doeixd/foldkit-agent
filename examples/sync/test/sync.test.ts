@@ -4,12 +4,12 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
-import { indexedDb, StorageError, type Exchange, type Operation, type Storage } from 'foldkit-sync'
+import { StorageError, type Exchange, type Operation, type Storage } from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Message, replay, update, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { serverAgentHost } from '../src/serverAgent.js'
-import { openReplica, type PromiseReplica } from './helpers.js'
+import { closeStorages, openReplica, openStorage, type PromiseReplica } from './helpers.js'
 
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const created = (id: string, title = id) => Message.CreatedTodo({ id, title })
@@ -33,7 +33,7 @@ let replicas: Array<PromiseReplica>
 const open = async (id: string, storage?: Storage): Promise<PromiseReplica> => {
   const replica = await openReplica(
     id,
-    storage ?? (await Effect.runPromise(indexedDb(id, factory))),
+    storage ?? (await Effect.runPromise(openStorage(id, factory))),
   )
   replicas.push(replica)
   return replica
@@ -46,6 +46,7 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(replicas.map(replica => replica.close()))
   server.close()
+  await closeStorages()
 })
 
 // Generic durable-journal and replica behavior lives in packages/durable and
@@ -301,7 +302,7 @@ describe('the wired replica', () => {
     expect(restored.shared().todos).toEqual([{ id: 'first', title: 'first' }])
     await restored.submit(created('second'))
     expect(restored.pending().map(op => op.opId)).toEqual(['a:1', 'a:2'])
-    const store = await Effect.runPromise(indexedDb('a', factory))
+    const store = await Effect.runPromise(openStorage('a', factory))
     const saved = await Effect.runPromise(store.load())
     await Effect.runPromise(store.close)
     expect(saved).toMatchObject({ protocolVersion: 1, schemaVersion: 1, nextLocalSequence: 3 })
@@ -309,7 +310,7 @@ describe('the wired replica', () => {
   })
 
   it('publishes nothing on failed persistence and can retry without losing its sequence', async () => {
-    const store = await Effect.runPromise(indexedDb('a', factory))
+    const store = await Effect.runPromise(openStorage('a', factory))
     let fail = false
     const a = await open('a', {
       ...store,

@@ -10,14 +10,16 @@ import {
 } from 'foldkit-durable'
 import {
   defineSync,
-  indexedDb,
   layerFromPromise,
   lwwRegister,
   openLwwClock,
   type Operation,
   type TransportClient,
 } from 'foldkit-sync'
-import { expect, it } from 'vitest'
+import { afterEach, expect, it } from 'vitest'
+import { closeStorages, openStorage } from './helpers.js'
+
+afterEach(closeStorages)
 
 const Title = lwwRegister(Schema.NullOr(Schema.String))
 const Shared = Schema.Struct({ title: Title.schema })
@@ -127,8 +129,8 @@ it.each(['a', 'b'])(
   async first => {
     const factory = new IDBFactory()
     const { journal, transport } = openJournal()
-    let a = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
-    const b = await openReplica('b', await Effect.runPromise(indexedDb('b', factory)))
+    let a = await openReplica('a', await Effect.runPromise(openStorage('a', factory)))
+    const b = await openReplica('b', await Effect.runPromise(openStorage('b', factory)))
     try {
       await a.submit(rename(1, 'a', 'Draft'))
       await a.submit(rename(2, 'a', 'Newer edit'))
@@ -137,7 +139,7 @@ it.each(['a', 'b'])(
       expect(b.shared().title.value).toBe('Stale offline edit')
 
       await a.close()
-      a = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
+      a = await openReplica('a', await Effect.runPromise(openStorage('a', factory)))
       expect(a.shared().title).toEqual(rename(2, 'a', 'Newer edit').title)
       expect(a.pending()).toHaveLength(2)
 
@@ -153,7 +155,7 @@ it.each(['a', 'b'])(
       expect(b.pending()).toEqual([])
 
       journal.compact('titles', 3)
-      const late = await openReplica('late', await Effect.runPromise(indexedDb('late', factory)))
+      const late = await openReplica('late', await Effect.runPromise(openStorage('late', factory)))
       try {
         await late.submit(rename(1, 'late', 'Late offline edit'))
         await late.synchronize(transport())
@@ -173,7 +175,10 @@ it.each(['a', 'b'])(
 
 it('authorization still rejects a winning write and tombstones survive delayed edits', async () => {
   const { journal, transport } = openJournal()
-  const replica = await openReplica('a', await Effect.runPromise(indexedDb('a', new IDBFactory())))
+  const replica = await openReplica(
+    'a',
+    await Effect.runPromise(openStorage('a', new IDBFactory())),
+  )
   try {
     await replica.submit(rename(2, 'a', null))
     await replica.synchronize(transport())
@@ -204,12 +209,12 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
       openLwwClock({
         documentId: 'titles',
         replicaId: 'a',
-        storage: await Effect.runPromise(indexedDb('a-clock', factory)),
+        storage: await Effect.runPromise(openStorage('a-clock', factory)),
       }),
     )
   const { journal, transport } = openJournal()
   let clock = await openClock()
-  let replica = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
+  let replica = await openReplica('a', await Effect.runPromise(openStorage('a', factory)))
   try {
     const refused = await Effect.runPromise(clock.next(20))
     await replica.submit(Message.Renamed({ title: { stamp: refused, value: 'Refused' } }))
@@ -223,7 +228,7 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
     await Effect.runPromise(clock.close)
     await replica.close()
     clock = await openClock()
-    replica = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
+    replica = await openReplica('a', await Effect.runPromise(openStorage('a', factory)))
 
     const stamp = await Effect.runPromise(clock.next(replica.shared().title.stamp.counter))
     expect(stamp).toEqual({ counter: 23, replicaId: 'a' })
@@ -247,7 +252,7 @@ it('IndexedDB admits only one clock writer at a saved revision', async () => {
       openLwwClock({
         documentId: 'titles',
         replicaId: 'a',
-        storage: await Effect.runPromise(indexedDb('clock', factory)),
+        storage: await Effect.runPromise(openStorage('clock', factory)),
       }),
     )
   const first = await openClock()
