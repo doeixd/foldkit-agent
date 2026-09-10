@@ -713,10 +713,14 @@ becomes unavailable its registration signal is aborted, and when it returns it
 is registered again.
 
 `available` defines whether the capability **currently belongs to the
-application's agent capability set**. Adapters must not advertise it while it is
+application's agent capability set**. Live tool discovery omits it while it is
 false, and the Runtime rejects invocation with
 `AgentCapabilityUnavailableError` even from a caller who already knows the name.
 Availability is stronger than tool visibility.
+
+The A2A Agent Card and Agent Native prototype registry describe the static
+contract, including conditional capabilities. Their invocation paths still
+enforce live availability.
 
 It is not authorization. Calls may still require `authorize`, and
 backend/domain authorization remains authoritative.
@@ -1062,7 +1066,9 @@ name at all for a variant that never declared one.
 
 Dispatch runs in a fixed order — resolve the capability, check `available`,
 decode input through its Effect Schema, run `authorize`, then construct and
-dispatch the Message. A failure at any step means no Message reaches `update`.
+dispatch the Message. A refusal before host dispatch sends no Message. A host
+failure may occur after delivery; completion timeouts and cancellation after
+delivery do not undo it.
 Decoding rejects undeclared fields, matching the `additionalProperties: false`
 that the derived JSON Schema advertises.
 
@@ -1080,6 +1086,10 @@ invocation already in flight. That is snapshot consistency, not live-state
 freshness: the next invocation sees the newer Model. Nothing rejects a dispatch
 because the live Model has advanced; see the
 [package README](./packages/agent#the-model-snapshot).
+
+The host must replace Models rather than mutate them in place: the runtime
+retains the returned reference, without cloning it. Unknown capabilities and
+already-cancelled invocations are refused before reading the Model.
 
 Dispatch runs inside an `Agent.dispatch` span annotated with the capability,
 transport, and invocation id.
@@ -1141,8 +1151,10 @@ WebMCP invocation
         ↓
 Agent.Invocation.signal
         ↓
-Command / Effect cancellation where supported
+Refuse before dispatch, or stop waiting for completion
 ```
+
+The signal does not cancel or roll back work already handed to the host.
 
 ## Dynamic availability
 
@@ -1737,10 +1749,10 @@ That should remain adapter policy. The current WebMCP producer API is tool-orien
 
 ## Should completion ship in v1?
 
-It did not. Validated dispatch is a useful and well-defined boundary. The
-`completion` contract is accepted and surfaced through introspection, but
-nothing executes it yet. Completion tracking becomes important when external
-agents need synchronous outcomes from Command-driven workflows.
+Completion tracking is implemented. When a capability declares `completion`,
+dispatch waits for a matching Message, timeout, or cancellation; the host must
+provide `observe`. Without a completion contract, successful host dispatch is
+the completion boundary.
 
 # Summary
 
