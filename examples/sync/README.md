@@ -1,6 +1,6 @@
 # Durable Foldkit messages: feasibility spike
 
-This private example answers the six feasibility questions in [issue #42](https://github.com/doeixd/foldkit-agent/issues/42). It is a concrete todo application, not a published sync API. Foldkit's existing Message union and `update` function define every transition on the browser and server.
+This private example answers the six feasibility questions in [issue #42](https://github.com/doeixd/foldkit-plus/issues/42). It is a concrete todo application, not a published sync API. Foldkit's existing Message union and `update` function define every transition on the browser and server.
 
 ## Run
 

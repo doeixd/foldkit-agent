@@ -15,12 +15,12 @@
   "author": "Patrick Glenn <doeixd@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/doeixd/foldkit-agent.git",
+    "url": "git+https://github.com/doeixd/foldkit-plus.git",
     "directory": "packages/durable"
   },
-  "homepage": "https://github.com/doeixd/foldkit-agent/tree/main/packages/durable#readme",
+  "homepage": "https://github.com/doeixd/foldkit-plus/tree/main/packages/durable#readme",
   "bugs": {
-    "url": "https://github.com/doeixd/foldkit-agent/issues"
+    "url": "https://github.com/doeixd/foldkit-plus/issues"
   },
   "sideEffects": false,
   "engines": {

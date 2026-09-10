@@ -114,5 +114,5 @@ adapter's own returned record preserves these keys, but cannot fix that
 downstream registry behavior.
 
 The package stays private pending a deployment test. This completes the bounded
-proof of concept in [issue #22](https://github.com/doeixd/foldkit-agent/issues/22),
+proof of concept in [issue #22](https://github.com/doeixd/foldkit-plus/issues/22),
 not a claim that every Agent Native subsystem is independently reusable.

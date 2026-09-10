@@ -1,15 +1,15 @@
 {
-  "name": "foldkit-agent-workspace",
+  "name": "foldkit-plus-workspace",
   "private": true,
   "license": "MIT",
   "author": "Patrick Glenn <doeixd@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/doeixd/foldkit-agent.git"
+    "url": "git+https://github.com/doeixd/foldkit-plus.git"
   },
-  "homepage": "https://github.com/doeixd/foldkit-agent#readme",
+  "homepage": "https://github.com/doeixd/foldkit-plus#readme",
   "bugs": {
-    "url": "https://github.com/doeixd/foldkit-agent/issues"
+    "url": "https://github.com/doeixd/foldkit-plus/issues"
   },
   "type": "module",
   "packageManager": "pnpm@10.32.1",

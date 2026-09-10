@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Use a private GitHub security advisory
-(<https://github.com/doeixd/foldkit-agent/security/advisories/new>), or email the
+(<https://github.com/doeixd/foldkit-plus/security/advisories/new>), or email the
 maintainer, rather than opening a public issue. Include the affected package and
 version, a minimal reproduction, and the impact.
 
