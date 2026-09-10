@@ -205,6 +205,88 @@ describe('the journal adapter', () => {
       guarded.close()
     }
   })
+
+  it('keys server effects per document, not just per operation', async () => {
+    let notifications = 0
+    const guarded = openJournal(':memory:', {
+      effects: message =>
+        message._tag === 'RenamedTodo'
+          ? [
+              {
+                name: 'notify',
+                run: async () => {
+                  notifications += 1
+                },
+              },
+            ]
+          : [],
+    })
+    const a = { actorId: 'owner', documentId: 'a', canWrite: true }
+    const b = { actorId: 'owner', documentId: 'b', canWrite: true }
+    try {
+      guarded.appendAsServer(created('x'), a, 'seed')
+      guarded.appendAsServer(created('x'), b, 'seed')
+
+      // The same replica sequence in two documents: only the document differs.
+      const first = guarded.append(
+        { ...operation('r', 1, Message.RenamedTodo({ id: 'x', title: 'one' })), documentId: 'a' },
+        a,
+      )
+      const second = guarded.append(
+        { ...operation('r', 1, Message.RenamedTodo({ id: 'x', title: 'two' })), documentId: 'b' },
+        b,
+      )
+
+      await guarded.settle(first)
+      await guarded.settle(second)
+      expect(notifications).toBe(2)
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('does not repeat an effect when a compacted operation is retransmitted', async () => {
+    let notifications = 0
+    const guarded = openJournal(':memory:', {
+      effects: message =>
+        message._tag === 'RenamedTodo'
+          ? [
+              {
+                name: 'notify',
+                run: async () => {
+                  notifications += 1
+                },
+              },
+            ]
+          : [],
+    })
+    try {
+      guarded.append(operation('seed', 1, created('todo')), principal)
+      const a = await open('a')
+      await a.submit(Message.RenamedTodo({ id: 'todo', title: 'renamed' }))
+
+      // The commit lands and the effect runs, but the reply is lost.
+      await expect(
+        a.synchronize({
+          exchange: async (cursor, pending) => {
+            await guarded.transport(principal).exchange(cursor, pending)
+            throw new Error('connection lost')
+          },
+        }),
+      ).rejects.toThrow('connection lost')
+      // Compaction folds both operations into the snapshot and drops payloads.
+      guarded.compact('todos', 2)
+      expect(notifications).toBe(1)
+
+      // The resend is acknowledged from the identity row, and the effect is not
+      // repeated, even though the payload is gone.
+      await a.synchronize(guarded.transport(principal))
+      expect(notifications).toBe(1)
+      expect(a.pending()).toEqual([])
+    } finally {
+      guarded.close()
+    }
+  })
 })
 
 describe('the wired replica', () => {

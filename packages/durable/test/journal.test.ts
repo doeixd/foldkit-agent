@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   createJournal,
@@ -63,9 +66,9 @@ const principal: Principal = { actorId: 'owner', canWrite: true }
 
 type Hooks = Pick<JournalOptions<Operation, Snapshot, Principal>, 'validate' | 'authorize'>
 
-const open = (hooks: Hooks = {}) =>
+const open = (hooks: Hooks = {}, file = ':memory:') =>
   createJournal<Operation, Snapshot, Principal>({
-    file: ':memory:',
+    file,
     operation,
     snapshot,
     empty: () => ({ ids: [] }),
@@ -103,6 +106,22 @@ describe('a durable journal', () => {
 
       expect(journal.load('a').snapshot).toEqual({ ids: ['a'] })
       expect(journal.load('b').snapshot).toEqual({ ids: ['b'] })
+    } finally {
+      journal.close()
+    }
+  })
+
+  it('treats an unknown key as empty and reads nothing at the cursor', () => {
+    const journal = open()
+    try {
+      const first = journal.load('missing')
+      const second = journal.load('missing')
+      expect(first).toEqual({ snapshot: { ids: [] }, cursor: 0 })
+      // `empty` runs per read, so callers cannot mutate a shared default.
+      expect(first.snapshot).not.toBe(second.snapshot)
+
+      journal.append('todos', add(1, 'a'), principal)
+      expect(journal.read('todos', 1)).toEqual([])
     } finally {
       journal.close()
     }
@@ -324,6 +343,53 @@ describe('the effect ledger', () => {
       expect(journal.effect('b')).toMatchObject({ result: 'b' })
     } finally {
       journal.close()
+    }
+  })
+
+  it('shares one failure between concurrent calls', async () => {
+    const journal = open()
+    try {
+      let runs = 0
+      const failing = () =>
+        journal.runEffect('k', async () => {
+          runs += 1
+          throw new Error('down')
+        })
+
+      const settled = await Promise.allSettled([failing(), failing()])
+      expect(runs).toBe(1)
+      expect(settled.map(result => result.status)).toEqual(['rejected', 'rejected'])
+      expect(journal.effect('k')).toMatchObject({ status: 'failed', error: 'down' })
+    } finally {
+      journal.close()
+    }
+  })
+
+  it('keeps a recorded effect across a reopen', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'foldkit-effects-'))
+    const path = join(directory, 'journal.sqlite')
+    let runs = 0
+    try {
+      const first = open({}, path)
+      await first.runEffect('k', async () => {
+        runs += 1
+        return 'recorded'
+      })
+      first.close()
+
+      const reopened = open({}, path)
+      try {
+        const result = await reopened.runEffect('k', async () => {
+          runs += 1
+          return 'again'
+        })
+        expect(result).toBe('recorded')
+        expect(runs).toBe(1)
+      } finally {
+        reopened.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
     }
   })
 })

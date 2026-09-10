@@ -123,7 +123,12 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
   const settle = async (committed: Committed): Promise<void> => {
     const effects = effectsFor?.(decodeMessage(committed.message)) ?? []
     for (const [index, effect] of effects.entries()) {
-      await durable.runEffect(`${committed.opId}/command/${index}`, effect.run)
+      // `opId` is only replica-scoped, so the document has to be part of the
+      // effect key: two documents may share a `replicaId:sequence`.
+      await durable.runEffect(
+        `${committed.documentId}/${committed.opId}/command/${index}`,
+        effect.run,
+      )
     }
   }
 

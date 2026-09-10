@@ -160,6 +160,41 @@ describe('the replica', () => {
     expect(replica.shared()).toEqual({ todos: [{ id: 'x', title: 'x' }] })
   })
 
+  it('rebases a pending operation onto an adopted checkpoint', async () => {
+    const replica = await Sync.openReplica('a', memoryStorage())
+    await replica.submit(created('t', 'mine'))
+
+    await replica.synchronize({
+      exchange: async () => ({
+        operations: [],
+        rejected: [],
+        checkpoint: { cursor: 2, model: { todos: [{ id: 'x', title: 'theirs' }] } },
+      }),
+    })
+
+    expect(replica.cursor()).toBe(2)
+    expect(replica.shared().todos).toEqual([
+      { id: 'x', title: 'theirs' },
+      { id: 't', title: 'mine' },
+    ])
+    expect(replica.pending().map(op => op.opId)).toEqual(['a:1'])
+  })
+
+  it('applies committed operations that follow an adopted checkpoint', async () => {
+    const replica = await Sync.openReplica('a', memoryStorage())
+
+    await replica.synchronize({
+      exchange: async () => ({
+        operations: [committed('b', 1, 2, created('tail'))],
+        rejected: [],
+        checkpoint: { cursor: 1, model: { todos: [{ id: 'base', title: 'base' }] } },
+      }),
+    })
+
+    expect(replica.cursor()).toBe(2)
+    expect(replica.shared().todos.map(todo => todo.id)).toEqual(['base', 'tail'])
+  })
+
   it('refuses a checkpoint older than its own cursor', async () => {
     const replica = await Sync.openReplica('a', memoryStorage())
     await replica.synchronize({

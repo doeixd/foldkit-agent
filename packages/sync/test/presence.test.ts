@@ -27,6 +27,21 @@ describe('presence', () => {
     expect(presence.peers()).toEqual([])
   })
 
+  it('keeps a peer live while it refreshes before the ttl', () => {
+    let clock = 0
+    const presence = createPresence<Cursor>({ id: 'a', ttl: 100, now: () => clock })
+
+    presence.set({ cursor: 1 })
+    clock = 90
+    presence.set({ cursor: 2 })
+
+    clock = 150
+    expect(presence.peers()).toEqual([{ id: 'a', value: { cursor: 2 }, updatedAt: 90 }])
+
+    clock = 191
+    expect(presence.peers()).toEqual([])
+  })
+
   it('prunes expired peers and notifies only when something went', () => {
     let clock = 0
     const presence = createPresence<Cursor>({ id: 'a', ttl: 100, now: () => clock })
