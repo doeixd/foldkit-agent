@@ -114,14 +114,13 @@ export interface Journal<Operation, Snapshot, Principal> {
   /** The recorded effect for a key, if it has ever run. */
   readonly effect: (key: string) => Effect.Effect<Option.Option<EffectRecord>, JournalError>
   /**
-   * Runs an externally visible effect at most once per key, recording the
-   * outcome durably.
-   *
-   * A second call after success returns the recorded result without running
-   * again; a concurrent call awaits the run already in flight; a failed run is
-   * left recorded and may be retried. Key it by the operation that caused it,
-   * for example `opId + "/command/" + index`, so a replay or restart cannot
-   * duplicate the effect. The result must be JSON-compatible.
+   * Reuses recorded successes and shares concurrent runs within this journal
+   * instance. Pending and failed records are retried when called again.
+   * An external action can succeed before its result is recorded; recovery
+   * requires provider idempotency or reconciliation. Use a stable key including
+   * the document, operation, and semantic effect identity, and pass that same
+   * key to the provider. Results must be JSON-compatible. See the README's
+   * effect recovery policy before retrying work with uncertain outcomes.
    */
   readonly runEffect: <Result, E>(
     key: string,

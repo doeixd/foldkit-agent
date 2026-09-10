@@ -38,9 +38,9 @@ export interface JournalPolicy {
   /** Defaults to allowing; an authenticated write still requires `Principal.canWrite`. */
   readonly authorize?: Authorize
   /**
-   * Effects a committed operation triggers. Each runs at most once per
-   * operation, keyed by the document and operation id, so a resend or replay
-   * cannot duplicate it.
+   * Effects a committed operation triggers. Recorded successes are reused;
+   * uncertain outcomes can run again. This spike keys effects by array position,
+   * so its policy must not reorder effects for previously committed operations.
    */
   readonly effects?: (message: Message) => ReadonlyArray<ServerEffect>
 }

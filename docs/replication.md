@@ -38,7 +38,7 @@ and to keep a durable authoritative order on the server.
   │      │ Messages          │           │   append → reduce →      │
   │      ▼                   │ Transport │   snapshot + cursor      │
   │  foldkit-sync replica    │◀─────────▶│   (authoritative order)  │
-  │  outbox · optimistic     │  exchange │   runEffect (once)       │
+  │  outbox · optimistic     │  exchange │   effect ledger          │
   │  IndexedDB (CAS)         │           │   SQLite                 │
   └──────────────────────────┘           └──────────────────────────┘
 ```
@@ -93,14 +93,15 @@ It owns storage and ordering only, and gives you:
 - **Compaction** drops old payloads below a floor without changing what replaying
   the prefix produces.
 - **A change stream** (`journal.subscribe`) and **metrics** (`journalMetrics`).
-- **`runEffect(key, run)` — at-most-once side effects.** Runs `run` once per key,
-  records the outcome durably, and coalesces concurrent calls. Key it by the
-  operation (`opId + "/command/0"`) so "send the confirmation email" happens once
-  even across retries and restarts.
+- **`runEffect(key, run)` — recorded effect outcomes.** Reuses successful results
+  and coalesces concurrent calls within one journal instance. A crash after an
+  external action but before recording success can repeat the action on retry.
+  Use stable document/operation/effect identities and provider idempotency;
+  see the [effect recovery policy](../packages/durable/README.md#effect-recovery).
 - **Migrations**, and branded `DocumentId` / `OpId` / `ActorId`.
 
 **Use it when** a server must sequence operations from many clients, replay or
-compact them, and run side effects exactly once.
+compact them, and retain effect outcomes.
 
 ## `foldkit-sync`
 
