@@ -77,6 +77,13 @@ export const serveSocket = (
     ) => unknown | Promise<unknown>
   },
 ): (() => void) => {
+  const send = (reply: ExchangeReply): void => {
+    try {
+      socket.send(JSON.stringify(reply))
+    } catch {
+      // The socket may have closed while the handler was running.
+    }
+  }
   const stopMessage = socket.onMessage(data => {
     let frame: ExchangeFrame
     try {
@@ -87,14 +94,9 @@ export const serveSocket = (
     void (async () => {
       try {
         const result = await options.exchange(frame.cursor, frame.pending)
-        socket.send(JSON.stringify({ id: frame.id, result } satisfies ExchangeReply))
+        send({ id: frame.id, result })
       } catch (error) {
-        socket.send(
-          JSON.stringify({
-            id: frame.id,
-            error: error instanceof Error ? error.message : String(error),
-          } satisfies ExchangeReply),
-        )
+        send({ id: frame.id, error: error instanceof Error ? error.message : String(error) })
       }
     })()
   })
@@ -143,8 +145,9 @@ const nativeSocket = (url: string): SocketLike => {
       return () => socket.removeEventListener('message', handler)
     },
     onClose: listener => {
-      socket.addEventListener('close', () => listener())
-      return () => socket.removeEventListener('close', listener)
+      const handler = (): void => listener()
+      socket.addEventListener('close', handler)
+      return () => socket.removeEventListener('close', handler)
     },
   }
 }
@@ -166,8 +169,9 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
       Effect.map(socket => {
         const pending = new Map<string, (effect: Effect.Effect<unknown, TransportError>) => void>()
         let nextId = 0
-        // A connecting socket cannot send yet; hold exchanges until it opens.
-        const queued: Array<() => void> = []
+        // A connecting socket cannot send yet; hold exchanges until it opens,
+        // and fail them if it closes first instead of leaving them hanging.
+        const queued: Array<(error?: string) => void> = []
         let ready = socket.onOpen === undefined
         const offOpen = socket.onOpen?.(() => {
           ready = true
@@ -191,6 +195,7 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
         })
         socket.onClose(() => {
           offOpen?.()
+          for (const send of queued.splice(0)) send('transport closed')
           for (const [id, resume] of pending) {
             pending.delete(id)
             resume(Effect.fail(new TransportError({ message: 'transport closed' })))
@@ -199,7 +204,11 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
         return {
           exchange: (cursor, pendingOps) =>
             Effect.callback<unknown, TransportError>(resume => {
-              const send = (): void => {
+              const send = (error?: string): void => {
+                if (error !== undefined) {
+                  resume(Effect.fail(new TransportError({ message: error })))
+                  return
+                }
                 const id = String(nextId++)
                 pending.set(id, resume)
                 socket.send(

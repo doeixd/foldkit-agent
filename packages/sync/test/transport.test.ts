@@ -146,6 +146,40 @@ describe('the socket transport', () => {
     })
   })
 
+  it('fails an exchange queued before the socket opens if it closes first', async () => {
+    const closes = new Set<() => void>()
+    let opened: () => void = () => {}
+    const built = new Promise<void>(resolve => {
+      opened = resolve
+    })
+    const client: SocketLike = {
+      send: () => {},
+      close: () => {
+        for (const listener of [...closes]) listener()
+      },
+      onOpen: () => {
+        opened()
+        return () => {}
+      },
+      onMessage: () => () => {},
+      onClose: listener => {
+        closes.add(listener)
+        return () => closes.delete(listener)
+      },
+    }
+
+    const running = Effect.runPromise(withSocket(client))
+    await built
+    // Let the fiber queue its exchange against the still-connecting socket.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    client.close()
+
+    expect(await running).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'SyncTransportError', message: 'transport closed' },
+    })
+  })
+
   it('fails pending exchanges when the socket closes', async () => {
     const { client, server } = socketPair()
     let received: () => void = () => {}
