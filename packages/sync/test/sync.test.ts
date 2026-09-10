@@ -375,4 +375,28 @@ describe('the replica', () => {
     await sync(replica, { exchange: async () => ({ operations: [], rejected: [] }) })
     expect((await status(replica)).lastError).toBeUndefined()
   })
+
+  it('reports an unsupported newer version without overwriting the stored state', async () => {
+    const saved = {
+      protocolVersion: 1,
+      schemaVersion: 2,
+      documentId: 'todos',
+      replicaId: 'a',
+      revision: 0,
+      nextLocalSequence: 1,
+      cursor: 0,
+      committed: { todos: [] },
+      committedIds: [],
+      pending: [],
+    }
+    const storage = memoryStorage(saved)
+
+    const result = await Effect.runPromise(Effect.result(Sync.openReplica(replicaId('a'), storage)))
+
+    expect(result).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'UnsupportedReplicaVersionError', protocolVersion: 1, schemaVersion: 2 },
+    })
+    expect(await Effect.runPromise(storage.load())).toEqual(saved)
+  })
 })

@@ -6,6 +6,7 @@ import {
   InvalidOutboxError,
   InvalidReplicaHistoryError,
   ReplicaClosedError,
+  UnsupportedReplicaVersionError,
   WrongReplicaStorageError,
   type ReplicaError,
 } from './errors.js'
@@ -19,10 +20,14 @@ const Sequence = Schema.Number.check(
   Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
 )
 
+/** Wire and persisted-format versions. A bump must handle the older value explicitly. */
+const PROTOCOL_VERSION = 1
+const SCHEMA_VERSION = 1
+
 /** A client-authored operation envelope. `message` is the application's encoded Message. */
 const OperationSchema = Schema.Struct({
-  protocolVersion: Schema.Literal(1),
-  schemaVersion: Schema.Literal(1),
+  protocolVersion: Schema.Literal(PROTOCOL_VERSION),
+  schemaVersion: Schema.Literal(SCHEMA_VERSION),
   documentId: DocumentId,
   replicaId: ReplicaId,
   localSequence: Sequence,
@@ -155,8 +160,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const encodeMessage = Schema.encodeSync(definition.message)
 
   const ReplicaStateSchema = Schema.Struct({
-    protocolVersion: Schema.Literal(1),
-    schemaVersion: Schema.Literal(1),
+    protocolVersion: Schema.Literal(PROTOCOL_VERSION),
+    schemaVersion: Schema.Literal(SCHEMA_VERSION),
     documentId: DocumentId,
     replicaId: ReplicaId,
     revision: Sequence,
@@ -174,6 +179,34 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     checkpoint: Schema.optional(CheckpointSchema),
   })
   const decodeState = Schema.decodeUnknownSync(ReplicaStateSchema, { onExcessProperty: 'error' })
+  const VersionProbe = Schema.Struct({
+    protocolVersion: Schema.optional(Schema.Number),
+    schemaVersion: Schema.optional(Schema.Number),
+  })
+  /**
+   * Tells a version this build does not understand apart from malformed data,
+   * so the caller gets an actionable failure and the stored state is preserved.
+   */
+  const unsupportedVersion = (input: unknown): UnsupportedReplicaVersionError | undefined => {
+    let found: {
+      readonly protocolVersion?: number | undefined
+      readonly schemaVersion?: number | undefined
+    }
+    try {
+      found = Schema.decodeUnknownSync(VersionProbe)(input)
+    } catch {
+      return undefined
+    }
+    if (found.protocolVersion === PROTOCOL_VERSION && found.schemaVersion === SCHEMA_VERSION)
+      return undefined
+    const protocolVersion = found.protocolVersion ?? null
+    const schemaVersion = found.schemaVersion ?? null
+    return new UnsupportedReplicaVersionError({
+      protocolVersion,
+      schemaVersion,
+      message: `Stored replica uses protocol ${protocolVersion ?? '?'} / schema ${schemaVersion ?? '?'}; this build supports ${PROTOCOL_VERSION}/${SCHEMA_VERSION}`,
+    })
+  }
   const decodeExchange = (input: unknown): Exchange<Shared> =>
     Schema.decodeUnknownSync(ExchangeSchema, { onExcessProperty: 'error' })(
       input,
@@ -249,6 +282,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           : yield* Effect.try({
               try: () => decodeState(saved),
               catch: cause =>
+                unsupportedVersion(saved) ??
                 new InvalidReplicaHistoryError({
                   message: 'Stored replica state is invalid',
                   cause,

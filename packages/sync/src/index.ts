@@ -16,6 +16,7 @@ export {
   InvalidReplicaHistoryError,
   ReplicaClosedError,
   StorageError,
+  UnsupportedReplicaVersionError,
   WrongReplicaStorageError,
   type ReplicaError,
 } from './errors.js'

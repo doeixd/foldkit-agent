@@ -70,10 +70,21 @@ export class ReplicaClosedError extends Schema.TaggedError<ReplicaClosedError>()
   },
 ) {}
 
+/** The stored replica state targets a protocol or schema version this build does not support. */
+export class UnsupportedReplicaVersionError extends Schema.TaggedError<UnsupportedReplicaVersionError>()(
+  'UnsupportedReplicaVersionError',
+  {
+    protocolVersion: Schema.NullOr(Schema.Number),
+    schemaVersion: Schema.NullOr(Schema.Number),
+    message: Schema.String,
+  },
+) {}
+
 export type ReplicaError =
   | StorageError
   | WrongReplicaStorageError
   | InvalidReplicaHistoryError
+  | UnsupportedReplicaVersionError
   | InvalidOutboxError
   | CheckpointRegressionError
   | CommittedOrderError
