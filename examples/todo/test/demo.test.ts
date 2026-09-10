@@ -86,7 +86,7 @@ describe('the example contract', () => {
     ])
   })
 
-  it('clears the selection when the selected todo is deleted', async () => {
+  it('deletes the selected todo, preserves the others, and clears the selection', async () => {
     resetIds()
     const store = makeStore()
     const agent = bindAgent({
@@ -94,10 +94,12 @@ describe('the example contract', () => {
       host: { ...store.host, principal: () => ({ canDelete: true }) },
     })
 
+    store.dispatch(Message.RequestedCreateTodo({ title: 'Keep me' }))
     store.dispatch(Message.RequestedCreateTodo({ title: 'Doomed' }))
-    await Effect.runPromise(agent.messages.dispatch(Message.SelectedTodo, { id: 'todo-1' }))
+    await Effect.runPromise(agent.messages.dispatch(Message.SelectedTodo, { id: 'todo-2' }))
     await Effect.runPromise(agent.messages.dispatch(Message.RequestedDeleteTodo, {}))
 
+    expect(store.model().todos.map(todo => todo.id)).toEqual(['todo-1'])
     expect(Option.isNone(store.model().selectedTodoId)).toBe(true)
   })
 })
