@@ -1,0 +1,162 @@
+import { Schema } from 'effect'
+import { IDBFactory } from 'fake-indexeddb'
+import { defineMessageUnion } from 'foldkit/message'
+import { createJournal, OperationRejectedError } from 'foldkit-durable'
+import {
+  defineSync,
+  indexedDb,
+  lwwRegister,
+  type Operation,
+  type TransportClient,
+} from 'foldkit-sync'
+import { expect, it } from 'vitest'
+
+const Title = lwwRegister(Schema.NullOr(Schema.String))
+const Shared = Schema.Struct({ title: Title.schema })
+type Shared = typeof Shared.Type
+const Message = defineMessageUnion({ Renamed: { title: Title.schema } })
+type Message = typeof Message.Type
+const empty: Shared = { title: { stamp: { counter: 0, replicaId: 'initial' }, value: 'Original' } }
+const update = (model: Shared, message: Message): Shared => ({
+  ...model,
+  title: Title.merge(model.title, message.title),
+})
+const decodeMessage = Schema.decodeUnknownSync(Message, { onExcessProperty: 'error' })
+const Sync = defineSync({
+  documentId: 'titles',
+  message: Message,
+  shared: Shared,
+  empty,
+  durable: () => true,
+  replay: update,
+})
+const rename = (counter: number, replicaId: string, value: string | null): Message =>
+  Message.Renamed({ title: { stamp: { counter, replicaId }, value } })
+
+const openJournal = () => {
+  const journal = createJournal<Operation, Shared, { actorId: string; canWrite: boolean }>({
+    file: ':memory:',
+    operation: { encode: value => value, decode: Sync.normalizeOperation },
+    snapshot: {
+      encode: Schema.encodeSync(Shared),
+      decode: Schema.decodeUnknownSync(Shared, { onExcessProperty: 'error' }),
+    },
+    empty: () => empty,
+    reduce: (model, operation) => update(model, decodeMessage(operation.message)),
+    opId: operation => operation.opId,
+    actorId: principal => principal.actorId,
+    authorize: ({ principal }) => principal.canWrite,
+    validate: ({ key, operation }) => {
+      if (operation.documentId !== key) throw new Error('Wrong document')
+    },
+  })
+  const transport = (canWrite = true): TransportClient => ({
+    exchange: async (cursor, pending) => {
+      const acknowledged: string[] = []
+      const rejected: string[] = []
+      for (const operation of pending) {
+        try {
+          journal.append('titles', operation, { actorId: 'owner', canWrite })
+          acknowledged.push(operation.opId)
+        } catch (error) {
+          if (!(error instanceof OperationRejectedError)) throw error
+          rejected.push(operation.opId)
+        }
+      }
+      if (cursor < journal.floor('titles')) {
+        const state = journal.load('titles')
+        return {
+          operations: [],
+          acknowledged,
+          rejected,
+          checkpoint: { cursor: state.cursor, model: state.snapshot },
+        }
+      }
+      return {
+        operations: journal.read('titles', cursor).map(row => ({
+          ...row.operation,
+          serverSequence: row.sequence,
+          actorId: row.actorId,
+        })),
+        acknowledged,
+        rejected,
+      }
+    },
+  })
+  return { journal, transport }
+}
+
+it.each(['a', 'b'])(
+  'converges offline edits when %s reconnects first, including reload and compaction',
+  async first => {
+    const factory = new IDBFactory()
+    const { journal, transport } = openJournal()
+    let a = await Sync.openReplica('a', await indexedDb('a', factory))
+    const b = await Sync.openReplica('b', await indexedDb('b', factory))
+    try {
+      await a.submit(rename(1, 'a', 'Draft'))
+      await a.submit(rename(2, 'a', 'Newer edit'))
+      await b.submit(rename(1, 'b', 'Stale offline edit'))
+      expect(a.shared().title.value).toBe('Newer edit')
+      expect(b.shared().title.value).toBe('Stale offline edit')
+
+      await a.close()
+      a = await Sync.openReplica('a', await indexedDb('a', factory))
+      expect(a.shared().title).toEqual(rename(2, 'a', 'Newer edit').title)
+      expect(a.pending()).toHaveLength(2)
+
+      const ordered = first === 'a' ? [a, b] : [b, a]
+      for (const replica of ordered) await replica.synchronize(transport())
+      await a.synchronize(transport())
+      await b.synchronize(transport())
+      const winner = rename(2, 'a', 'Newer edit').title
+      expect(a.shared().title).toEqual(winner)
+      expect(b.shared().title).toEqual(winner)
+      expect(journal.load('titles')).toEqual({ cursor: 3, snapshot: { title: winner } })
+      expect(a.pending()).toEqual([])
+      expect(b.pending()).toEqual([])
+
+      journal.compact('titles', 3)
+      const late = await Sync.openReplica('late', await indexedDb('late', factory))
+      try {
+        await late.submit(rename(1, 'late', 'Late offline edit'))
+        await late.synchronize(transport())
+        expect(late.shared().title).toEqual(winner)
+        expect(late.cursor()).toBe(4)
+        expect(late.pending()).toEqual([])
+      } finally {
+        await late.close()
+      }
+    } finally {
+      await a.close()
+      await b.close()
+      journal.close()
+    }
+  },
+)
+
+it('authorization still rejects a winning write and tombstones survive delayed edits', async () => {
+  const { journal, transport } = openJournal()
+  const replica = await Sync.openReplica('a', await indexedDb('a', new IDBFactory()))
+  try {
+    await replica.submit(rename(2, 'a', null))
+    await replica.synchronize(transport())
+    await replica.submit(rename(1, 'a', 'Delayed'))
+    await replica.synchronize(transport())
+    expect(replica.shared().title).toEqual(rename(2, 'a', null).title)
+
+    await replica.submit(rename(3, 'a', 'Unauthorized resurrection'))
+    expect(replica.shared().title.value).toBe('Unauthorized resurrection')
+    await replica.synchronize(transport(false))
+    expect(replica.shared().title).toEqual(rename(2, 'a', null).title)
+    expect(replica.pending()).toEqual([])
+    expect(journal.load('titles').cursor).toBe(2)
+
+    await replica.submit(rename(4, 'a', 'Intentional restoration'))
+    await replica.synchronize(transport())
+    expect(journal.load('titles').snapshot.title.value).toBe('Intentional restoration')
+  } finally {
+    await replica.close()
+    journal.close()
+  }
+})
