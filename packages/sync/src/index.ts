@@ -8,6 +8,15 @@
  */
 export { indexedDb, type Storage } from './indexedDb.js'
 export {
+  createPresence,
+  loopbackPresenceChannel,
+  type Presence,
+  type PresenceChannel,
+  type PresenceOptions,
+  type PresencePeer,
+  type PresenceUpdate,
+} from './presence.js'
+export {
   defineSync,
   type Checkpoint,
   type Committed,

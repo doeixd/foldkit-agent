@@ -32,12 +32,16 @@ await replica.synchronize(transport)
   prefix.
 - Strict decoding: an operation is always validated with the application's
   Message schema, and a Message the contract does not call durable is refused.
+- Presence (`createPresence`): an ephemeral, TTL'd peer registry, deliberately
+  outside the durable log. A peer that stops refreshing is dropped, not
+  replayed.
 
 ## Limits
 
 - IndexedDB is the only storage adapter.
 - It assumes an authoritative, single-writer-per-document server that orders
   operations; there is no peer-to-peer or CRDT merge.
-- Presence has no channel yet.
+- Presence ships an in-process channel (`loopbackPresenceChannel`); a real
+  broadcast transport is future work.
 - Unpublished: `private` until an application other than the sync spike depends
   on the API.
