@@ -17,7 +17,10 @@ import { defineSync, indexedDb, layerFromPromise } from 'foldkit-sync'
 const Sync = defineSync({ ... })
 
 const replica = await Effect.runPromise(
-  Sync.openReplica('tab-1', await indexedDb('todos-tab-1')),
+  Effect.gen(function* () {
+    const storage = yield* indexedDb('todos-tab-1')
+    return yield* Sync.openReplica('tab-1', storage)
+  }),
 )
 await Effect.runPromise(
   replica.submit(Message.CreatedTodo({ id: crypto.randomUUID(), title: 'Milk' })),
@@ -104,18 +107,21 @@ write cannot cause timestamp reuse after reload:
 import { Effect } from 'effect'
 import { indexedDb, openLwwClock } from 'foldkit-sync'
 
-const clock = await openLwwClock({
-  documentId: 'todos',
-  replicaId: 'tab-a',
-  storage: await indexedDb('todos-tab-a-clock'),
-})
+const clock = await Effect.runPromise(
+  Effect.gen(function* () {
+    const storage = yield* indexedDb('todos-tab-a-clock')
+    return yield* openLwwClock({ documentId: 'todos', replicaId: 'tab-a', storage })
+  }),
+)
 try {
-  const stamp = await clock.next(Effect.runSync(replica.shared).title.stamp.counter)
+  const stamp = await Effect.runPromise(
+    clock.next(Effect.runSync(replica.shared).title.stamp.counter),
+  )
   await Effect.runPromise(
     replica.submit({ _tag: 'Renamed', title: { stamp, value: 'Milk' } }),
   )
 } finally {
-  await clock.close()
+  await Effect.runPromise(clock.close)
 }
 ```
 
