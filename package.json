@@ -24,6 +24,7 @@
     "release": "pnpm build && pnpm -r --filter './packages/*' publish --access public"
   },
   "devDependencies": {
+    "@effect/sql-sqlite-node": "4.0.0-rc.112",
     "@types/node": "^22.10.2",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
