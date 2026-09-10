@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { Deferred, Effect, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
@@ -398,5 +399,20 @@ describe('the replica', () => {
       failure: { _tag: 'UnsupportedReplicaVersionError', protocolVersion: 1, schemaVersion: 2 },
     })
     expect(await Effect.runPromise(storage.load())).toEqual(saved)
+  })
+
+  it('opens a checked-in state persisted by a previous release with its outbox intact', async () => {
+    const state = JSON.parse(
+      readFileSync(new URL('./fixtures/previousReplicaState.json', import.meta.url), 'utf8'),
+    )
+    const replica = await open('a', memoryStorage(state))
+
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2'])
+    expect(shared(replica).todos.map(todo => todo.id)).toEqual(['milk', 'bread'])
+
+    // A new edit continues the stored outbox instead of colliding with it.
+    await submit(replica, created('eggs'))
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2', 'a:3'])
+    await close(replica)
   })
 })

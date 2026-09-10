@@ -1,0 +1,33 @@
+{
+  "protocolVersion": 1,
+  "schemaVersion": 1,
+  "documentId": "todos",
+  "replicaId": "a",
+  "revision": 2,
+  "nextLocalSequence": 3,
+  "cursor": 0,
+  "committed": { "todos": [] },
+  "committedIds": [],
+  "pending": [
+    {
+      "protocolVersion": 1,
+      "schemaVersion": 1,
+      "documentId": "todos",
+      "replicaId": "a",
+      "localSequence": 1,
+      "opId": "a:1",
+      "baseCursor": 0,
+      "message": { "_tag": "CreatedTodo", "id": "milk", "title": "Milk" }
+    },
+    {
+      "protocolVersion": 1,
+      "schemaVersion": 1,
+      "documentId": "todos",
+      "replicaId": "a",
+      "localSequence": 2,
+      "opId": "a:2",
+      "baseCursor": 0,
+      "message": { "_tag": "CreatedTodo", "id": "bread", "title": "Bread" }
+    }
+  ]
+}

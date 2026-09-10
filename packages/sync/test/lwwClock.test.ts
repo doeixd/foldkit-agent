@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { Deferred, Effect, Fiber } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
@@ -264,6 +265,20 @@ describe('a durable LWW clock', () => {
           })
           expect(yield* saved.storage.load()).toEqual(state)
           expect(saved.closes()).toBe(1)
+        }),
+      ),
+    ))
+
+  it('opens a checked-in clock state and continues above its high-water mark', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const state = JSON.parse(
+            readFileSync(new URL('./fixtures/previousClockState.json', import.meta.url), 'utf8'),
+          )
+          const clock = yield* open(memory(state).storage)
+          expect(yield* clock.next()).toEqual({ counter: 41, replicaId: 'a' })
+          yield* clock.close
         }),
       ),
     ))
