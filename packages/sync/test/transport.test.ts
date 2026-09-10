@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 import { describe, expect, it, vi } from 'vitest'
 import {
   layerFromPromise,
@@ -197,55 +197,131 @@ describe('the socket transport', () => {
     expect(rejections).toEqual([])
   })
 
-  it('fails an exchange queued before the socket opens if it closes first', async () => {
-    const closes = new Set<() => void>()
-    let opened: () => void = () => {}
-    const built = new Promise<void>(resolve => {
-      opened = resolve
-    })
-    const client: SocketLike = {
-      send: () => {},
-      close: () => {
-        for (const listener of [...closes]) listener()
-      },
-      onOpen: () => {
-        opened()
-        return () => {}
-      },
-      onMessage: () => () => {},
-      onClose: listener => {
-        closes.add(listener)
-        return () => closes.delete(listener)
-      },
+  it('reconnects and re-sends an exchange after the socket closes', async () => {
+    const serverMessages = new Set<(data: string) => void>()
+    const replies = new Map<SocketLike, (data: string) => void>()
+    let current: SocketLike | undefined
+    let clients = 0
+    const makeClient = (): SocketLike => {
+      clients += 1
+      const closes = new Set<() => void>()
+      let closed = false
+      const client: SocketLike = {
+        send: data => {
+          if (!closed) for (const listener of [...serverMessages]) listener(data)
+        },
+        close: () => {
+          closed = true
+          for (const listener of [...closes]) listener()
+        },
+        onMessage: listener => {
+          const reply = (data: string): void => listener(data)
+          replies.set(client, reply)
+          return () => replies.delete(client)
+        },
+        onClose: listener => {
+          closes.add(listener)
+          return () => closes.delete(listener)
+        },
+      }
+      current = client
+      return client
     }
-
-    const running = Effect.runPromise(withSocket(client))
-    await built
-    // Let the fiber queue its exchange against the still-connecting socket.
-    await new Promise(resolve => setTimeout(resolve, 0))
-    client.close()
-
-    expect(await running).toMatchObject({
-      _tag: 'Failure',
-      failure: { _tag: 'SyncTransportError', message: 'transport closed' },
+    serverMessages.add(data => {
+      const frame = JSON.parse(data) as { id: string }
+      replies.get(current!)?.(JSON.stringify({ id: frame.id, result: { ok: true } }))
     })
+
+    const program = Effect.gen(function* () {
+      const transport = yield* Effect.service(Transport)
+      const first = yield* transport.exchange(0, [])
+      current!.close()
+      const second = yield* transport.exchange(1, [])
+      return [first, second]
+    })
+    const result = await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          layerSocket({ url: 'ws://test', makeSocket: makeClient, retryBase: '1 millis' }),
+        ),
+      ),
+    )
+
+    expect(result).toEqual([{ ok: true }, { ok: true }])
+    expect(clients).toBe(2)
   })
 
-  it('fails pending exchanges when the socket closes', async () => {
-    const { client, server } = socketPair()
-    let received: () => void = () => {}
-    const sent = new Promise<void>(resolve => {
-      received = resolve
-    })
-    server.onMessage(() => received())
+  it('fails queued work once reconnect attempts are exhausted', async () => {
+    let created = 0
+    const makeClosing = (): SocketLike => {
+      created += 1
+      const closes = new Set<() => void>()
+      const fire = (): void => {
+        for (const listener of [...closes]) listener()
+      }
+      return {
+        send: fire,
+        close: fire,
+        onMessage: () => () => {},
+        onClose: listener => {
+          closes.add(listener)
+          return () => closes.delete(listener)
+        },
+      }
+    }
 
-    const running = Effect.runPromise(withSocket(client))
-    await sent
-    client.close()
+    const program = Effect.gen(function* () {
+      const transport = yield* Effect.service(Transport)
+      return yield* transport.exchange(0, [])
+    }).pipe(Effect.result)
+    const result = await Effect.runPromise(
+      program.pipe(
+        Effect.provide(
+          layerSocket({
+            url: 'ws://test',
+            makeSocket: makeClosing,
+            retryBase: '1 millis',
+            maxRetries: 2,
+          }),
+        ),
+      ),
+    )
 
-    expect(await running).toMatchObject({
+    expect(result).toMatchObject({
       _tag: 'Failure',
       failure: { _tag: 'SyncTransportError', message: 'transport closed' },
+    })
+    expect(created).toBe(3)
+  })
+
+  it('fails a new exchange when the queue is full', async () => {
+    const neverReplies: SocketLike = {
+      send: () => {},
+      close: () => {},
+      onMessage: () => () => {},
+      onClose: () => () => {},
+    }
+    const program = Effect.gen(function* () {
+      const transport = yield* Effect.service(Transport)
+      const held = yield* Effect.forkScoped(transport.exchange(0, []))
+      yield* Effect.yieldNow
+      const second = yield* Effect.result(transport.exchange(1, []))
+      yield* Fiber.interrupt(held)
+      return second
+    })
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        program.pipe(
+          Effect.provide(
+            layerSocket({ url: 'ws://test', makeSocket: () => neverReplies, maxQueue: 1 }),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'SyncTransportError', message: 'transport queue full' },
     })
   })
 })

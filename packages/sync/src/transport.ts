@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from 'effect'
+import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 import type { Operation, TransportClient } from './sync.js'
 
 /** The wire failure of a transport. A refusal is a result, not an error. */
@@ -138,6 +138,12 @@ export interface SocketOptions {
   readonly url: string
   /** Injectable for tests; defaults to the platform `WebSocket`. */
   readonly makeSocket?: ((url: string) => SocketLike) | undefined
+  /** Reconnect attempts after a close before queued work fails. Default 5. */
+  readonly maxRetries?: number | undefined
+  /** Base delay of the exponential reconnect backoff. Default `50 millis`. */
+  readonly retryBase?: Duration.Input | undefined
+  /** Exchanges queued or in flight before new ones fail. Default 64. */
+  readonly maxQueue?: number | undefined
 }
 
 /** The default socket factory: the platform `WebSocket`, as a `SocketLike`. */
@@ -170,70 +176,138 @@ export const nativeSocket = (url: string): SocketLike => {
 /**
  * A WebSocket client transport.
  *
- * Each exchange sends one JSON frame and waits for the reply with the matching
- * id; a reply error or the socket closing fails the exchange. The socket is
- * released when the layer's scope ends.
+ * One connection is live at a time. While it is connecting, exchanges queue; if
+ * it closes, the transport reconnects on an exponential, jittered backoff and
+ * re-sends every queued and in-flight frame with its original id, so a lost
+ * reply is answered rather than dropped and a late reply cannot resolve a newer
+ * frame. Once the retries are exhausted (or the layer closes) queued work fails
+ * with a `TransportError`; a queue over `maxQueue` fails new exchanges with
+ * backpressure. The socket is released when the layer's scope ends.
  */
 export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, TransportError> =>
   Layer.effect(
     Transport,
-    Effect.acquireRelease(
-      Effect.sync(() => (options.makeSocket ?? nativeSocket)(options.url)),
-      socket => Effect.sync(() => socket.close()),
-    ).pipe(
-      Effect.map(socket => {
-        const pending = new Map<string, (effect: Effect.Effect<unknown, TransportError>) => void>()
-        let nextId = 0
-        // A connecting socket cannot send yet; hold exchanges until it opens,
-        // and fail them if it closes first instead of leaving them hanging.
-        const queued: Array<(error?: string) => void> = []
-        let ready = socket.onOpen === undefined
-        const offOpen = socket.onOpen?.(() => {
-          ready = true
-          for (const send of queued.splice(0)) send()
-        })
-        socket.onMessage(data => {
-          let reply: ExchangeReply
-          try {
-            reply = JSON.parse(data) as ExchangeReply
-          } catch {
-            return
-          }
-          const resume = pending.get(reply.id)
-          if (resume === undefined) return
-          pending.delete(reply.id)
-          resume(
-            reply.error === undefined
-              ? Effect.succeed(reply.result)
-              : Effect.fail(new TransportError({ message: reply.error })),
-          )
-        })
-        socket.onClose(() => {
-          offOpen?.()
-          for (const send of queued.splice(0)) send('transport closed')
-          for (const [id, resume] of pending) {
-            pending.delete(id)
-            resume(Effect.fail(new TransportError({ message: 'transport closed' })))
-          }
-        })
-        return {
-          exchange: (cursor, pendingOps) =>
-            Effect.callback<unknown, TransportError>(resume => {
-              const send = (error?: string): void => {
-                if (error !== undefined) {
-                  resume(Effect.fail(new TransportError({ message: error })))
-                  return
-                }
-                const id = String(nextId++)
-                pending.set(id, resume)
-                socket.send(
-                  JSON.stringify({ id, cursor, pending: pendingOps } satisfies ExchangeFrame),
-                )
+    Effect.gen(function* () {
+      const makeSocket = options.makeSocket ?? nativeSocket
+      const maxQueue = options.maxQueue ?? 64
+      const retry = Schedule.exponential(options.retryBase ?? '50 millis').pipe(
+        Schedule.jittered,
+        Schedule.upTo({ times: options.maxRetries ?? 5 }),
+      )
+
+      interface Entry {
+        readonly id: string
+        readonly cursor: number
+        readonly pending: ReadonlyArray<Operation>
+        readonly resume: (effect: Effect.Effect<unknown, TransportError>) => void
+      }
+      const queued: Array<Entry> = []
+      const inFlight = new Map<string, Entry>()
+      let socket: SocketLike | undefined
+      let ready = false
+      let nextId = 0
+      let disposed = false
+
+      const send = (entry: Entry): void => {
+        inFlight.set(entry.id, entry)
+        socket?.send(
+          JSON.stringify({
+            id: entry.id,
+            cursor: entry.cursor,
+            pending: entry.pending,
+          } satisfies ExchangeFrame),
+        )
+      }
+      const flush = (): void => {
+        if (socket === undefined || !ready) return
+        for (const entry of queued.splice(0)) send(entry)
+      }
+      const requeue = (): void => {
+        queued.unshift(...inFlight.values())
+        inFlight.clear()
+      }
+      const failAll = (message: string): void => {
+        const entries = [...queued.splice(0), ...inFlight.values()]
+        inFlight.clear()
+        for (const entry of entries) entry.resume(Effect.fail(new TransportError({ message })))
+      }
+
+      const connect = Effect.tryPromise({
+        try: () =>
+          new Promise<void>((resolve, reject) => {
+            const next = makeSocket(options.url)
+            socket = next
+            ready = next.onOpen === undefined
+            const offOpen = next.onOpen?.(() => {
+              ready = true
+              flush()
+            })
+            const offMessage = next.onMessage(data => {
+              let reply: ExchangeReply
+              try {
+                reply = JSON.parse(data) as ExchangeReply
+              } catch {
+                return
               }
-              if (ready) send()
-              else queued.push(send)
+              const entry = inFlight.get(reply.id)
+              if (entry === undefined) return
+              inFlight.delete(reply.id)
+              entry.resume(
+                reply.error === undefined
+                  ? Effect.succeed(reply.result)
+                  : Effect.fail(new TransportError({ message: reply.error })),
+              )
+            })
+            const offClose = next.onClose(() => {
+              offOpen?.()
+              offMessage()
+              offClose()
+              socket = undefined
+              ready = false
+              // Keep every unanswered frame for the next connection.
+              requeue()
+              reject(new Error('transport closed'))
+            })
+            if (ready) flush()
+          }),
+        catch: () => new TransportError({ message: 'transport closed' }),
+      })
+
+      yield* Effect.forkScoped(
+        connect.pipe(
+          Effect.retry(retry),
+          Effect.catch(error =>
+            Effect.sync(() => {
+              if (!disposed) failAll(error.message)
             }),
-        }
-      }),
-    ),
+          ),
+        ),
+      )
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          disposed = true
+          ready = false
+          socket?.close()
+          socket = undefined
+          failAll('transport closed')
+        }),
+      )
+
+      return {
+        exchange: (cursor, pending) =>
+          Effect.callback<unknown, TransportError>(resume => {
+            if (disposed) {
+              resume(Effect.fail(new TransportError({ message: 'transport closed' })))
+              return
+            }
+            if (queued.length + inFlight.size >= maxQueue) {
+              resume(Effect.fail(new TransportError({ message: 'transport queue full' })))
+              return
+            }
+            const entry: Entry = { id: String(nextId++), cursor, pending, resume }
+            if (ready) send(entry)
+            else queued.push(entry)
+          }),
+      }
+    }),
   )
