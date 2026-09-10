@@ -1,23 +1,23 @@
 import { strict as assert } from 'node:assert'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
+import { indexedDb } from 'foldkit-sync'
 import { Effect } from 'effect'
 import { Message, type Shared } from './app.js'
-import { indexedDb } from './indexedDb.js'
 import { openJournal, type Principal } from './journal.js'
-import { openReplica } from './replica.js'
 import { serverAgentHost } from './serverAgent.js'
+import { Sync } from './sync.js'
 
 const factory = new IDBFactory()
 const server = openJournal(':memory:')
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const transport = server.transport(principal)
-const alice = await openReplica('todos', 'alice', await indexedDb('alice', factory))
-let bob = await openReplica('todos', 'bob', await indexedDb('bob', factory))
+const alice = await Sync.openReplica('alice', await indexedDb('alice', factory))
+let bob = await Sync.openReplica('bob', await indexedDb('bob', factory))
 await alice.submit(Message.CreatedTodo({ id: 'a', title: 'Alice offline' }))
 await bob.submit(Message.CreatedTodo({ id: 'b', title: 'Bob offline' }))
 await bob.close()
-bob = await openReplica('todos', 'bob', await indexedDb('bob', factory))
+bob = await Sync.openReplica('bob', await indexedDb('bob', factory))
 assert.equal(bob.pending().length, 1)
 await bob.synchronize(transport)
 await alice.synchronize(transport)

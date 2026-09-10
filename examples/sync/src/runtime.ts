@@ -4,9 +4,8 @@ import * as Port from 'foldkit/port'
 import * as Runtime from 'foldkit/runtime'
 import * as Subscription from 'foldkit/subscription'
 import type * as Update from 'foldkit/update'
-import { Message, Model, durableTags, initialModel, update } from './app.js'
-import type { Replica } from './replica.js'
-import type { Transport } from './protocol.js'
+import type { Replica, Transport } from 'foldkit-sync'
+import { Message, Model, durableTags, initialModel, update, type Shared } from './app.js'
 
 const RuntimeMessage = defineMessageUnion({
   ApplicationMessage: { message: Message },
@@ -16,7 +15,7 @@ const RuntimeMessage = defineMessageUnion({
 type RuntimeMessage = typeof RuntimeMessage.Type
 
 /** The wrapper delays durable updates until their IndexedDB transaction commits. */
-export const mountReplica = (replica: Replica, container: HTMLElement) => {
+export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLElement) => {
   const ports = {
     inbound: {
       message: Port.inbound(Message),

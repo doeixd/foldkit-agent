@@ -20,6 +20,7 @@ export default defineConfig({
         new URL('./packages/agent-webmcp/src/index.ts', import.meta.url),
       ),
       'foldkit-durable': fileURLToPath(new URL('./packages/durable/src/index.ts', import.meta.url)),
+      'foldkit-sync': fileURLToPath(new URL('./packages/sync/src/index.ts', import.meta.url)),
     },
   },
   test: {

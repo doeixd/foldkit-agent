@@ -7,6 +7,7 @@
     { "path": "./packages/agent-a2a" },
     { "path": "./packages/agent-native" },
     { "path": "./packages/durable" },
+    { "path": "./packages/sync" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" }
   ]

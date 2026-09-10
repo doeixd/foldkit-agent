@@ -2,11 +2,11 @@ import { Agent } from 'foldkit-agent'
 import { AgentMcp } from 'foldkit-agent-mcp'
 import { IDBFactory } from 'fake-indexeddb'
 import { expect, it } from 'vitest'
+import { indexedDb } from 'foldkit-sync'
 import { Message, type Shared } from '../src/app.js'
-import { indexedDb } from '../src/indexedDb.js'
 import { openJournal, type Principal } from '../src/journal.js'
-import { openReplica } from '../src/replica.js'
 import { serverAgentHost } from '../src/serverAgent.js'
+import { Sync } from '../src/sync.js'
 
 const principal: Principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const SyncAgent = Agent.forModel<Shared, Principal>()
@@ -20,11 +20,7 @@ const request = (id: number, method: string, params?: Record<string, unknown>) =
 
 it('commits a durable operation from an MCP tool call and converges a replica', async () => {
   const journal = openJournal(':memory:')
-  const replica = await openReplica(
-    'todos',
-    'browser',
-    await indexedDb('browser', new IDBFactory()),
-  )
+  const replica = await Sync.openReplica('browser', await indexedDb('browser', new IDBFactory()))
   try {
     journal.append(
       {

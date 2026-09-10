@@ -4,13 +4,12 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
+import { indexedDb, type Exchange, type Operation, type Replica, type Storage } from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Message, replay, update, type Shared } from '../src/app.js'
-import { indexedDb, type Storage } from '../src/indexedDb.js'
 import { openJournal, type Principal } from '../src/journal.js'
-import { openReplica, type Replica } from '../src/replica.js'
 import { serverAgentHost } from '../src/serverAgent.js'
-import type { Exchange, Operation } from '../src/protocol.js'
+import { Sync } from '../src/sync.js'
 
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const created = (id: string, title = id) => Message.CreatedTodo({ id, title })
@@ -30,9 +29,9 @@ const operation = (
 })
 let factory: IDBFactory
 let server: ReturnType<typeof openJournal>
-let replicas: Replica[]
-const open = async (id: string, storage?: Storage): Promise<Replica> => {
-  const replica = await openReplica('todos', id, storage ?? (await indexedDb(id, factory)))
+let replicas: Array<Replica<Message, Shared>>
+const open = async (id: string, storage?: Storage): Promise<Replica<Message, Shared>> => {
+  const replica = await Sync.openReplica(id, storage ?? (await indexedDb(id, factory)))
   replicas.push(replica)
   return replica
 }
@@ -351,12 +350,12 @@ describe('local durability and reconciliation', () => {
 
   it('keeps edits made during a pull and rebases them onto remote changes', async () => {
     const a = await open('a')
-    let release!: (value: Exchange) => void
+    let release!: (value: Exchange<Shared>) => void
     let started!: () => void
     const ready = new Promise<void>(resolve => {
       started = resolve
     })
-    const response = new Promise<Exchange>(resolve => {
+    const response = new Promise<Exchange<Shared>>(resolve => {
       release = resolve
     })
     const running = a.synchronize({

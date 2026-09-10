@@ -3,14 +3,9 @@ import {
   OperationRejectedError,
   type Committed as DurableCommitted,
 } from 'foldkit-durable'
+import type { Committed, Operation, Transport } from 'foldkit-sync'
 import { decodeShared, decodeMessage, replay, type Message, type Shared } from './app.js'
-import {
-  committedFrom,
-  normalizeOperation,
-  type Committed,
-  type Operation,
-  type Transport,
-} from './protocol.js'
+import { Sync } from './sync.js'
 
 /** Supplied by a trusted transport, never decoded from an operation. */
 export interface Principal {
@@ -42,7 +37,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
   const authorize = policy.authorize
   const durable = createJournal<Operation, Shared, Principal>({
     file: path,
-    operation: { encode: operation => operation, decode: normalizeOperation },
+    operation: { encode: operation => operation, decode: Sync.normalizeOperation },
     snapshot: { encode: snapshot => snapshot, decode: decodeShared },
     empty: () => ({ todos: [] }),
     reduce: (snapshot, operation) => replay(snapshot, decodeMessage(operation.message)),
@@ -62,7 +57,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
 
   /** The durable record, flattened into the wire shape the protocol exchanges. */
   const toCommitted = (committed: DurableCommitted<Operation>, documentId: string): Committed =>
-    committedFrom(
+    Sync.committedFrom(
       { ...committed.operation, serverSequence: committed.sequence, actorId: committed.actorId },
       documentId,
     )
@@ -121,7 +116,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
         for (const input of pending) {
           // Validation and identity conflicts fail the exchange; an authorization
           // refusal is a policy answer, so it removes the outbox entry instead.
-          const operation = normalizeOperation(input)
+          const operation = Sync.normalizeOperation(input)
           if (!principal.canWrite) {
             rejected.push(operation.opId)
             continue

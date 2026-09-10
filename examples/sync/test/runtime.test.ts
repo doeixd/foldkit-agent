@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
+import { indexedDb } from 'foldkit-sync'
 import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Message } from '../src/app.js'
-import { indexedDb } from '../src/indexedDb.js'
 import { mountReplica } from '../src/runtime.js'
-import { openReplica } from '../src/replica.js'
+import { Sync } from '../src/sync.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -20,7 +20,7 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
   const held = new Promise<void>(resolve => {
     release = resolve
   })
-  const replica = await openReplica('todos', 'a', {
+  const replica = await Sync.openReplica('a', {
     ...storage,
     save: async (state, revision) => {
       if (revision !== null) await held

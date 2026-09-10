@@ -1,9 +1,9 @@
+import { indexedDb } from 'foldkit-sync'
 import { Message } from './app.js'
-import { indexedDb } from './indexedDb.js'
-import { openReplica } from './replica.js'
 import { mountReplica } from './runtime.js'
+import { Sync } from './sync.js'
 
-const replica = await openReplica('todos', 'browser', await indexedDb('foldkit-sync-spike'))
+const replica = await Sync.openReplica('browser', await indexedDb('foldkit-sync-spike'))
 const runtime = mountReplica(replica, document.querySelector<HTMLElement>('#sync-app')!)
 document.querySelector<HTMLFormElement>('#create')!.addEventListener('submit', event => {
   event.preventDefault()

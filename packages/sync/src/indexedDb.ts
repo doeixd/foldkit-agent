@@ -1,16 +1,15 @@
-import type { ReplicaState } from './protocol.js'
-
-export interface Storage {
+/** Persists a replica's state with compare-and-swap on its revision. */
+export interface Storage<State = unknown> {
   load(): Promise<unknown>
-  save(state: ReplicaState, expectedRevision: number | null): Promise<void>
+  save(state: State, expectedRevision: number | null): Promise<void>
   close(): void
 }
 
 /** One database per document/replica; CAS prevents two tabs from sharing a writer identity. */
-export const indexedDb = async (
+export const indexedDb = async <State = unknown>(
   name: string,
   factory: IDBFactory = globalThis.indexedDB,
-): Promise<Storage> => {
+): Promise<Storage<State>> => {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
     const request = factory.open(name, 1)
     request.onupgradeneeded = () => request.result.createObjectStore('replica')
