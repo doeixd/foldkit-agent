@@ -146,6 +146,38 @@ describe('the socket transport', () => {
     })
   })
 
+  it('does not leak an unhandled rejection when the reply cannot be sent', async () => {
+    const { client, server } = socketPair()
+    const refusing: SocketLike = {
+      ...server,
+      send: () => {
+        throw new Error('socket closed')
+      },
+    }
+    let exchanged = false
+    serveSocket(refusing, {
+      exchange: () => {
+        exchanged = true
+        return { operations: [], rejected: [] }
+      },
+    })
+
+    const rejections: Array<unknown> = []
+    const onRejection = (reason: unknown): void => {
+      rejections.push(reason)
+    }
+    process.on('unhandledRejection', onRejection)
+    try {
+      client.send(JSON.stringify({ id: '1', cursor: 0, pending: [] }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    } finally {
+      process.off('unhandledRejection', onRejection)
+    }
+
+    expect(exchanged).toBe(true)
+    expect(rejections).toEqual([])
+  })
+
   it('fails an exchange queued before the socket opens if it closes first', async () => {
     const closes = new Set<() => void>()
     let opened: () => void = () => {}
