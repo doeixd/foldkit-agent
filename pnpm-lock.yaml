@@ -54,6 +54,9 @@ importers:
       fake-indexeddb:
         specifier: 6.2.4
         version: 6.2.4
+      foldkit-agent-mcp:
+        specifier: workspace:*
+        version: link:../../packages/agent-mcp
       jsdom:
         specifier: 26.1.0
         version: 26.1.0
