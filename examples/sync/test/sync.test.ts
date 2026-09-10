@@ -458,7 +458,7 @@ describe('a server agent', () => {
     expect(server.snapshot('todos').cursor).toBe(0)
   })
 
-  it('cannot bypass the journal policy', () => {
+  it('cannot bypass the journal policy', async () => {
     const guarded = openJournal(':memory:', {
       authorize: ({ principal }) => principal.actorId === 'owner',
     })
@@ -468,13 +468,48 @@ describe('a server agent', () => {
         principal: { ...principal, actorId: 'guest' },
       })
 
-      // The agent runtime turns a host throw into a defect, so a diverging
+      // The agent runtime turns a host failure into a defect, so a diverging
       // policy fails loudly rather than committing. The contract's typed
       // `authorize` is the refusal path a caller should see.
-      expect(() => host.dispatch(Message.RenamedTodo({ id: 'a', title: 'x' }))).toThrow(
+      await expect(host.dispatch(Message.RenamedTodo({ id: 'a', title: 'x' }))).rejects.toThrow(
         'refused by authorization',
       )
       expect(guarded.snapshot('todos').cursor).toBe(0)
+    } finally {
+      guarded.close()
+    }
+  })
+
+  it('settles server-authority effects once for an agent dispatch', async () => {
+    let notifications = 0
+    const guarded = openJournal(':memory:', {
+      effects: message =>
+        message._tag === 'RenamedTodo'
+          ? [
+              {
+                name: 'notify',
+                run: async () => {
+                  notifications += 1
+                },
+              },
+            ]
+          : [],
+    })
+    try {
+      guarded.appendAsServer(created('a'), principal, 'seed')
+      const agent = Agent.bind({
+        definition: SyncAgent.define({
+          messages: SyncAgent.expose(Message, { RenamedTodo: rename }),
+        }),
+        host: serverAgentHost({ journal: guarded, principal }),
+      })
+
+      await Effect.runPromise(agent.messages.dispatch('rename_todo', { id: 'a', title: 'renamed' }))
+      expect(notifications).toBe(1)
+
+      // Settling the same operation again does not repeat the effect.
+      await guarded.settle(guarded.read('todos', 0).at(-1)!)
+      expect(notifications).toBe(1)
     } finally {
       guarded.close()
     }

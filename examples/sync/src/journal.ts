@@ -114,9 +114,23 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
     return { cursor, model }
   }
 
+  /**
+   * Runs the effects a committed operation declared, once each.
+   *
+   * Safe to call for an operation already settled: the ledger keys each effect
+   * to the operation, so a resend, replay, or second call is a no-op.
+   */
+  const settle = async (committed: Committed): Promise<void> => {
+    const effects = effectsFor?.(decodeMessage(committed.message)) ?? []
+    for (const [index, effect] of effects.entries()) {
+      await durable.runEffect(`${committed.opId}/command/${index}`, effect.run)
+    }
+  }
+
   return {
     append,
     appendAsServer,
+    settle,
     subscribe: durable.subscribe,
     read,
     compact: durable.compact,
@@ -136,13 +150,8 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
           }
           try {
             const committed = append(operation, principal)
-            // Server-authority effects settle before the ack. The ledger keys
-            // each to its operation, so a resend of this operation cannot
-            // repeat a side effect it already performed.
-            const effects = effectsFor?.(decodeMessage(committed.message)) ?? []
-            for (const [index, effect] of effects.entries()) {
-              await durable.runEffect(`${committed.opId}/command/${index}`, effect.run)
-            }
+            // Settled before the ack, so the client's retry cannot repeat it.
+            await settle(committed)
             acknowledged.push(committed.opId)
           } catch (error) {
             if (error instanceof OperationRejectedError) rejected.push(error.opId)

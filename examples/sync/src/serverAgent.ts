@@ -33,8 +33,10 @@ export const serverAgentHost = (
   return {
     model: () => journal.snapshot(principal.documentId).model,
     principal: () => principal,
-    dispatch: (message: Message) => {
-      journal.appendAsServer(message, principal, replicaId)
+    dispatch: async (message: Message) => {
+      // The runtime awaits a returned Promise, so the agent path settles the
+      // operation's server-authority effects exactly as the client path does.
+      await journal.settle(journal.appendAsServer(message, principal, replicaId))
     },
     subscribe: journal.subscribe,
   }
