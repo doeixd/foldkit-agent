@@ -38,7 +38,9 @@ The client replays newly committed operations in server order, removes acknowled
 
 Compaction drops committed payloads but keeps one identity row per operation so retransmission stays idempotent, and a replica behind the floor adopts the snapshot as a checkpoint. There is no compaction schedule and the identity rows are never garbage-collected. There is no CRDT merge, peer-to-peer authority, presence channel, schema migration, production transport, or general package API. Retained history and committed IDs still make storage and replay costs grow with history and outbox size. Browser storage eviction and abrupt machine power loss are outside the recovery tests.
 
-An `AgentRuntime` bound to the journal (`serverAgentHost`) is an ordinary producer: a capability dispatch becomes one operation authored by a dedicated replica, under the caller's authenticated principal. The contract's `authorize` is the typed refusal a caller sees; the journal policy underneath is the authoritative backstop, so a binding that diverges from it fails loudly instead of committing. Protocol adapters call `dispatchUnknown` on that runtime, so a remote tool call would land in the same durable log the browser converges on. No MCP, A2A, or HTTP transport is wired in this example.
+An `AgentRuntime` bound to the journal (`serverAgentHost`) is an ordinary producer: a capability dispatch becomes one operation authored by a dedicated replica, under the caller's authenticated principal. The contract's `authorize` is the typed refusal a caller sees; the journal policy underneath is the authoritative backstop, so a binding that diverges from it fails loudly instead of committing.
+
+The MCP handler is exercised over that runtime in a transport-free test: an initialize plus a `tools/call` commits one durable operation, and a browser replica converges on it. No HTTP, A2A, or Agent Native transport is wired in this example, and the MCP adapter is a test-only dependency.
 
 ## Replay and the runtime boundary
 
