@@ -533,18 +533,31 @@ describe('the Model snapshot', () => {
     const pending = new Promise<boolean>(resolve => {
       approve = resolve
     })
-    const agent = snapshotAgent(() => Effect.promise(() => pending))
-
-    const running = Effect.runPromise(
-      agent.runtime.messages.dispatch('delete_selected_todo', {}, invocation()),
+    let entered: () => void = () => {}
+    const authorizing = new Promise<void>(resolve => {
+      entered = resolve
+    })
+    const agent = snapshotAgent(() =>
+      Effect.promise(() => {
+        entered()
+        return pending
+      }),
     )
+    const operation = agent.runtime.messages.dispatch('delete_selected_todo', {}, invocation())
+    const running = Effect.runPromise(operation)
 
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await authorizing
     agent.setModel(modelWith({ selectedTodoId: Option.some('B') }))
     approve(true)
     await running
 
     expect(agent.dispatched).toEqual([{ _tag: 'RequestedDeleteTodo', id: 'A' }])
+
+    await Effect.runPromise(operation)
+    expect(agent.dispatched).toEqual([
+      { _tag: 'RequestedDeleteTodo', id: 'A' },
+      { _tag: 'RequestedDeleteTodo', id: 'B' },
+    ])
   })
 
   it('reads the Model once per invocation', () => {
