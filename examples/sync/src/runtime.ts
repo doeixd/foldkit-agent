@@ -4,7 +4,7 @@ import * as Port from 'foldkit/port'
 import * as Runtime from 'foldkit/runtime'
 import * as Subscription from 'foldkit/subscription'
 import type * as Update from 'foldkit/update'
-import type { Replica, Transport } from 'foldkit-sync'
+import type { Replica, TransportClient } from 'foldkit-sync'
 import { Message, Model, durableTags, initialModel, update, type Shared } from './app.js'
 
 const RuntimeMessage = defineMessageUnion({
@@ -91,7 +91,7 @@ export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLE
   const handle = Runtime.embed(program)
   return {
     send: handle.ports.message.send,
-    synchronize: async (transport: Transport) => {
+    synchronize: async (transport: TransportClient) => {
       await replica.synchronize(transport)
       handle.ports.refresh.send(true)
     },

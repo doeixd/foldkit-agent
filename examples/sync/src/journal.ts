@@ -3,7 +3,7 @@ import {
   OperationRejectedError,
   type Committed as DurableCommitted,
 } from 'foldkit-durable'
-import type { Committed, Operation, Transport } from 'foldkit-sync'
+import type { Committed, Operation, TransportClient } from 'foldkit-sync'
 import { decodeShared, decodeMessage, replay, type Message, type Shared } from './app.js'
 import { Sync } from './sync.js'
 
@@ -108,7 +108,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}) => {
     read,
     compact: durable.compact,
     snapshot,
-    transport: (principal: Principal): Transport => ({
+    transport: (principal: Principal): TransportClient => ({
       exchange: async (cursor, pending) => {
         if (!principal.actorId) throw new Error('Unauthenticated reader')
         const rejected: string[] = []

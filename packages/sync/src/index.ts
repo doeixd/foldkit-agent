@@ -17,6 +17,19 @@ export {
   type PresenceUpdate,
 } from './presence.js'
 export {
+  layerFromPromise,
+  layerLoopback,
+  layerSocket,
+  toPromise,
+  Transport,
+  TransportError,
+  type ExchangeFrame,
+  type ExchangeReply,
+  type SocketLike,
+  type SocketOptions,
+  type TransportShape,
+} from './transport.js'
+export {
   defineSync,
   type Checkpoint,
   type Committed,
@@ -26,5 +39,5 @@ export {
   type ReplicaState,
   type Sync,
   type SyncDefinition,
-  type Transport,
+  type TransportClient,
 } from './sync.js'

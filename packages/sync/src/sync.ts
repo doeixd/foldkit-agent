@@ -58,7 +58,8 @@ export interface ReplicaState<Shared> {
   readonly pending: ReadonlyArray<Operation>
 }
 
-export interface Transport {
+/** What the replica consumes; the Effect `Transport` service bridges to this. */
+export interface TransportClient {
   exchange(cursor: number, pending: ReadonlyArray<Operation>): Promise<unknown>
 }
 
@@ -67,7 +68,7 @@ export interface Replica<Message, Shared> {
   pending(): ReadonlyArray<Operation>
   cursor(): number
   submit(message: Message): Promise<void>
-  synchronize(transport: Transport): Promise<void>
+  synchronize(transport: TransportClient): Promise<void>
   close(): Promise<void>
 }
 
