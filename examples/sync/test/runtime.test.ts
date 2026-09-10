@@ -16,7 +16,7 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
     setTimeout(() => callback(performance.now()), 0),
   )
   vi.stubGlobal('cancelAnimationFrame', clearTimeout)
-  const storage = await indexedDb('runtime', new IDBFactory())
+  const storage = await Effect.runPromise(indexedDb('runtime', new IDBFactory()))
   let release!: () => void
   const held = new Promise<void>(resolve => {
     release = resolve
@@ -24,10 +24,11 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
   const replica = await Effect.runPromise(
     Sync.openReplica('a', {
       ...storage,
-      save: async (state, revision) => {
-        if (revision !== null) await held
-        await storage.save(state, revision)
-      },
+      save: (state, revision) =>
+        Effect.gen(function* () {
+          if (revision !== null) yield* Effect.promise(() => held)
+          yield* storage.save(state, revision)
+        }),
     }),
   )
   const container = document.createElement('div')

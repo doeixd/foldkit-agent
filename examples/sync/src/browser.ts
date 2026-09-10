@@ -5,7 +5,7 @@ import { mountReplica } from './runtime.js'
 import { Sync } from './sync.js'
 
 const replica = await Effect.runPromise(
-  Sync.openReplica('browser', await indexedDb('foldkit-sync-spike')),
+  Sync.openReplica('browser', await Effect.runPromise(indexedDb('foldkit-sync-spike'))),
 )
 const runtime = mountReplica(replica, document.querySelector<HTMLElement>('#sync-app')!)
 document.querySelector<HTMLFormElement>('#create')!.addEventListener('submit', event => {

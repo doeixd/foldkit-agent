@@ -15,7 +15,7 @@ afterEach(async () => {
 })
 
 const openReplica = async (id: string): Promise<TodoReplica> =>
-  openReplicaEffect(id, await indexedDb(id, new IDBFactory()))
+  openReplicaEffect(id, await Effect.runPromise(indexedDb(id, new IDBFactory())))
 
 const sync = (url: string, replica: TodoReplica): Promise<void> =>
   Effect.runPromise(Effect.provide(replica.synchronize, layerSocket({ url })))

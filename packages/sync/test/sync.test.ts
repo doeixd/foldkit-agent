@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Deferred, Effect, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   defineSync,
@@ -78,11 +78,12 @@ const committed = (
 const memoryStorage = (initial?: unknown): Storage<ReplicaState<Shared>> => {
   let state = initial
   return {
-    load: async () => state,
-    save: async next => {
-      state = structuredClone(next)
-    },
-    close: () => {},
+    load: () => Effect.sync(() => state),
+    save: next =>
+      Effect.sync(() => {
+        state = structuredClone(next)
+      }),
+    close: Effect.void,
   }
 }
 
@@ -293,36 +294,31 @@ describe('the replica', () => {
   })
 
   it('refuses a submit that was queued when the replica closed', async () => {
-    let reached!: () => void
-    const atSave = new Promise<void>(resolve => {
-      reached = resolve
-    })
-    let release!: () => void
-    const gate = new Promise<void>(resolve => {
-      release = resolve
-    })
+    const reached = Effect.runSync(Deferred.make<void>())
+    const release = Effect.runSync(Deferred.make<void>())
     let saves = 0
     const storage = memoryStorage()
     const replica = await open('a', {
       ...storage,
-      save: async (state, revision) => {
-        saves += 1
-        if (saves === 2) {
-          reached()
-          await gate
-        }
-        await storage.save(state, revision)
-      },
+      save: (state, revision) =>
+        Effect.gen(function* () {
+          saves += 1
+          if (saves === 2) {
+            yield* Deferred.succeed(reached, undefined)
+            yield* Deferred.await(release)
+          }
+          yield* storage.save(state, revision)
+        }),
     })
 
     // The first submit holds the state lock inside its save; the second queues
     // behind it, then sees the close when it finally acquires the lock.
     const first = submit(replica, created('first'))
-    await atSave
+    await Effect.runPromise(Deferred.await(reached))
     const queued = submit(replica, created('second'))
     await new Promise(resolve => setTimeout(resolve, 0))
     await close(replica)
-    release()
+    Effect.runSync(Deferred.succeed(release, undefined))
     await first
     await expect(queued).rejects.toThrow('Replica is closed')
   })
@@ -338,7 +334,7 @@ describe('the replica', () => {
 
     // Every commit applied, but the persisted id set did not grow with the log.
     expect(cursor(replica)).toBe(1100)
-    const saved = (await storage.load()) as ReplicaState<Shared>
+    const saved = (await Effect.runPromise(storage.load())) as ReplicaState<Shared>
     expect(saved.committedIds.length).toBeLessThan(1100)
   })
 })

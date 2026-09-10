@@ -1,3 +1,4 @@
+import { Effect } from 'effect'
 import { Agent } from 'foldkit-agent'
 import { AgentMcp } from 'foldkit-agent-mcp'
 import { IDBFactory } from 'fake-indexeddb'
@@ -20,7 +21,10 @@ const request = (id: number, method: string, params?: Record<string, unknown>) =
 
 it('commits a durable operation from an MCP tool call and converges a replica', async () => {
   const journal = openJournal(':memory:')
-  const replica = await openReplica('browser', await indexedDb('browser', new IDBFactory()))
+  const replica = await openReplica(
+    'browser',
+    await Effect.runPromise(indexedDb('browser', new IDBFactory())),
+  )
   try {
     journal.append(
       {

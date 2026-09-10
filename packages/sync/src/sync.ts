@@ -6,7 +6,6 @@ import {
   InvalidOutboxError,
   InvalidReplicaHistoryError,
   ReplicaClosedError,
-  StorageError,
   WrongReplicaStorageError,
   type ReplicaError,
 } from './errors.js'
@@ -60,13 +59,6 @@ export const syncMetrics = {
     boundaries: [1, 4, 16, 64, 256, 1024],
   }),
 }
-
-/** Keeps the storage driver's message visible on the typed failure. */
-const storageError = (context: string, cause: unknown): StorageError =>
-  new StorageError({
-    message: `${context}: ${cause instanceof Error ? cause.message : String(cause)}`,
-    cause,
-  })
 
 export interface Checkpoint<Shared> {
   readonly cursor: number
@@ -225,10 +217,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     storage: Storage<ReplicaState<Shared>>,
   ): Effect.Effect<Replica<Message, Shared>, ReplicaError> =>
     Effect.gen(function* () {
-      const saved = yield* Effect.tryPromise({
-        try: () => storage.load(),
-        catch: cause => storageError('Could not read the replica', cause),
-      })
+      const saved = yield* storage.load()
       const initial: ReplicaState<Shared> = {
         protocolVersion: 1,
         schemaVersion: 1,
@@ -276,11 +265,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           return yield* new InvalidOutboxError({ message: 'Invalid outbox' })
         pendingIds.add(operation.opId)
       }
-      if (saved === undefined)
-        yield* Effect.tryPromise({
-          try: () => storage.save(state, null),
-          catch: cause => storageError('Could not save the replica', cause),
-        })
+      if (saved === undefined) yield* storage.save(state, null)
 
       const stateRef = yield* SynchronizedRef.make(state)
       const closed = yield* Ref.make(false)
@@ -288,10 +273,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       // `SynchronizedRef.modifyEffect` installs the returned state itself, so
       // persisting must not also set the ref (that would re-enter the lock).
       const persist = (next: ReplicaState<Shared>, current: ReplicaState<Shared>) =>
-        Effect.tryPromise({
-          try: () => storage.save(next, current.revision),
-          catch: cause => storageError('Could not save the replica', cause),
-        })
+        storage.save(next, current.revision)
 
       const submit = (message: Message): Effect.Effect<void, ReplicaError> =>
         // The closed check belongs inside the lock: a `close` between an outer
@@ -435,7 +417,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         synchronize,
         close: Effect.gen(function* () {
           yield* Ref.set(closed, true)
-          yield* Effect.sync(() => storage.close())
+          yield* storage.close
         }),
       }
     }).pipe(Effect.withSpan('Sync.openReplica', { attributes: { documentId, replicaId } }))

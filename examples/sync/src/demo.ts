@@ -17,7 +17,7 @@ import { serverAgentHost } from './serverAgent.js'
 import { Sync } from './sync.js'
 
 type TodoReplica = Replica<Message, Shared>
-const open = (id: string, storage: Awaited<ReturnType<typeof indexedDb>>): Promise<TodoReplica> =>
+const open = (id: string, storage: Parameters<typeof Sync.openReplica>[1]): Promise<TodoReplica> =>
   Effect.runPromise(Sync.openReplica(id, storage))
 const submit = (replica: TodoReplica, message: Message): Promise<void> =>
   Effect.runPromise(replica.submit(message))
@@ -31,12 +31,12 @@ const factory = new IDBFactory()
 const server = openJournal(':memory:')
 const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const transport = server.transport(principal)
-const alice = await open('alice', await indexedDb('alice', factory))
-let bob = await open('bob', await indexedDb('bob', factory))
+const alice = await open('alice', await Effect.runPromise(indexedDb('alice', factory)))
+let bob = await open('bob', await Effect.runPromise(indexedDb('bob', factory)))
 await submit(alice, Message.CreatedTodo({ id: 'a', title: 'Alice offline' }))
 await submit(bob, Message.CreatedTodo({ id: 'b', title: 'Bob offline' }))
 await close(bob)
-bob = await open('bob', await indexedDb('bob', factory))
+bob = await open('bob', await Effect.runPromise(indexedDb('bob', factory)))
 assert.equal(pending(bob).length, 1)
 await synchronize(bob, transport)
 await synchronize(alice, transport)

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
-import { indexedDb, type Exchange, type Operation, type Storage } from 'foldkit-sync'
+import { indexedDb, StorageError, type Exchange, type Operation, type Storage } from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Message, replay, update, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
@@ -31,7 +31,10 @@ let factory: IDBFactory
 let server: ReturnType<typeof openJournal>
 let replicas: Array<PromiseReplica>
 const open = async (id: string, storage?: Storage): Promise<PromiseReplica> => {
-  const replica = await openReplica(id, storage ?? (await indexedDb(id, factory)))
+  const replica = await openReplica(
+    id,
+    storage ?? (await Effect.runPromise(indexedDb(id, factory))),
+  )
   replicas.push(replica)
   return replica
 }
@@ -298,22 +301,22 @@ describe('the wired replica', () => {
     expect(restored.shared().todos).toEqual([{ id: 'first', title: 'first' }])
     await restored.submit(created('second'))
     expect(restored.pending().map(op => op.opId)).toEqual(['a:1', 'a:2'])
-    const store = await indexedDb('a', factory)
-    const saved = await store.load()
-    store.close()
+    const store = await Effect.runPromise(indexedDb('a', factory))
+    const saved = await Effect.runPromise(store.load())
+    await Effect.runPromise(store.close)
     expect(saved).toMatchObject({ protocolVersion: 1, schemaVersion: 1, nextLocalSequence: 3 })
     expect(JSON.stringify(saved)).not.toMatch(/selectedTodoId|lastError/)
   })
 
   it('publishes nothing on failed persistence and can retry without losing its sequence', async () => {
-    const store = await indexedDb('a', factory)
+    const store = await Effect.runPromise(indexedDb('a', factory))
     let fail = false
     const a = await open('a', {
       ...store,
-      save: (state, revision) => {
-        if (fail) return Promise.reject(new Error('disk full'))
-        return store.save(state, revision)
-      },
+      save: (state, revision) =>
+        fail
+          ? Effect.fail(new StorageError({ message: 'disk full' }))
+          : store.save(state, revision),
     })
     fail = true
     await expect(a.submit(created('a'))).rejects.toThrow('disk full')

@@ -127,8 +127,8 @@ it.each(['a', 'b'])(
   async first => {
     const factory = new IDBFactory()
     const { journal, transport } = openJournal()
-    let a = await openReplica('a', await indexedDb('a', factory))
-    const b = await openReplica('b', await indexedDb('b', factory))
+    let a = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
+    const b = await openReplica('b', await Effect.runPromise(indexedDb('b', factory)))
     try {
       await a.submit(rename(1, 'a', 'Draft'))
       await a.submit(rename(2, 'a', 'Newer edit'))
@@ -137,7 +137,7 @@ it.each(['a', 'b'])(
       expect(b.shared().title.value).toBe('Stale offline edit')
 
       await a.close()
-      a = await openReplica('a', await indexedDb('a', factory))
+      a = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
       expect(a.shared().title).toEqual(rename(2, 'a', 'Newer edit').title)
       expect(a.pending()).toHaveLength(2)
 
@@ -153,7 +153,7 @@ it.each(['a', 'b'])(
       expect(b.pending()).toEqual([])
 
       journal.compact('titles', 3)
-      const late = await openReplica('late', await indexedDb('late', factory))
+      const late = await openReplica('late', await Effect.runPromise(indexedDb('late', factory)))
       try {
         await late.submit(rename(1, 'late', 'Late offline edit'))
         await late.synchronize(transport())
@@ -173,7 +173,7 @@ it.each(['a', 'b'])(
 
 it('authorization still rejects a winning write and tombstones survive delayed edits', async () => {
   const { journal, transport } = openJournal()
-  const replica = await openReplica('a', await indexedDb('a', new IDBFactory()))
+  const replica = await openReplica('a', await Effect.runPromise(indexedDb('a', new IDBFactory())))
   try {
     await replica.submit(rename(2, 'a', null))
     await replica.synchronize(transport())
@@ -200,30 +200,32 @@ it('authorization still rejects a winning write and tombstones survive delayed e
 it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', async () => {
   const factory = new IDBFactory()
   const openClock = async () =>
-    openLwwClock({
-      documentId: 'titles',
-      replicaId: 'a',
-      storage: await indexedDb('a-clock', factory),
-    })
+    Effect.runPromise(
+      openLwwClock({
+        documentId: 'titles',
+        replicaId: 'a',
+        storage: await Effect.runPromise(indexedDb('a-clock', factory)),
+      }),
+    )
   const { journal, transport } = openJournal()
   let clock = await openClock()
-  let replica = await openReplica('a', await indexedDb('a', factory))
+  let replica = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
   try {
-    const refused = await clock.next(20)
+    const refused = await Effect.runPromise(clock.next(20))
     await replica.submit(Message.Renamed({ title: { stamp: refused, value: 'Refused' } }))
     await replica.synchronize(transport(false))
     expect(replica.shared()).toEqual(empty)
     expect(replica.pending()).toEqual([])
     expect(journal.load('titles').cursor).toBe(0)
 
-    const unsubmitted = await clock.next()
+    const unsubmitted = await Effect.runPromise(clock.next())
     expect(unsubmitted.counter).toBe(22)
-    await clock.close()
+    await Effect.runPromise(clock.close)
     await replica.close()
     clock = await openClock()
-    replica = await openReplica('a', await indexedDb('a', factory))
+    replica = await openReplica('a', await Effect.runPromise(indexedDb('a', factory)))
 
-    const stamp = await clock.next(replica.shared().title.stamp.counter)
+    const stamp = await Effect.runPromise(clock.next(replica.shared().title.stamp.counter))
     expect(stamp).toEqual({ counter: 23, replicaId: 'a' })
     await replica.submit(Message.Renamed({ title: { stamp, value: 'Accepted' } }))
     await replica.synchronize(transport())
@@ -232,7 +234,7 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
       snapshot: { title: { stamp, value: 'Accepted' } },
     })
   } finally {
-    await clock.close()
+    await Effect.runPromise(clock.close)
     await replica.close()
     journal.close()
   }
@@ -241,29 +243,36 @@ it('allocates beyond rejected and unsubmitted writes after IndexedDB reload', as
 it('IndexedDB admits only one clock writer at a saved revision', async () => {
   const factory = new IDBFactory()
   const openClock = async () =>
-    openLwwClock({
-      documentId: 'titles',
-      replicaId: 'a',
-      storage: await indexedDb('clock', factory),
-    })
+    Effect.runPromise(
+      openLwwClock({
+        documentId: 'titles',
+        replicaId: 'a',
+        storage: await Effect.runPromise(indexedDb('clock', factory)),
+      }),
+    )
   const first = await openClock()
   const second = await openClock()
   try {
-    const results = await Promise.allSettled([first.next(), second.next()])
+    const results = await Promise.allSettled([
+      Effect.runPromise(first.next()),
+      Effect.runPromise(second.next()),
+    ])
     expect(results.filter(result => result.status === 'fulfilled')).toEqual([
       { status: 'fulfilled', value: { counter: 1, replicaId: 'a' } },
     ])
     const failures = results.filter(result => result.status === 'rejected')
     expect(failures).toHaveLength(1)
-    expect(failures[0]?.reason).toEqual(new Error('Replica was changed by another writer'))
+    expect(failures[0]?.reason).toMatchObject({
+      message: expect.stringContaining('another writer'),
+    })
   } finally {
-    await first.close()
-    await second.close()
+    await Effect.runPromise(first.close)
+    await Effect.runPromise(second.close)
   }
   const reopened = await openClock()
   try {
-    expect(await reopened.next()).toEqual({ counter: 2, replicaId: 'a' })
+    expect(await Effect.runPromise(reopened.next())).toEqual({ counter: 2, replicaId: 'a' })
   } finally {
-    await reopened.close()
+    await Effect.runPromise(reopened.close)
   }
 })

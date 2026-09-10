@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import { lwwRegister, type LwwClock } from '../src/index.js'
 
 const Count = lwwRegister(Schema.NumberFromString)
@@ -13,7 +13,7 @@ const encoded: typeof Count.schema.Encoded = { stamp, value: 1 }
 Count.merge({ stamp: { counter: 1 }, value: 1 }, { stamp, value: 1 })
 
 declare const clock: LwwClock
-const allocated = await clock.next(3)
+const allocated = Effect.runSync(clock.next(3))
 Count.merge({ stamp: allocated, value: 1 }, { stamp, value: 2 })
 // @ts-expect-error observations are numeric counters
 clock.next('3')

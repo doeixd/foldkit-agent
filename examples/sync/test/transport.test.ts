@@ -48,7 +48,10 @@ it('converges a replica through the socket transport', async () => {
   const { client, server } = socketPair()
   const handler = journal.transport(principal)
   serveSocket(server, { exchange: (cursor, pending) => handler.exchange(cursor, pending) })
-  const replica = await openReplicaEffect('browser', await indexedDb('browser', new IDBFactory()))
+  const replica = await openReplicaEffect(
+    'browser',
+    await Effect.runPromise(indexedDb('browser', new IDBFactory())),
+  )
   try {
     // A server-side producer commits one operation the client has not seen.
     journal.appendAsServer(

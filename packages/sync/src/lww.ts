@@ -1,4 +1,5 @@
-import { Schema } from 'effect'
+import { Effect, Ref, Schema, SynchronizedRef } from 'effect'
+import { StorageError } from './errors.js'
 import type { Storage } from './indexedDb.js'
 
 /** A logical write time; replica ids break concurrent ties using UTF-16 order. */
@@ -22,66 +23,79 @@ export type LwwClockState = typeof ClockState.Type
 
 export interface LwwClock {
   /** Persists a timestamp beyond the saved counter and supplied observation. */
-  next(observedCounter?: number): Promise<typeof Stamp.Type>
-  /** Drains accepted allocations and closes storage; repeated calls share completion. */
-  close(): Promise<void>
+  next: (observedCounter?: number) => Effect.Effect<typeof Stamp.Type, StorageError>
+  /** Drains accepted allocations, then closes storage. Repeated calls no-op. */
+  close: Effect.Effect<void>
 }
 
 const decodeClock = Schema.decodeUnknownSync(ClockState, { onExcessProperty: 'error' })
 const decodeCounter = Schema.decodeUnknownSync(Stamp.fields.counter)
 
-/** Opens a durable clock in its own storage, taking ownership even if opening fails. */
-export const openLwwClock = async ({
-  documentId,
-  replicaId,
-  storage,
-}: {
+const clockError = (message: string, cause: unknown): StorageError =>
+  new StorageError({
+    message: `${message}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    cause,
+  })
+
+/**
+ * Opens a durable clock over the caller's storage.
+ *
+ * Allocations are serialized through a `SynchronizedRef` and each persists before
+ * its stamp is returned. A crash after the save may skip a timestamp but never
+ * reuse one. Storage is owned by the caller; a failed open closes it so a partial
+ * initialization does not leak the connection.
+ */
+export const openLwwClock = (options: {
   readonly documentId: string
   readonly replicaId: string
   readonly storage: Storage<LwwClockState>
-}): Promise<LwwClock> => {
-  let state: LwwClockState
-  try {
-    const initial = decodeClock({
-      schemaVersion: 1,
-      documentId,
-      replicaId,
-      revision: 0,
+}): Effect.Effect<LwwClock, StorageError> =>
+  Effect.gen(function* () {
+    const { documentId, replicaId, storage } = options
+    const initial = decodeClock({ schemaVersion: 1, documentId, replicaId, revision: 0 })
+    const saved = yield* storage.load()
+    const state = yield* Effect.try({
+      try: () => (saved === undefined ? initial : decodeClock(saved)),
+      catch: cause => clockError('Stored clock state is invalid', cause),
     })
-    const saved = await storage.load()
-    state = saved === undefined ? initial : decodeClock(saved)
     if (state.documentId !== documentId || state.replicaId !== replicaId)
-      throw new Error('Wrong clock storage')
-    if (saved === undefined) await storage.save(state, null)
-  } catch (error) {
-    storage.close()
-    throw error
-  }
+      return yield* new StorageError({ message: 'Wrong clock storage' })
+    if (saved === undefined) yield* storage.save(state, null)
 
-  let tail = Promise.resolve()
-  let closing: Promise<void> | undefined
-  return {
-    next: (observedCounter = 0) => {
-      if (closing !== undefined) return Promise.reject(new Error('Clock is closed'))
-      const allocation = tail.then(async () => {
-        const next = decodeClock({
-          ...state,
-          revision: Math.max(state.revision, decodeCounter(observedCounter)) + 1,
-        })
-        // A crash after this save may skip a timestamp, but must never reuse it.
-        await storage.save(next, state.revision)
-        state = next
-        return { counter: next.revision, replicaId }
+    const stateRef = yield* SynchronizedRef.make(state)
+    const closed = yield* Ref.make(false)
+
+    const next = (observedCounter = 0): Effect.Effect<typeof Stamp.Type, StorageError> =>
+      Effect.gen(function* () {
+        if (yield* Ref.get(closed)) return yield* new StorageError({ message: 'Clock is closed' })
+        return yield* SynchronizedRef.modifyEffect(stateRef, current =>
+          Effect.gen(function* () {
+            const allocated = yield* Effect.try({
+              try: () =>
+                decodeClock({
+                  ...current,
+                  revision: Math.max(current.revision, decodeCounter(observedCounter)) + 1,
+                }),
+              catch: cause => clockError('Invalid clock allocation', cause),
+            })
+            yield* storage.save(allocated, current.revision)
+            return [{ counter: allocated.revision, replicaId }, allocated] as const
+          }),
+        )
       })
-      tail = allocation.then(
-        () => {},
-        () => {},
+
+    const close: Effect.Effect<void> = Effect.gen(function* () {
+      const alreadyClosed = yield* Ref.modify(closed, current => [current, true] as const)
+      if (alreadyClosed) return
+      // Drains any accepted allocation before releasing the connection.
+      yield* SynchronizedRef.modifyEffect(stateRef, current =>
+        Effect.succeed([undefined, current] as const),
       )
-      return allocation
-    },
-    close: () => (closing ??= tail.then(() => storage.close())),
-  }
-}
+      yield* storage.close
+    })
+
+    return { next, close }
+  }).pipe(Effect.tapError(() => options.storage.close))
 
 /**
  * A schema and reducer helper for a last-writer-wins register.
