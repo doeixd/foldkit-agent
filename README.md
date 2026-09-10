@@ -1793,6 +1793,8 @@ packages/agent-webmcp   foldkit-agent-webmcp
 packages/agent-mcp      foldkit-agent-mcp
 packages/agent-a2a      foldkit-agent-a2a
 packages/agent-native   foldkit-agent-native (prototype, unpublished)
+packages/durable        foldkit-durable (prototype, unpublished)
+packages/sync           foldkit-sync (prototype, unpublished)
 examples/todo           a worked example, end to end
 examples/sync           durable messages and ordered replication feasibility spike
 ```
