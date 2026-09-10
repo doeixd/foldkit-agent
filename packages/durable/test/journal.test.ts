@@ -5,8 +5,11 @@ import { Config, Deferred, Effect, Fiber, Option, Stream, type Scope } from 'eff
 import { describe, expect, it } from 'vitest'
 import {
   JournalService,
+  actorId,
+  documentId,
   makeJournal,
   makeJournalLayer,
+  opId,
   type Codec,
   type Journal,
   type JournalOptions,
@@ -67,6 +70,11 @@ const reduce = (state: Snapshot, op: Operation): Snapshot =>
 
 const principal: Principal = { actorId: 'owner', canWrite: true }
 
+const todos = documentId('todos')
+const docA = documentId('a')
+const docB = documentId('b')
+const missing = documentId('missing')
+
 type Hooks = Pick<JournalOptions<Operation, Snapshot, Principal>, 'validate' | 'authorize'>
 
 const base = {
@@ -74,8 +82,8 @@ const base = {
   snapshot,
   empty: (): Snapshot => ({ ids: [] }),
   reduce,
-  opId: (value: Operation) => value.opId,
-  actorId: (value: Principal) => value.actorId,
+  opId: (value: Operation) => opId(value.opId),
+  actorId: (value: Principal) => actorId(value.actorId),
 }
 
 const withJournal = <A>(
@@ -101,17 +109,17 @@ const withJournal = <A>(
 describe('a durable journal', () => {
   it('orders appends and reads them after a cursor', () =>
     withJournal(function* (journal) {
-      yield* journal.append('todos', add(1, 'a'), principal)
-      yield* journal.append('todos', add(2, 'b'), principal)
+      yield* journal.append(todos, add(1, 'a'), principal)
+      yield* journal.append(todos, add(2, 'b'), principal)
 
-      const all = yield* journal.read('todos', 0)
+      const all = yield* journal.read(todos, 0)
       expect(all.map(committed => [committed.operation.opId, committed.sequence])).toEqual([
         ['a:1', 1],
         ['a:2', 2],
       ])
-      const tail = yield* journal.read('todos', 1)
+      const tail = yield* journal.read(todos, 1)
       expect(tail.map(committed => committed.operation.opId)).toEqual(['a:2'])
-      expect(yield* journal.load('todos')).toEqual({
+      expect(yield* journal.load(todos)).toEqual({
         snapshot: { ids: ['a', 'b'] },
         cursor: 2,
       })
@@ -119,47 +127,47 @@ describe('a durable journal', () => {
 
   it('keeps keys independent', () =>
     withJournal(function* (journal) {
-      yield* journal.append('a', add(1, 'a'), principal)
-      yield* journal.append('b', add(1, 'b'), principal)
+      yield* journal.append(docA, add(1, 'a'), principal)
+      yield* journal.append(docB, add(1, 'b'), principal)
 
-      expect((yield* journal.load('a')).snapshot).toEqual({ ids: ['a'] })
-      expect((yield* journal.load('b')).snapshot).toEqual({ ids: ['b'] })
+      expect((yield* journal.load(docA)).snapshot).toEqual({ ids: ['a'] })
+      expect((yield* journal.load(docB)).snapshot).toEqual({ ids: ['b'] })
     }))
 
   it('treats an unknown key as empty and reads nothing at the cursor', () =>
     withJournal(function* (journal) {
-      const first = yield* journal.load('missing')
-      const second = yield* journal.load('missing')
+      const first = yield* journal.load(missing)
+      const second = yield* journal.load(missing)
       expect(first).toEqual({ snapshot: { ids: [] }, cursor: 0 })
       // `empty` runs per read, so callers cannot mutate a shared default.
       expect(first.snapshot).not.toBe(second.snapshot)
 
-      yield* journal.append('todos', add(1, 'a'), principal)
-      expect(yield* journal.read('todos', 1)).toEqual([])
+      yield* journal.append(todos, add(1, 'a'), principal)
+      expect(yield* journal.read(todos, 1)).toEqual([])
     }))
 
   it('is idempotent by operation identity and rejects a conflicting reuse', () =>
     withJournal(function* (journal) {
-      yield* journal.append('todos', add(1, 'a'), principal)
-      const again = yield* journal.append('todos', add(1, 'a'), principal)
+      yield* journal.append(todos, add(1, 'a'), principal)
+      const again = yield* journal.append(todos, add(1, 'a'), principal)
       expect(again.sequence).toBe(1)
-      expect(yield* journal.load('todos')).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
+      expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
 
       const payload = yield* Effect.result(
-        journal.append('todos', { ...add(1), id: 'different' }, principal),
+        journal.append(todos, { ...add(1), id: 'different' }, principal),
       )
       expect(payload).toMatchObject({ _tag: 'Failure', failure: { _tag: 'IdentityConflictError' } })
 
       const actor = yield* Effect.result(
-        journal.append('todos', add(1, 'a'), { actorId: 'other', canWrite: true }),
+        journal.append(todos, add(1, 'a'), { actorId: 'other', canWrite: true }),
       )
       expect(actor).toMatchObject({ _tag: 'Failure', failure: { _tag: 'IdentityConflictError' } })
-      expect(yield* journal.load('todos')).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
+      expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
     }))
 
   it('records the actor from the principal, never the operation', () =>
     withJournal(function* (journal) {
-      const committed = yield* journal.append('todos', add(1), {
+      const committed = yield* journal.append(todos, add(1), {
         actorId: 'alice',
         canWrite: true,
       })
@@ -169,22 +177,22 @@ describe('a durable journal', () => {
   it('rejects invalid input before committing', () =>
     withJournal(function* (journal) {
       const result = yield* Effect.result(
-        journal.append('todos', { opId: 'a:1', kind: 'nope', id: 'a' }, principal),
+        journal.append(todos, { opId: 'a:1', kind: 'nope', id: 'a' }, principal),
       )
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidOperationError' } })
-      expect((yield* journal.load('todos')).cursor).toBe(0)
+      expect((yield* journal.load(todos)).cursor).toBe(0)
     }))
 
   it('refuses through validate without committing', () =>
     withJournal(
       function* (journal) {
-        yield* journal.append('todos', add(1), principal)
-        const result = yield* Effect.result(journal.append('todos', add(2), principal))
+        yield* journal.append(todos, add(1), principal)
+        const result = yield* Effect.result(journal.append(todos, add(2), principal))
         expect(result).toMatchObject({
           _tag: 'Failure',
           failure: { _tag: 'InvalidOperationError' },
         })
-        expect(yield* journal.load('todos')).toEqual({ snapshot: { ids: ['1'] }, cursor: 1 })
+        expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['1'] }, cursor: 1 })
       },
       {
         validate: ({ cursor }) => {
@@ -196,47 +204,47 @@ describe('a durable journal', () => {
   it('refuses through authorize and consumes no operation identity', () =>
     withJournal(
       function* (journal) {
-        yield* journal.append('todos', add(1, 'a'), principal)
-        const result = yield* Effect.result(journal.append('todos', remove(2, 'a'), principal))
+        yield* journal.append(todos, add(1, 'a'), principal)
+        const result = yield* Effect.result(journal.append(todos, remove(2, 'a'), principal))
         expect(result).toMatchObject({
           _tag: 'Failure',
           failure: { _tag: 'OperationRejectedError' },
         })
-        expect((yield* journal.load('todos')).cursor).toBe(1)
+        expect((yield* journal.load(todos)).cursor).toBe(1)
 
-        yield* journal.append('todos', add(2, 'b'), principal)
-        expect(yield* journal.load('todos')).toEqual({ snapshot: { ids: ['a', 'b'] }, cursor: 2 })
+        yield* journal.append(todos, add(2, 'b'), principal)
+        expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a', 'b'] }, cursor: 2 })
       },
       { authorize: ({ operation }) => operation.kind === 'add' },
     ))
 
   it('compacts payloads while keeping identity and the snapshot', () =>
     withJournal(function* (journal) {
-      yield* journal.append('todos', add(1, 'a'), principal)
-      yield* journal.append('todos', add(2, 'b'), principal)
-      yield* journal.append('todos', add(3, 'c'), principal)
-      const before = yield* journal.load('todos')
-      expect(yield* journal.floor('todos')).toBe(0)
+      yield* journal.append(todos, add(1, 'a'), principal)
+      yield* journal.append(todos, add(2, 'b'), principal)
+      yield* journal.append(todos, add(3, 'c'), principal)
+      const before = yield* journal.load(todos)
+      expect(yield* journal.floor(todos)).toBe(0)
 
-      yield* journal.compact('todos', 2)
-      expect(yield* journal.floor('todos')).toBe(2)
-      expect((yield* journal.read('todos', 0)).map(committed => committed.operation.opId)).toEqual([
+      yield* journal.compact(todos, 2)
+      expect(yield* journal.floor(todos)).toBe(2)
+      expect((yield* journal.read(todos, 0)).map(committed => committed.operation.opId)).toEqual([
         'a:3',
       ])
-      expect(yield* journal.load('todos')).toEqual(before)
+      expect(yield* journal.load(todos)).toEqual(before)
 
       // A retransmission of a compacted operation is still idempotent.
-      expect((yield* journal.append('todos', add(1, 'a'), principal)).sequence).toBe(1)
-      expect(yield* journal.load('todos')).toEqual(before)
+      expect((yield* journal.append(todos, add(1, 'a'), principal)).sequence).toBe(1)
+      expect(yield* journal.load(todos)).toEqual(before)
     }))
 
   it('refuses a compaction cursor that moves backwards or past the snapshot', () =>
     withJournal(function* (journal) {
-      yield* journal.append('todos', add(1), principal)
-      const past = yield* Effect.result(journal.compact('todos', 2))
+      yield* journal.append(todos, add(1), principal)
+      const past = yield* Effect.result(journal.compact(todos, 2))
       expect(past).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidCompactionError' } })
-      yield* journal.compact('todos', 1)
-      const backwards = yield* Effect.result(journal.compact('todos', 0))
+      yield* journal.compact(todos, 1)
+      const backwards = yield* Effect.result(journal.compact(todos, 0))
       expect(backwards).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'InvalidCompactionError' },
@@ -245,8 +253,8 @@ describe('a durable journal', () => {
 
   it('refuses a read cursor past the snapshot', () =>
     withJournal(function* (journal) {
-      yield* journal.append('todos', add(1), principal)
-      const result = yield* Effect.result(journal.read('todos', 2))
+      yield* journal.append(todos, add(1), principal)
+      const result = yield* Effect.result(journal.read(todos, 2))
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidCursorError' } })
     }))
 
@@ -258,12 +266,12 @@ describe('a durable journal', () => {
       )
       yield* Effect.yieldNow
 
-      yield* journal.append('todos', add(1), principal)
+      yield* journal.append(todos, add(1), principal)
       yield* Effect.yieldNow
       expect(seen).toEqual(['todos'])
 
       yield* Fiber.interrupt(subscriber)
-      yield* journal.append('todos', add(2), principal)
+      yield* journal.append(todos, add(2), principal)
       yield* Effect.yieldNow
       expect(seen).toEqual(['todos'])
     }))
@@ -283,12 +291,12 @@ describe('a durable journal', () => {
       )
       yield* Effect.yieldNow
 
-      yield* journal.append('todos', add(1), principal)
+      yield* journal.append(todos, add(1), principal)
       yield* Effect.yieldNow
       // A failing subscriber is isolated: the commit lands and every other
       // subscriber still sees it.
       expect(seen).toEqual(['todos'])
-      expect((yield* journal.load('todos')).cursor).toBe(1)
+      expect((yield* journal.load(todos)).cursor).toBe(1)
     }))
 })
 
@@ -463,8 +471,8 @@ describe('the journal layer', () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const journal = yield* JournalService<Operation, Snapshot, Principal>()
-        yield* journal.append('todos', add(1, 'a'), principal)
-        return yield* journal.load('todos')
+        yield* journal.append(todos, add(1, 'a'), principal)
+        return yield* journal.load(todos)
       }).pipe(
         Effect.provide(
           makeJournalLayer<Operation, Snapshot, Principal>({

@@ -1,7 +1,13 @@
 import { Effect, Exit, Schema, Scope } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
 import { defineMessageUnion } from 'foldkit/message'
-import { makeJournal, OperationRejectedError } from 'foldkit-durable'
+import {
+  actorId as toActorId,
+  documentId as toDocumentId,
+  makeJournal,
+  OperationRejectedError,
+  opId as toOpId,
+} from 'foldkit-durable'
 import {
   defineSync,
   indexedDb,
@@ -61,8 +67,8 @@ const openJournal = () => {
       },
       empty: () => empty,
       reduce: (model, operation) => update(model, decodeMessage(operation.message)),
-      opId: operation => operation.opId,
-      actorId: principal => principal.actorId,
+      opId: operation => toOpId(operation.opId),
+      actorId: principal => toActorId(principal.actorId),
       authorize: ({ principal }) => principal.canWrite,
       validate: ({ key, operation }) => {
         if (operation.documentId !== key) throw new Error('Wrong document')
@@ -72,11 +78,12 @@ const openJournal = () => {
   // The test drives the journal synchronously; `node:sqlite` is synchronous.
   const journal = {
     append: (key: string, input: unknown, principal: { actorId: string; canWrite: boolean }) =>
-      Effect.runSync(durable.append(key, input, principal)),
-    floor: (key: string) => Effect.runSync(durable.floor(key)),
-    load: (key: string) => Effect.runSync(durable.load(key)),
-    read: (key: string, after: number) => Effect.runSync(durable.read(key, after)),
-    compact: (key: string, through: number) => Effect.runSync(durable.compact(key, through)),
+      Effect.runSync(durable.append(toDocumentId(key), input, principal)),
+    floor: (key: string) => Effect.runSync(durable.floor(toDocumentId(key))),
+    load: (key: string) => Effect.runSync(durable.load(toDocumentId(key))),
+    read: (key: string, after: number) => Effect.runSync(durable.read(toDocumentId(key), after)),
+    compact: (key: string, through: number) =>
+      Effect.runSync(durable.compact(toDocumentId(key), through)),
     close: () => Effect.runSync(Scope.close(scope, Exit.void)),
   }
   const transport = (canWrite = true): TransportClient => ({

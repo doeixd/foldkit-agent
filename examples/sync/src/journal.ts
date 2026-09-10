@@ -1,6 +1,9 @@
 import { Effect, Exit, Fiber, Scope, Stream } from 'effect'
 import {
+  actorId as toActorId,
+  documentId as toDocumentId,
   makeJournal,
+  opId as toOpId,
   type Committed as DurableCommitted,
   type Journal as DurableJournal,
 } from 'foldkit-durable'
@@ -75,8 +78,8 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
           snapshot: { encode: snapshot => snapshot, decode: decodeShared },
           empty: () => ({ todos: [] }),
           reduce: (snapshot, operation) => replay(snapshot, decodeMessage(operation.message)),
-          opId: operation => operation.opId,
-          actorId: principal => principal.actorId,
+          opId: operation => toOpId(operation.opId),
+          actorId: principal => toActorId(principal.actorId),
           validate: ({ key, operation, cursor }) => {
             if (operation.documentId !== key) throw new Error('Wrong document')
             if (operation.baseCursor > cursor)
@@ -109,12 +112,14 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
 
   const append = (input: unknown, principal: Principal): Committed => {
     if (!principal.actorId || !principal.canWrite) throw new Error('Unauthorized operation')
-    const committed = Effect.runSync(durable.append(principal.documentId, input, principal))
+    const committed = Effect.runSync(
+      durable.append(toDocumentId(principal.documentId), input, principal),
+    )
     return toCommitted(committed, principal.documentId)
   }
 
   const snapshot = (documentId: string): { cursor: number; model: Shared } => {
-    const { cursor, snapshot: model } = Effect.runSync(durable.load(documentId))
+    const { cursor, snapshot: model } = Effect.runSync(durable.load(toDocumentId(documentId)))
     return { cursor, model }
   }
 
@@ -145,7 +150,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
   }
 
   const read = (documentId: string, after: number): ReadonlyArray<Committed> =>
-    Effect.runSync(durable.read(documentId, after)).map(committed =>
+    Effect.runSync(durable.read(toDocumentId(documentId), after)).map(committed =>
       toCommitted(committed, documentId),
     )
 
@@ -172,7 +177,8 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
     appendAsServer,
     settle,
     read,
-    compact: (documentId, through) => Effect.runSync(durable.compact(documentId, through)),
+    compact: (documentId, through) =>
+      Effect.runSync(durable.compact(toDocumentId(documentId), through)),
     snapshot,
     // The agent host still registers a callback; the journal's subscription is
     // a Stream, so this is the edge where it is bridged back.
@@ -196,7 +202,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
             continue
           }
           const committed = Effect.runSync(
-            durable.append(principal.documentId, operation, principal).pipe(
+            durable.append(toDocumentId(principal.documentId), operation, principal).pipe(
               Effect.catchTag('OperationRejectedError', error =>
                 Effect.sync(() => {
                   rejected.push(error.opId)
@@ -210,7 +216,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
           await settle(toCommitted(committed, principal.documentId))
           acknowledged.push(committed.operation.opId)
         }
-        if (cursor < Effect.runSync(durable.floor(principal.documentId))) {
+        if (cursor < Effect.runSync(durable.floor(toDocumentId(principal.documentId)))) {
           const { cursor: at, model } = snapshot(principal.documentId)
           return { checkpoint: { cursor: at, model }, operations: [], rejected, acknowledged }
         }

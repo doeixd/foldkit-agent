@@ -13,6 +13,7 @@ import {
   type Scope,
 } from 'effect'
 import type { Codec } from './codec.js'
+import { actorId as toActorId, type ActorId, type DocumentId, type OpId } from './ids.js'
 import {
   IdentityConflictError,
   InvalidCompactionError,
@@ -47,12 +48,12 @@ const SCHEMA = `
 export interface Committed<Operation> {
   readonly operation: Operation
   readonly sequence: number
-  readonly actorId: string
+  readonly actorId: ActorId
 }
 
 /** Structural checks that run before a commit and throw when the operation is invalid. */
 export interface ValidationRequest<Operation, Snapshot, Principal> {
-  readonly key: string
+  readonly key: DocumentId
   readonly principal: Principal
   readonly operation: Operation
   readonly snapshot: Snapshot
@@ -61,7 +62,7 @@ export interface ValidationRequest<Operation, Snapshot, Principal> {
 
 /** The application's policy decision for an operation, against the authoritative snapshot. */
 export interface AuthorizationRequest<Operation, Snapshot, Principal> {
-  readonly key: string
+  readonly key: DocumentId
   readonly principal: Principal
   readonly operation: Operation
   readonly snapshot: Snapshot
@@ -79,9 +80,9 @@ export interface JournalOptions<Operation, Snapshot, Principal> {
   /** Deterministic: the application's own reducer, not the journal's. */
   readonly reduce: (snapshot: Snapshot, operation: Operation) => Snapshot
   /** Stable identity; a repeat is answered idempotently. */
-  readonly opId: (operation: Operation) => string
+  readonly opId: (operation: Operation) => OpId
   /** The trusted actor recorded for the commit. */
-  readonly actorId: (principal: Principal) => string
+  readonly actorId: (principal: Principal) => ActorId
   readonly validate?: (request: ValidationRequest<Operation, Snapshot, Principal>) => void
   readonly authorize?: (request: AuthorizationRequest<Operation, Snapshot, Principal>) => boolean
 }
@@ -101,21 +102,21 @@ export type AppendError =
 
 export interface Journal<Operation, Snapshot, Principal> {
   readonly load: (
-    key: string,
+    key: DocumentId,
   ) => Effect.Effect<{ readonly snapshot: Snapshot; readonly cursor: number }, JournalError>
   /** The highest sequence whose payload has been compacted away; `0` if none. */
-  readonly floor: (key: string) => Effect.Effect<number, JournalError>
+  readonly floor: (key: DocumentId) => Effect.Effect<number, JournalError>
   readonly read: (
-    key: string,
+    key: DocumentId,
     after: number,
   ) => Effect.Effect<ReadonlyArray<Committed<Operation>>, InvalidCursorError | JournalError>
   readonly append: (
-    key: string,
+    key: DocumentId,
     input: unknown,
     principal: Principal,
   ) => Effect.Effect<Committed<Operation>, AppendError>
   readonly compact: (
-    key: string,
+    key: DocumentId,
     through: number,
   ) => Effect.Effect<void, InvalidCompactionError | JournalError>
   /** The recorded effect for a key, if it has ever run. */
@@ -215,7 +216,7 @@ const makeShape = <Operation, Snapshot, Principal>(
 ): Journal<Operation, Snapshot, Principal> => {
   type Shape = Journal<Operation, Snapshot, Principal>
 
-  const load: Shape['load'] = Effect.fn('Journal.load')(function* (key: string) {
+  const load: Shape['load'] = Effect.fn('Journal.load')(function* (key: DocumentId) {
     yield* Effect.annotateCurrentSpan({ key })
     return yield* Effect.try({
       try: () => {
@@ -233,17 +234,17 @@ const makeShape = <Operation, Snapshot, Principal>(
     })
   })
 
-  const compactBefore = (key: string): number => {
+  const compactBefore = (key: DocumentId): number => {
     const row = database.prepare('SELECT compact_before FROM documents WHERE key = ?').get(key)
     return row === undefined ? 0 : Number(row.compact_before)
   }
 
-  const cursorOf = (key: string): number => {
+  const cursorOf = (key: DocumentId): number => {
     const row = database.prepare('SELECT cursor FROM documents WHERE key = ?').get(key)
     return row === undefined ? 0 : Number(row.cursor)
   }
 
-  const floor: Shape['floor'] = Effect.fn('Journal.floor')(function* (key: string) {
+  const floor: Shape['floor'] = Effect.fn('Journal.floor')(function* (key: DocumentId) {
     yield* Effect.annotateCurrentSpan({ key })
     return yield* Effect.try({
       try: () => compactBefore(key),
@@ -252,7 +253,7 @@ const makeShape = <Operation, Snapshot, Principal>(
   })
 
   const append: Shape['append'] = Effect.fn('Journal.append')(function* (
-    key: string,
+    key: DocumentId,
     input: unknown,
     principal: Principal,
   ) {
@@ -283,7 +284,7 @@ const makeShape = <Operation, Snapshot, Principal>(
                   ? operation
                   : options.operation.decode(JSON.parse(String(prior.input))),
               sequence: Number(prior.sequence),
-              actorId: String(prior.actor_id),
+              actorId: toActorId(String(prior.actor_id)),
             }
             if (prior.input !== null && (prior.input !== encoded || committed.actorId !== actorId))
               throw new IdentityConflictError({
@@ -353,7 +354,7 @@ const makeShape = <Operation, Snapshot, Principal>(
   })
 
   const compact: Shape['compact'] = Effect.fn('Journal.compact')(function* (
-    key: string,
+    key: DocumentId,
     through: number,
   ) {
     yield* Effect.annotateCurrentSpan({ key, through })
@@ -384,7 +385,7 @@ const makeShape = <Operation, Snapshot, Principal>(
     })
   })
 
-  const read: Shape['read'] = Effect.fn('Journal.read')(function* (key: string, after: number) {
+  const read: Shape['read'] = Effect.fn('Journal.read')(function* (key: DocumentId, after: number) {
     yield* Effect.annotateCurrentSpan({ key, after })
     return yield* Effect.try({
       try: () => {
@@ -403,7 +404,7 @@ const makeShape = <Operation, Snapshot, Principal>(
           .map(row => ({
             operation: options.operation.decode(JSON.parse(String(row.input))),
             sequence: Number(row.sequence),
-            actorId: String(row.actor_id),
+            actorId: toActorId(String(row.actor_id)),
           }))
       },
       catch: (cause): InvalidCursorError | JournalError =>
