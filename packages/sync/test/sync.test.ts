@@ -56,6 +56,15 @@ const definition: SyncDefinition<Message, Shared, unknown, unknown> = {
 
 const Sync = defineSync(definition)
 
+const replayCalls = { count: 0 }
+const CountingSync = defineSync({
+  ...definition,
+  replay: (shared, message) => {
+    replayCalls.count += 1
+    return definition.replay(shared, message)
+  },
+})
+
 const created = (id: string, title = id): Message => ({ _tag: 'CreatedTodo', id, title })
 
 const operation = (replica: string, localSequence: number, message: Message): Operation => ({
@@ -157,6 +166,39 @@ describe('the replica', () => {
 
     expect(cursor(replica)).toBe(1)
     expect(pending(replica)).toEqual([])
+  })
+
+  it('reflects a write that happens after a shared read', async () => {
+    const replica = await open('a')
+    expect(shared(replica)).toEqual({ todos: [] })
+
+    await submit(replica, created('t', 'first'))
+    expect(shared(replica).todos).toEqual([{ id: 't', title: 'first' }])
+
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: ['a:1'] }) })
+    expect(shared(replica)).toEqual({ todos: [] })
+  })
+
+  it('reuses the projection across reads until the state changes', async () => {
+    const replica = await Effect.runPromise(
+      CountingSync.openReplica(replicaId('a'), memoryStorage()),
+    )
+    await Effect.runPromise(replica.submit(created('t1')))
+
+    replayCalls.count = 0
+    Effect.runSync(replica.shared)
+    const afterFirstRead = replayCalls.count
+    expect(afterFirstRead).toBeGreaterThan(0)
+
+    Effect.runSync(replica.shared)
+    expect(replayCalls.count).toBe(afterFirstRead)
+
+    // A write replaces the state object, so the next read must rebuild.
+    await Effect.runPromise(replica.submit(created('t2')))
+    Effect.runSync(replica.shared)
+    expect(replayCalls.count).toBeGreaterThan(afterFirstRead)
+
+    await Effect.runPromise(replica.close)
   })
 
   it('drops a rejected operation and reverts its optimistic effect', async () => {

@@ -318,6 +318,21 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       const closed = yield* Ref.make(false)
       const lastError = yield* Ref.make<string | undefined>(undefined)
       const rejectedOps = yield* Ref.make<ReadonlyArray<OpId>>([])
+      // The projection is pure over an immutable state, so a cached value is
+      // reused until a write replaces the state object. A UI reads `shared` far
+      // more often than it writes, and replaying a large outbox per read is
+      // quadratic (see `bench/projection.bench.ts`).
+      const projection = yield* Ref.make<
+        { readonly state: ReplicaState<Shared>; readonly shared: Shared } | undefined
+      >(undefined)
+      const shared = Effect.gen(function* () {
+        const current = yield* SynchronizedRef.get(stateRef)
+        const cached = yield* Ref.get(projection)
+        if (cached !== undefined && cached.state === current) return cached.shared
+        const projected = optimistic(current)
+        yield* Ref.set(projection, { state: current, shared: projected })
+        return projected
+      })
 
       // `SynchronizedRef.modifyEffect` installs the returned state itself, so
       // persisting must not also set the ref (that would re-enter the lock).
@@ -467,7 +482,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       }).pipe(Effect.withSpan('Sync.synchronize', { attributes: { documentId } }))
 
       return {
-        shared: Effect.map(SynchronizedRef.get(stateRef), optimistic),
+        shared,
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
         cursor: Effect.map(SynchronizedRef.get(stateRef), state => state.cursor),
         status: Effect.gen(function* () {
