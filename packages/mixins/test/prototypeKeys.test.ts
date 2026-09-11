@@ -44,4 +44,16 @@ describe('prototype-key slot names', () => {
     const builders = SlotView.buildersFor(ProtoSlots, [Mixin.compose(A, B)], context)
     expect(classValue(builders['__proto__'].attrs())).toBe('a b')
   })
+
+  it('describes a __proto__ slot as an own key', () => {
+    const described = Slots.describe(ProtoSlots)
+    expect(Object.hasOwn(described.slots, '__proto__')).toBe(true)
+    expect(described.slots['__proto__']?.capability).toBe('Container')
+  })
+
+  it('composes a __proto__ style property', () => {
+    const composed = Style.compose(Style.inline({ ['__proto__']: 'thin' }))
+    expect(Object.hasOwn(composed.style, '__proto__')).toBe(true)
+    expect(composed.style['__proto__']).toBe('thin')
+  })
 })

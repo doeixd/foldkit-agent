@@ -36,10 +36,11 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   `A11y.validate` reports every mismatch as a stable `a11y:*` diagnostic
   (missing or hidden slot, capability mismatch, missing event or attribute). It
   is pure and DOM-independent. The UI/Surface adapters are not in this slice.
-- **Prototype-key slot names.** `Style`, `Behavior`, `Mixin.compose`, the
-  `SlotView` builders, and the `@foldkit/ui` resolver accumulate into
-  prototype-free records, so a slot named `__proto__` keeps its contribution
-  instead of silently becoming the accumulator's prototype.
+- **Prototype-key slot names.** `Style`, `Behavior`, `Mixin.compose`,
+  `Style.compose`, `Slots.describe`, the `SlotView` builders, and the
+  `@foldkit/ui` resolver accumulate into prototype-free records, so a slot or
+  style named `__proto__` keeps its contribution instead of silently becoming
+  the accumulator's prototype.
 
 ### `foldkit-mixins-ui` (private)
 

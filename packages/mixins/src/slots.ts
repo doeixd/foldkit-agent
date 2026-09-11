@@ -112,7 +112,8 @@ export const describe = (contract: {
     >
   >
 } => {
-  const slots: Record<string, ReturnType<typeof Slot.describe> & { readonly name: string }> = {}
+  const slots: Record<string, ReturnType<typeof Slot.describe> & { readonly name: string }> =
+    Object.create(null)
   for (const key of Object.getOwnPropertyNames(contract)) {
     const slot = contract[key]
     if (slot === undefined || !Slot.is(slot)) continue

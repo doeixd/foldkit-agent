@@ -43,7 +43,7 @@ export const inline = (value: Readonly<Record<string, string>>): StyleValue =>
 export const compose = (...pieces: ReadonlyArray<StyleValue>): StyleValue =>
   Object.freeze({
     classes: Object.freeze(pieces.flatMap(piece => piece.classes)),
-    style: Object.freeze(Object.assign({}, ...pieces.map(piece => piece.style))),
+    style: Object.freeze(Object.assign(Object.create(null), ...pieces.map(piece => piece.style))),
   })
 
 export const when = (condition: boolean, piece: StyleValue): StyleValue =>
