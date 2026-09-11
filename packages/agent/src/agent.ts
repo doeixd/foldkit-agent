@@ -18,6 +18,12 @@ export {
 } from './expose.js'
 export { forModel, type BoundAgent } from './forModel.js'
 export {
+  forApplication,
+  type ApplicationAgent,
+  type ProjectionValue,
+  type ReadableProjection,
+} from './forApplication.js'
+export {
   auditLog,
   type AuditDecision,
   type AuditEntry,
