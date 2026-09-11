@@ -153,6 +153,24 @@ The read loads every child row in one `IN (...)`, ordered by child id, and emits
 `values.comments = ["Comment:c1", "Comment:c2"]`. The Entity declares the field as
 `Schema.Array(Entity.ref(CommentEntity))` and the Selection selects it as `true`.
 
+A many-to-many relation joins through a table; `localColumn` references the
+owner's `id` and `foreignColumn` the target's `id`:
+
+```ts
+const Post = entity('Post', posts, {
+  relations: {
+    tags: manyToMany(Tag, {
+      through: postTags,
+      localColumn: postTags.postId,
+      foreignColumn: postTags.tagId,
+    }),
+  },
+})
+```
+
+The read joins the target table (`innerJoin` on the foreign key) so dangling
+through rows are dropped, then emits refs ordered by target id.
+
 ## Compose a server
 
 ```ts
@@ -174,10 +192,11 @@ silently dropped requirement.
 
 ## Limits
 
-- Singular relations and to-many relations selected as arrays of refs work (above).
-  A to-many relation loads all children in one `IN (...)` ordered by child id;
-  per-relation ordering/pagination and an embedded target object are not
-  supported yet. `reader`, the injected-executor path, does not load children.
+- Singular, to-many, and many-to-many relations selected as refs work (above).
+  A to-many relation loads its children in one `IN (...)`; a many-to-many joins
+  the through table to the target. Both order by the target id. Per-relation
+  ordering/pagination and an embedded target object are not supported yet, and
+  `reader`, the injected-executor path, does not load children.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - No computed/aggregate selections yet.
 

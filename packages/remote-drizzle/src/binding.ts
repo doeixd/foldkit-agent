@@ -26,7 +26,18 @@ export interface ManyRelation extends RelationTarget {
   readonly localKey: AnyColumn
 }
 
-export type RelationBinding = OneRelation | ManyRelation
+/**
+ * A collection relation joined through a table. `localColumn` references the
+ * owning entity's `id`; `foreignColumn` references the target entity's `id`.
+ */
+export interface ManyToManyRelation extends RelationTarget {
+  readonly kind: 'manyToMany'
+  readonly through: PgTable
+  readonly localColumn: AnyColumn
+  readonly foreignColumn: AnyColumn
+}
+
+export type RelationBinding = OneRelation | ManyRelation | ManyToManyRelation
 
 export type RelationConfig =
   | {
@@ -39,6 +50,13 @@ export type RelationConfig =
       readonly entity: EntityBinding<any, any>
       readonly foreignKey: AnyColumn
       readonly localKey: AnyColumn
+    }
+  | {
+      readonly kind: 'manyToMany'
+      readonly entity: EntityBinding<any, any>
+      readonly through: PgTable
+      readonly localColumn: AnyColumn
+      readonly foreignColumn: AnyColumn
     }
 
 export const one = (
@@ -56,15 +74,42 @@ export const many = (
   localKey: options.localKey,
 })
 
-const normalizeRelation = (config: RelationConfig): RelationBinding =>
-  config.kind === 'many'
-    ? {
+export const manyToMany = (
+  entity: EntityBinding<any, any>,
+  options: {
+    readonly through: PgTable
+    readonly localColumn: AnyColumn
+    readonly foreignColumn: AnyColumn
+  },
+): ManyToManyRelation => ({
+  kind: 'manyToMany',
+  entity,
+  through: options.through,
+  localColumn: options.localColumn,
+  foreignColumn: options.foreignColumn,
+})
+
+const normalizeRelation = (config: RelationConfig): RelationBinding => {
+  switch (config.kind) {
+    case 'many':
+      return {
         kind: 'many',
         entity: config.entity,
         foreignKey: config.foreignKey,
         localKey: config.localKey,
       }
-    : { kind: 'one', entity: config.entity, field: config.field }
+    case 'manyToMany':
+      return {
+        kind: 'manyToMany',
+        entity: config.entity,
+        through: config.through,
+        localColumn: config.localColumn,
+        foreignColumn: config.foreignColumn,
+      }
+    default:
+      return { kind: 'one', entity: config.entity, field: config.field }
+  }
+}
 
 export interface EntityBinding<Name extends string, Table extends PgTable> {
   readonly name: Name

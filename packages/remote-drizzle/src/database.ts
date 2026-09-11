@@ -17,6 +17,7 @@ import { Context } from 'effect'
 
 export interface DrizzleStatement extends PromiseLike<ReadonlyArray<Record<string, unknown>>> {
   where(condition: SQL | undefined): DrizzleStatement
+  innerJoin(table: PgTable, on: SQL): DrizzleStatement
   orderBy(...order: SQL[]): DrizzleStatement
   limit(count: number): DrizzleStatement
 }

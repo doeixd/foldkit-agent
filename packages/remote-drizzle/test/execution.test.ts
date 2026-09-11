@@ -7,6 +7,7 @@ import {
   DrizzleDatabase,
   entity,
   many,
+  manyToMany,
   source,
   type DrizzleDatabaseService,
   type DrizzleStatement,
@@ -58,30 +59,54 @@ const CommentEntity = Entity.make(
 
 const CommentBinding = entity('Comment', comments)
 
+const tags = pgTable('tags', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+})
+
+const postTags = pgTable('post_tags', {
+  postId: uuid('post_id').notNull(),
+  tagId: uuid('tag_id').notNull(),
+})
+
+const TagEntity = Entity.make('Tag', Schema.Struct({ id: Schema.String, name: Schema.String }))
+
+const TagBinding = entity('Tag', tags)
+
 const PostEntity = Entity.make(
   'Post',
   Schema.Struct({
     id: Schema.String,
     title: Schema.String,
     comments: Schema.Array(Entity.ref(CommentEntity)),
+    tags: Schema.Array(Entity.ref(TagEntity)),
   }),
 )
 
 const PostBinding = entity('Post', posts, {
   relations: {
     comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+    tags: manyToMany(TagBinding, {
+      through: postTags,
+      localColumn: postTags.postId,
+      foreignColumn: postTags.tagId,
+    }),
   },
 })
 
 /** Projects each row to the selected columns, as Drizzle's typed select would. */
 const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<string, unknown>>) => {
-  const calls: Array<{ selection: Record<string, unknown>; where: unknown }> = []
+  const calls: Array<{
+    selection: Record<string, unknown>
+    where: unknown
+    innerJoin?: unknown
+  }> = []
   let index = 0
   const database: DrizzleDatabaseService = {
     select: selection => {
       const rows = rowsAt(index)
       index += 1
-      const call = { selection, where: undefined as unknown }
+      const call = { selection, where: undefined as unknown, innerJoin: undefined as unknown }
       calls.push(call)
       const promise = Promise.resolve(
         rows.map(row => Object.fromEntries(Object.keys(selection).map(key => [key, row[key]]))),
@@ -89,6 +114,10 @@ const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<string, un
       const statement = {
         where: (condition: unknown) => {
           call.where = condition
+          return statement
+        },
+        innerJoin: (table: unknown, on: unknown) => {
+          call.innerJoin = { table, on }
           return statement
         },
         orderBy: () => statement,
@@ -220,8 +249,8 @@ describe('RemoteDrizzle execution', () => {
     const { database, calls } = fakeDatabaseQueue([
       [{ id: 'p1', comments: 'p1' }],
       [
-        { id: 'c1', post_id: 'p1' },
-        { id: 'c2', post_id: 'p1' },
+        { id: 'c1', parent: 'p1' },
+        { id: 'c2', parent: 'p1' },
       ],
     ])
     const read = source(PostBinding)
@@ -248,7 +277,7 @@ describe('RemoteDrizzle execution', () => {
       ],
     })
     expect(calls).toHaveLength(2)
-    expect(Object.keys(calls[1]!.selection)).toEqual(['id', 'post_id'])
+    expect(Object.keys(calls[1]!.selection)).toEqual(['id', 'parent'])
   })
 
   it('emits an empty array when a many relation has no children', async () => {
@@ -262,5 +291,39 @@ describe('RemoteDrizzle execution', () => {
     )
 
     expect(records[0]!.values.comments).toEqual([])
+  })
+
+  it('loads a many-to-many relation through the join table', async () => {
+    const { database, calls } = fakeDatabaseQueue([
+      [{ id: 'p1', tags: 'p1' }],
+      [
+        { parent: 'p1', child: 't1' },
+        { parent: 'p1', child: 't2' },
+      ],
+    ])
+    const read = source(PostBinding)
+    const selection = Selection.make(PostEntity, { id: true, tags: true })
+
+    const records = await Effect.runPromise(
+      read
+        .read({ ids: ['p1'], fields: selection.fields, principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records).toEqual([{ id: 'p1', values: { id: 'p1', tags: ['Tag:t1', 'Tag:t2'] } }])
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)(
+        records[0]!.values,
+      ),
+    ).toEqual({
+      id: 'p1',
+      tags: [
+        { entity: 'Tag', id: 't1' },
+        { entity: 'Tag', id: 't2' },
+      ],
+    })
+    expect(calls).toHaveLength(2)
+    expect(Object.keys(calls[1]!.selection)).toEqual(['parent', 'child'])
+    expect(calls[1]!.innerJoin).toBeDefined()
   })
 })

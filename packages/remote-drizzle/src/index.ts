@@ -83,7 +83,12 @@ export const selectColumns = (
     }
     const relation = binding.relations[field]
     if (relation !== undefined) {
-      columns[field] = relation.kind === 'one' ? relation.field : relation.localKey
+      columns[field] =
+        relation.kind === 'one'
+          ? relation.field
+          : relation.kind === 'many'
+            ? relation.localKey
+            : idColumn(binding)
     }
   }
   return columns
@@ -99,7 +104,7 @@ const relationRefs = (
   for (const field of fields) {
     const relation = binding.relations[field]
     if (relation === undefined) continue
-    if (relation.kind === 'many') {
+    if (relation.kind !== 'one') {
       // The injected-executor path cannot load children. Leave the raw key: the
       // client's array schema rejects it instead of reporting a false absence,
       // which would refetch forever. Use `source` for relations.
@@ -144,12 +149,16 @@ const selectRows = (
   columns: Record<string, AnyColumn>,
   options: {
     readonly where?: SQL | undefined
+    readonly innerJoin?: { readonly table: PgTable; readonly on: SQL } | undefined
     readonly orderBy?: readonly SQL[] | undefined
     readonly limit?: number | undefined
   } = {},
 ): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RemoteServerError> => {
   let statement = database.select(columns).from(table)
   if (options.where !== undefined) statement = statement.where(options.where)
+  if (options.innerJoin !== undefined) {
+    statement = statement.innerJoin(options.innerJoin.table, options.innerJoin.on)
+  }
   if (options.orderBy !== undefined) statement = statement.orderBy(...options.orderBy)
   if (options.limit !== undefined) statement = statement.limit(options.limit)
   return Effect.tryPromise({
@@ -207,19 +216,41 @@ export const source = <P = unknown>(
         ]
         const byParent = new Map<string, string[]>()
         if (parentKeys.length > 0) {
-          const childColumns: Record<string, AnyColumn> = {
-            id: idColumn(relation.entity),
-            [relation.foreignKey.name]: relation.foreignKey,
-          }
-          const childRows = yield* selectRows(database, relation.entity.table, childColumns, {
-            where: inArray(relation.foreignKey, parentKeys),
-            orderBy: [asc(idColumn(relation.entity))],
-          })
-          for (const child of childRows) {
-            const key = String(child[relation.foreignKey.name])
-            const refs = byParent.get(key) ?? []
-            refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.id) }))
-            byParent.set(key, refs)
+          const targetId = idColumn(relation.entity)
+          if (relation.kind === 'many') {
+            const childRows = yield* selectRows(
+              database,
+              relation.entity.table,
+              { id: targetId, parent: relation.foreignKey },
+              {
+                where: inArray(relation.foreignKey, parentKeys),
+                orderBy: [asc(targetId)],
+              },
+            )
+            for (const child of childRows) {
+              const refs = byParent.get(String(child.parent)) ?? []
+              refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.id) }))
+              byParent.set(String(child.parent), refs)
+            }
+          } else {
+            const throughRows = yield* selectRows(
+              database,
+              relation.through,
+              { parent: relation.localColumn, child: targetId },
+              {
+                where: inArray(relation.localColumn, parentKeys),
+                innerJoin: {
+                  table: relation.entity.table,
+                  on: eq(relation.foreignColumn, targetId),
+                },
+                orderBy: [asc(targetId)],
+              },
+            )
+            for (const through of throughRows) {
+              const refs = byParent.get(String(through.parent)) ?? []
+              refs.push(Entity.refKey({ entity: relation.entity.name, id: String(through.child) }))
+              byParent.set(String(through.parent), refs)
+            }
           }
         }
         for (const row of rows) {
