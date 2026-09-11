@@ -3,15 +3,9 @@ import { Option } from 'effect'
 import { Scene } from 'foldkit/test'
 import type { HtmlBuilder } from 'foldkit/html'
 import * as CalendarUi from '@foldkit/ui/calendar'
-import {
-  Behavior,
-  Diagnostics,
-  Event,
-  Style,
-  type MixinValue,
-  type SlotAttributes,
-} from 'foldkit-mixins'
+import { Behavior, Event, Style, type MixinValue } from 'foldkit-mixins'
 import { Calendar, CalendarSlots, type ResolvedCalendar, type ResolvedDays } from '../src/index.js'
+import { classValue, diagnosticFrom, holds } from './fixture.js'
 
 type CalendarMixins = ReadonlyArray<MixinValue<CalendarUi.Message> | MixinValue<never>>
 
@@ -50,35 +44,6 @@ const runCalendar = (mixins: CalendarMixins, capture: (captured: Captured) => vo
 const days = (resolved: ResolvedCalendar<CalendarUi.Message>): ResolvedDays<CalendarUi.Message> => {
   if (resolved._tag !== 'Days') throw new Error(`expected Days, got ${resolved._tag}`)
   return resolved
-}
-
-const holds = (
-  attributes: SlotAttributes<CalendarUi.Message>,
-  child: SlotAttributes<CalendarUi.Message>[number],
-): boolean => attributes.includes(child)
-
-const classValue = (attributes: SlotAttributes<CalendarUi.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const diagnosticFrom = (run: () => void): Diagnostics.Diagnostic | undefined => {
-  try {
-    run()
-    return undefined
-  } catch (error) {
-    if (error instanceof Diagnostics.DiagnosticError) return error.diagnostic
-    throw error
-  }
 }
 
 describe('Calendar adapter', () => {

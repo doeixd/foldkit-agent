@@ -2,15 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { Scene } from 'foldkit/test'
 import type { HtmlBuilder } from 'foldkit/html'
 import * as TabsUi from '@foldkit/ui/tabs'
-import {
-  Behavior,
-  Diagnostics,
-  Event,
-  Style,
-  type MixinValue,
-  type SlotAttributes,
-} from 'foldkit-mixins'
+import { Behavior, Event, Style, type MixinValue } from 'foldkit-mixins'
 import { Tabs, TabsSlots, type ResolvedTabs } from '../src/index.js'
+import { classValue, diagnosticFrom, holds, preserves } from './fixture.js'
 
 type DemoValue = 'overview' | 'settings'
 
@@ -53,43 +47,6 @@ const runTabs = (mixins: TabsMixins, capture: (captured: Captured) => void): voi
     },
     Scene.given(TabsUi.init({ id: 'test-tabs' })),
   )
-}
-
-const holds = (
-  attributes: SlotAttributes<TabsUi.Message>,
-  child: SlotAttributes<TabsUi.Message>[number],
-): boolean => attributes.includes(child)
-
-/** Every base child survives resolution in the resolved bundle. */
-const preserves = (
-  base: ReadonlyArray<SlotAttributes<TabsUi.Message>[number]>,
-  resolved: SlotAttributes<TabsUi.Message>,
-): void => {
-  for (const child of base) expect(holds(resolved, child)).toBe(true)
-}
-
-const classValue = (attributes: SlotAttributes<TabsUi.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const diagnosticFrom = (run: () => void): Diagnostics.Diagnostic | undefined => {
-  try {
-    run()
-    return undefined
-  } catch (error) {
-    if (error instanceof Diagnostics.DiagnosticError) return error.diagnostic
-    throw error
-  }
 }
 
 describe('Tabs adapter', () => {

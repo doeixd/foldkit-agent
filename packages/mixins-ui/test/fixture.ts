@@ -1,6 +1,7 @@
+import { expect } from 'vitest'
 import type { Attribute, ChildAttribute, HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
-import type { MixinValue, SlotAttributes, StaticMixin } from 'foldkit-mixins'
+import { Diagnostics, type MixinValue, type SlotAttributes, type StaticMixin } from 'foldkit-mixins'
 
 export type TestMessage = { readonly _tag: 'Clicked' } | { readonly _tag: 'Other' }
 
@@ -29,6 +30,36 @@ export const attributeOf = <Message>(
     if (tagOf(attribute) === tag) return attribute as Record<string, unknown>
   }
   return undefined
+}
+
+export const classValue = <Message>(attributes: SlotAttributes<Message>): string | undefined => {
+  for (const attribute of attributes) {
+    if (tagOf(attribute) === 'Class') return (attribute as { readonly value: string }).value
+  }
+  return undefined
+}
+
+export const holds = <Message>(
+  attributes: SlotAttributes<Message>,
+  child: SlotAttributes<Message>[number],
+): boolean => attributes.includes(child)
+
+/** Every base child survives resolution in the resolved bundle. */
+export const preserves = <Message>(
+  base: ReadonlyArray<SlotAttributes<Message>[number]>,
+  resolved: SlotAttributes<Message>,
+): void => {
+  for (const child of base) expect(holds(resolved, child)).toBe(true)
+}
+
+export const diagnosticFrom = (run: () => void): Diagnostics.Diagnostic | undefined => {
+  try {
+    run()
+    return undefined
+  } catch (error) {
+    if (error instanceof Diagnostics.DiagnosticError) return error.diagnostic
+    throw error
+  }
 }
 
 /** A branded value with the shape `childAttributes` produces, without a runtime. */

@@ -3,15 +3,9 @@ import { Option } from 'effect'
 import { Scene } from 'foldkit/test'
 import type { HtmlBuilder } from 'foldkit/html'
 import * as SliderUi from '@foldkit/ui/slider'
-import {
-  Behavior,
-  Diagnostics,
-  Event,
-  Style,
-  type MixinValue,
-  type SlotAttributes,
-} from 'foldkit-mixins'
+import { Behavior, Event, Style, type MixinValue, type SlotAttributes } from 'foldkit-mixins'
 import { Slider, SliderSlots } from '../src/index.js'
+import { classValue, diagnosticFrom, holds, preserves } from './fixture.js'
 
 type SliderMixins = ReadonlyArray<MixinValue<SliderUi.Message> | MixinValue<never>>
 
@@ -60,43 +54,6 @@ const runSlider = (mixins: SliderMixins, capture: (captured: Captured) => void):
     },
     Scene.given(SliderUi.init({ id: 'test-slider', min: 0, max: 100, step: 1 })),
   )
-}
-
-const holds = (
-  attributes: SlotAttributes<SliderUi.Message>,
-  child: SlotAttributes<SliderUi.Message>[number],
-): boolean => attributes.includes(child)
-
-/** Every base child survives resolution in the resolved bundle. */
-const preserves = (
-  base: ReadonlyArray<SlotAttributes<SliderUi.Message>[number]>,
-  resolved: SlotAttributes<SliderUi.Message>,
-): void => {
-  for (const child of base) expect(holds(resolved, child)).toBe(true)
-}
-
-const classValue = (attributes: SlotAttributes<SliderUi.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const diagnosticFrom = (run: () => void): Diagnostics.Diagnostic | undefined => {
-  try {
-    run()
-    return undefined
-  } catch (error) {
-    if (error instanceof Diagnostics.DiagnosticError) return error.diagnostic
-    throw error
-  }
 }
 
 describe('Slider adapter', () => {

@@ -11,6 +11,7 @@ import {
   type SlotAttributes,
 } from 'foldkit-mixins'
 import { Popover as PopoverAdapter, PopoverSlots } from '../src/index.js'
+import { classValue, holds } from './fixture.js'
 
 type PopoverMixins = ReadonlyArray<MixinValue<Popover.Message> | MixinValue<never>>
 
@@ -51,25 +52,6 @@ const runPopover = (mixins: PopoverMixins, capture: (captured: Captured) => void
     Scene.given(Popover.init({ id: 'test-popover' })),
   )
 }
-
-const classValue = (attributes: SlotAttributes<Popover.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const holds = (
-  attributes: SlotAttributes<Popover.Message>,
-  child: SlotAttributes<Popover.Message>[number],
-): boolean => attributes.includes(child)
 
 describe('Popover adapter', () => {
   it('preserves the real ChildAttribute bundles by identity', () => {

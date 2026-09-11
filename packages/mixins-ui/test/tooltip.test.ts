@@ -11,6 +11,7 @@ import {
   type SlotAttributes,
 } from 'foldkit-mixins'
 import { Tooltip as TooltipAdapter, TooltipSlots } from '../src/index.js'
+import { classValue, holds } from './fixture.js'
 
 type TooltipMixins = ReadonlyArray<MixinValue<Tooltip.Message> | MixinValue<never>>
 
@@ -47,25 +48,6 @@ const runTooltip = (mixins: TooltipMixins, capture: (captured: Captured) => void
     Scene.given(Tooltip.init({ id: 'test-tooltip' })),
   )
 }
-
-const classValue = (attributes: SlotAttributes<Tooltip.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const holds = (
-  attributes: SlotAttributes<Tooltip.Message>,
-  child: SlotAttributes<Tooltip.Message>[number],
-): boolean => attributes.includes(child)
 
 describe('Tooltip adapter', () => {
   it('preserves the real ChildAttribute bundles by identity', () => {

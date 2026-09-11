@@ -5,31 +5,16 @@ import { inertHtml } from 'foldkit/html'
 import { Style, type SlotAttributes } from 'foldkit-mixins'
 import { Button, ButtonSlots } from 'foldkit-mixins-ui'
 import { SurfaceView } from '../src/index.js'
-import { Message, TodoList, TodoSlots, type TodoMessage } from './fixture.js'
+import {
+  attributeOf,
+  classValue,
+  Message,
+  TodoList,
+  TodoSlots,
+  type TodoMessage,
+} from './fixture.js'
 
 const h = inertHtml as unknown as HtmlBuilder<TodoMessage>
-
-const tagOf = (attribute: SlotAttributes<TodoMessage>[number]): string =>
-  typeof attribute === 'object' && attribute !== null && '_tag' in attribute
-    ? String((attribute as { readonly _tag: unknown })._tag)
-    : 'Child'
-
-const attributeOf = (
-  attributes: SlotAttributes<TodoMessage>,
-  tag: string,
-): Record<string, unknown> | undefined => {
-  for (const attribute of attributes) {
-    if (tagOf(attribute) === tag) return attribute as Record<string, unknown>
-  }
-  return undefined
-}
-
-const classValue = (attributes: SlotAttributes<TodoMessage>): string | undefined => {
-  for (const attribute of attributes) {
-    if (tagOf(attribute) === 'Class') return (attribute as { readonly value: string }).value
-  }
-  return undefined
-}
 
 describe('@foldkit/ui inside a SurfaceView', () => {
   it('renders a Button with a Surface Message and a Mixin', () => {

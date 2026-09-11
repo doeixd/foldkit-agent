@@ -3,15 +3,9 @@ import { Option } from 'effect'
 import { Scene } from 'foldkit/test'
 import type { HtmlBuilder } from 'foldkit/html'
 import * as RadioGroupUi from '@foldkit/ui/radioGroup'
-import {
-  Behavior,
-  Diagnostics,
-  Event,
-  Style,
-  type MixinValue,
-  type SlotAttributes,
-} from 'foldkit-mixins'
+import { Behavior, Event, Style, type MixinValue, type SlotAttributes } from 'foldkit-mixins'
 import { RadioGroup, RadioGroupSlots } from '../src/index.js'
+import { classValue, diagnosticFrom } from './fixture.js'
 
 const DemoRadio = RadioGroupUi.create<'free' | 'pro'>()
 
@@ -83,30 +77,6 @@ const runRadio = (
     },
     Scene.given(RadioGroupUi.init({ id: 'test-radio' })),
   )
-}
-
-const classValue = (attributes: SlotAttributes<RadioGroupUi.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const diagnosticFrom = (run: () => void): Diagnostics.Diagnostic | undefined => {
-  try {
-    run()
-    return undefined
-  } catch (error) {
-    if (error instanceof Diagnostics.DiagnosticError) return error.diagnostic
-    throw error
-  }
 }
 
 describe('RadioGroup adapter', () => {

@@ -4,27 +4,13 @@ import { inertHtml } from 'foldkit/html'
 import { Behavior, Style, type SlotAttributes } from 'foldkit-mixins'
 import { Surface } from 'foldkit-surface'
 import { SurfaceView } from '../src/index.js'
-import { Message, TodoList, TodoSlots, type TodoMessage } from './fixture.js'
+import { classValue, Message, tagOf, TodoList, TodoSlots, type TodoMessage } from './fixture.js'
 
 const h = inertHtml as unknown as HtmlBuilder<TodoMessage>
 
 type ProjectedTodo = {
   readonly todos: ReadonlyArray<{ readonly id: string; readonly title: string }>
   readonly selectedId: string | null
-}
-
-const tagOf = (attribute: SlotAttributes<TodoMessage>[number]): string =>
-  typeof attribute === 'object' && attribute !== null && '_tag' in attribute
-    ? String((attribute as { readonly _tag: unknown })._tag)
-    : 'Child'
-
-const classValue = (attributes: SlotAttributes<TodoMessage>): string | undefined => {
-  for (const attribute of attributes) {
-    if (tagOf(attribute) === 'Class') {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
 }
 
 describe('SurfaceView', () => {

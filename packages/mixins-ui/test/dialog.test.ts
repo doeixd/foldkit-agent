@@ -11,6 +11,7 @@ import {
   type SlotAttributes,
 } from 'foldkit-mixins'
 import { Dialog as DialogAdapter, DialogSlots } from '../src/index.js'
+import { classValue, holds } from './fixture.js'
 
 type DialogMixins = ReadonlyArray<MixinValue<Dialog.Message> | MixinValue<never>>
 
@@ -53,25 +54,6 @@ const runDialog = (mixins: DialogMixins, capture: (captured: Captured) => void):
     Scene.given(Dialog.init({ id: 'test-dialog', isOpen: true })),
   )
 }
-
-const classValue = (attributes: SlotAttributes<Dialog.Message>): string | undefined => {
-  for (const attribute of attributes) {
-    if (
-      typeof attribute === 'object' &&
-      attribute !== null &&
-      '_tag' in attribute &&
-      (attribute as { readonly _tag: string })._tag === 'Class'
-    ) {
-      return (attribute as { readonly value: string }).value
-    }
-  }
-  return undefined
-}
-
-const holds = (
-  attributes: SlotAttributes<Dialog.Message>,
-  child: SlotAttributes<Dialog.Message>[number],
-): boolean => attributes.includes(child)
 
 describe('Dialog adapter', () => {
   it('preserves the real ChildAttribute bundles by identity', () => {
