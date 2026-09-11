@@ -224,6 +224,10 @@ So the exposure is the **existence and id of referenced rows**, not their data.
 
 ## D4 — Computed and aggregate fields
 
+**Status: A2 (adapter-level counts) in `b7d7f39`.** `entity(..., { computed })`
+declares a count over a collection relation. A3 (first-class `Entity.computed`)
+remains deferred, as does generalizing beyond counts.
+
 ### Current behaviour
 
 Not supported. `Entity` fields map to columns or declared relations.
@@ -297,7 +301,8 @@ dialects in one client is a bug factory.
    remains and should be designed with top-level queries.
 5. **D3 (A2 row-level relation `where`)** — done (`d43c182`): a principal-scoped
    filter per collection relation on `source`.
-6. **D4** — only when an app needs computed values.
+6. **D4** — counts landed (`b7d7f39`); generalize beyond counts only if an app
+   needs it.
 7. **SQL window optimization** — benchmark-driven.
 
 ## Decision summary
@@ -308,7 +313,7 @@ dialects in one client is a bug factory.
 | D1 accumulation | B2/B3-lite (`afc3d2c`), B4 long-term | L | client model | Partial: no segmented `Connection`/GC |
 | D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
 | D3 relation authz | A1/A5 field gating; A2 landed (`d43c182`) | S–M | adapter (A2) | Target ids revealed unless fields are gated |
-| D4 computed | A1 defer, A2 counts later | S–M | adapter | No aggregates |
+| D4 computed | A1 defer, A2 counts later | S–M | adapter | Counts landed (`b7d7f39`); other aggregates absent |
 | Nullable ordering | NULL-aware keyset | S | cursor kernel | Resolved (`6aca3b7`) |
 | Window functions | Defer, benchmark-driven | L | database contract | N queries for N parents |
 
