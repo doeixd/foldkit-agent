@@ -28,9 +28,10 @@ suggested sequence are at the end.
 
 ## D1 — Relation cursoring and connection accumulation
 
-**Status: server cursor (A2) implemented in `ce7dec6`.** `last` pages per
-parent; `after`/`before` work for a single parent. Client accumulation (B2/B3/B4)
-remains open.
+**Status: server cursor (A2) in `ce7dec6`; page merge (B2/B3-lite) in
+`afc3d2c`.** `last` pages per parent; `after`/`before` work for a single parent;
+`Remote.writeRead` merges a cursor page onto the stored page. A full `Connection`
+value/store (B3/B4) remains open.
 
 ### Current behaviour
 
@@ -291,8 +292,9 @@ dialects in one client is a bug factory.
    `after`/`before` for a single parent, reusing the query source's id cursor.
 3. **Nullable ordering fix** — done (`6aca3b7`): NULL-aware keyset branches
    shared by `query` and relations.
-4. **D1 client accumulation (B2 -> B3, B4 long-term)** — the library-grade
-   connection; design B4 together with top-level queries.
+4. **D1 client accumulation** — page merge landed (`afc3d2c`): `writeRead`
+   appends/prepends a cursor page. A full segmented `Connection` value/store (B4)
+   remains and should be designed with top-level queries.
 5. **D3 (A2 row-level relation `where`)** — done (`d43c182`): a principal-scoped
    filter per collection relation on `source`.
 6. **D4** — only when an app needs computed values.
@@ -303,7 +305,7 @@ dialects in one client is a bug factory.
 | Decision | Recommended option | Effort | Blast radius | Risk if deferred |
 | --- | --- | --- | --- | --- |
 | D1 cursor | A2 single-parent, C1 id cursor | M | adapter + server | Resolved server-side (`ce7dec6`); batched relations are first/last only |
-| D1 accumulation | B2 now, B3 next, B4 long-term | L | client model | Apps own merge correctness |
+| D1 accumulation | B2/B3-lite (`afc3d2c`), B4 long-term | L | client model | Partial: no segmented `Connection`/GC |
 | D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
 | D3 relation authz | A1/A5 field gating; A2 landed (`d43c182`) | S–M | adapter (A2) | Target ids revealed unless fields are gated |
 | D4 computed | A1 defer, A2 counts later | S–M | adapter | No aggregates |
