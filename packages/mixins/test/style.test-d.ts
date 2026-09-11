@@ -29,3 +29,12 @@ Theme.variable(Brand, 'color', 'text')
 Theme.variable(Brand, 'spacing', 'sm')
 // @ts-expect-error unknown theme token.
 Theme.variable(Brand, 'color', 'missing')
+
+interface PredicateInput {
+  readonly dark: boolean
+}
+
+Style.whenInput<PredicateInput>(input => input.dark, Style.class('dark'))
+
+// @ts-expect-error a predicate must return boolean.
+Style.whenInput<PredicateInput>(() => 1, Style.class('dark'))

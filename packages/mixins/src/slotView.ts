@@ -6,7 +6,8 @@
  * capability masking is preserved.
  */
 import type { Html, HtmlBuilder } from 'foldkit/html'
-import { evaluate, type AnyMixin, type Mixin, type StaticMixin } from './mixin.js'
+import type { SlotContribution } from './contribution.js'
+import { evaluate, type AnyMixin, type Mixin, type MixinFor, type StaticMixin } from './mixin.js'
 import { pipeSelf, type Pipeable } from './pipe.js'
 import { resolve, type SlotAttributes } from './resolver.js'
 import type { Any as AnySlot, SlotProtection } from './slot.js'
@@ -29,14 +30,14 @@ export interface SlotView<Slots, Input, Message> extends Pipeable<SlotView<Slots
   (input: Input, h: HtmlBuilder<Message>): Html
   readonly name?: string
   readonly slots: Slots
-  readonly mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>
+  readonly mixins: ReadonlyArray<MixinFor<Message>>
   readonly render: SlotViewRender<Slots, Input, Message>
 }
 
 /** Build one `attrs` resolver per published slot, evaluating Mixins lazily. */
 export const buildersFor = <Slots, Message, Input>(
   slots: Slots,
-  mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>,
+  mixins: ReadonlyArray<MixinFor<Message>>,
   context: { readonly input: Input; readonly h: HtmlBuilder<Message> },
 ): SlotBuilders<Slots, Message> => {
   const source = slots as unknown as Record<string, AnySlot>
@@ -51,7 +52,12 @@ export const buildersFor = <Slots, Message, Input>(
         for (const mixin of mixins) {
           const contribution = mixin.contributions[name]
           if (contribution !== undefined) {
-            contributions.push(evaluate(contribution, { input: context.input, h: context.h }))
+            contributions.push(
+              evaluate(contribution as SlotContribution<Message>, {
+                input: context.input,
+                h: context.h,
+              }),
+            )
           }
         }
         return resolve(base, contributions, { slot: name, protected: protection })
@@ -64,7 +70,7 @@ export const buildersFor = <Slots, Message, Input>(
 const makeView = <Slots, Input, Message>(
   name: string | undefined,
   slots: Slots,
-  mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>,
+  mixins: ReadonlyArray<MixinFor<Message>>,
   render: SlotViewRender<Slots, Input, Message>,
 ): SlotView<Slots, Input, Message> => {
   const view = (input: Input, h: HtmlBuilder<Message>): Html =>
@@ -98,9 +104,9 @@ export type SlotViewTransformFor<Message> = <Slots, Input>(
 ) => SlotView<Slots, Input, Message>
 
 /** Attach one Mixin. Returns a new view; the original is unchanged. */
-export function attach(mixin: StaticMixin<never>): SlotViewTransform
+export function attach(mixin: StaticMixin<never> | Mixin<never>): SlotViewTransform
 export function attach<MixinMessage>(mixin: Mixin<MixinMessage>): SlotViewTransformFor<MixinMessage>
-export function attach(mixin: AnyMixin): any {
+export function attach(mixin: AnyMixin | Mixin<never>): any {
   return (view: SlotView<any, any, any>) =>
     makeView(view.name, view.slots, [...view.mixins, mixin], view.render)
 }

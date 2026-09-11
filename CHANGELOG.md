@@ -23,8 +23,12 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   Mixins per slot into ordinary Foldkit attributes; `SlotView.attach` is
   immutable.
 - **Style v1.** Pure `Style.class`/`inline`/`compose`/`when`/`forSlots`, compiling
-  to a contribution; `Style.attach` is `SlotView.attach` for a style. Input-driven
-  conditional style and the CSS compiler are not in this slice.
+  to a contribution; `Style.attach` is `SlotView.attach` for a style.
+- **Input-driven Style.** `Style.whenInput(predicate, piece)` defers a piece to
+  render time, folded against the view's input and composable (including nested
+  conditions). It compiles to a message-free `Mixin<never>`; the mixin boundaries
+  accept `Mixin<never>` explicitly because it does not widen to `Mixin<Message>`.
+  The CSS compiler is not in this slice.
 - **Behavior v1.** `Behavior.slot`/`forSlots` build attributes from the view's
   `input` and `h` at resolve time, so the view's Message universe governs them.
   Definition-time validation rejects an unknown slot, an unsatisfied capability,

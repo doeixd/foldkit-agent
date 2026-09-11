@@ -8,7 +8,9 @@
 import type { HtmlBuilder } from 'foldkit/html'
 import { SlotView, type MixinValue, type SlotAttributes, type StaticMixin } from 'foldkit-mixins'
 
-export type MixinList<Message> = ReadonlyArray<MixinValue<Message> | StaticMixin<Message>>
+export type MixinList<Message> = ReadonlyArray<
+  MixinValue<Message> | MixinValue<never> | StaticMixin<Message>
+>
 
 export interface ResolveContext<Input, Message> {
   readonly input: Input

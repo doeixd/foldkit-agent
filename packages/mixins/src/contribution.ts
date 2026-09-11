@@ -26,6 +26,15 @@ export type DynamicContribution<Message> = (
   context: ContributionContext<Message>,
 ) => StaticContribution<Message>
 
+/**
+ * A contribution that reads the view input but names no Message universe, so it
+ * stays assignable to any view. Input-driven Style (`Style.whenInput`) compiles
+ * to this. It never receives `h`, because a conditional style emits no handlers.
+ */
+export type InputContribution<Message = never> = (context: {
+  readonly input: unknown
+}) => StaticContribution<Message>
+
 export type SlotContribution<Message> = StaticContribution<Message> | DynamicContribution<Message>
 
 export type Contribution<Message> = {

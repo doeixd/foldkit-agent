@@ -181,21 +181,37 @@ override even when a later attachment would otherwise win.
 
 ### Behavior and the Mixin algebra
 
-- `StaticMixin` holds only static contributions, so it stays assignable to any
-  Message universe; `Style` produces one. `Mixin` may hold deferred
-  contributions typed with one Message universe; `Behavior` produces one.
+- A `Mixin` contribution is static data (`StaticMixin`) or deferred (`Mixin`).
+  `MixinFor<Message>` is the union any view accepts: `Mixin<Message> |
+  StaticMixin<Message> | Mixin<never>`.
+- `Mixin<never>` must be named explicitly in that union: a message-free dynamic
+  Mixin does **not** widen to `Mixin<Message>`, because `HtmlBuilder` is
+  invariant in `Message` and the deferred context carries `h`. `Style` produces
+  a `Mixin<never>` so it attaches to any view.
 - A deferred contribution is `(context: { input; h }) => StaticContribution`.
-  The context's `input` is `unknown` at the container level; the Behavior
-  authoring helper re-narrows it. This keeps `StaticMixin<never>` usable in any
-  `buildersFor` call while Message safety stays with the view's `h`.
+  Input-driven Style compiles to the narrower `InputContribution`,
+  `(context: { input }) => StaticContribution`, which names no Message universe
+  and so is assignable to the dynamic form for every `Message`. The context's
+  `input` is `unknown` at the container level; authors and Behavior re-narrow it.
 - `buildersFor` evaluates deferred contributions lazily inside `attrs`, per
-  render, so a Behavior sees the view's `input` and `h`.
+  render, so a Behavior sees the view's `input` and `h` and an input-driven
+  Style is folded against the same `input`.
 - Behavior validates its `requires` against the target Slot at definition time
   (`mixins:unknown-slot`, `mixins:capability-mismatch`,
   `mixins:unsupported-event`, `mixins:unsupported-attribute`).
 - Behavior owns no state. Stateful widgets stay `@foldkit/ui` Submodels; a
   continuous element listener is a Mount; a network call is Message -> update ->
   Command.
+
+### Input-driven Style
+
+- `Style.whenInput(predicate, piece)` defers a piece to render time; it applies
+  when `predicate` sees the view's `input`. `Style.when` remains the
+  authoring-time boolean.
+- `Style.compose` concatenates conditions, and `resolveStyle` folds active
+  conditions recursively, so a conditional piece may itself be conditional.
+- A style with no conditions stays static data; one with conditions compiles to
+  an `InputContribution`, still message-free.
 
 ### A11y patterns
 
@@ -247,7 +263,8 @@ override even when a later attachment would otherwise win.
 6. Behavior v1 (no hidden state). Done.
 7. Mount composition. Done.
 8. A11y patterns + diagnostics. Done.
-9. `@foldkit/ui` adapter (separate package). Button/Input/Checkbox/Disclosure done.
+9. `@foldkit/ui` adapter (separate package). Button/Input/Textarea/Checkbox/
+   Switch/Fieldset/Disclosure done; Submodel components remain.
 10. Surface adapter (separate package).
 
 Style CSS compiler, DevTools, and agent metadata wait until the core

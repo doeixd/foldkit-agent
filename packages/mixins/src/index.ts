@@ -41,13 +41,14 @@ export type {
   Contribution,
   ContributionContext,
   DynamicContribution,
+  InputContribution,
   SlotContribution,
   StaticContribution,
   StaticContributionMap,
 } from './contribution.js'
 export type { Diagnostic, DiagnosticCode } from './diagnostics.js'
 export type { EventToken } from './event.js'
-export type { AnyMixin, Mixin as MixinValue, StaticMixin } from './mixin.js'
+export type { AnyMixin, Mixin as MixinValue, MixinFor, StaticMixin } from './mixin.js'
 export type { RequirementToken } from './requirement.js'
 export type { ResolveOptions, SlotAttributes } from './resolver.js'
 export type { SlotProtection, UnnamedSlot } from './slot.js'
@@ -59,5 +60,5 @@ export type {
   SlotViewTransformFor,
 } from './slotView.js'
 export type { Contract as SlotsContract } from './slots.js'
-export type { NamedStyle, StylePieces, StyleValue } from './style.js'
+export type { NamedStyle, StyleCondition, StylePieces, StyleValue } from './style.js'
 export type { Theme as ThemeValue, ThemeTokens } from './theme.js'

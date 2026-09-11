@@ -43,4 +43,16 @@ describe('Mixin.compose', () => {
     expect(Object.keys(empty.contributions)).toEqual([])
     expect(Mixin.empty<TestMessage>().name).toBe('Empty')
   })
+
+  it('composes a message-free Mixin with a message-bearing one', () => {
+    const style = Mixin.dynamic<never>('Style', { root: { classes: ['s'] } })
+    const behavior = Mixin.make<TestMessage>('B', {
+      root: { attributes: [h.OnClick({ _tag: 'Clicked' })] },
+    })
+    const merged = Mixin.compose(style, behavior)
+    const root = Mixin.evaluate(merged.contributions.root ?? {}, { input: undefined, h })
+    expect(merged.name).toBe('Style+B')
+    expect(root.classes).toEqual(['s'])
+    expect(root.attributes).toHaveLength(1)
+  })
 })

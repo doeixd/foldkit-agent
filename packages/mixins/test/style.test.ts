@@ -7,6 +7,7 @@ import { h, type TestMessage } from './resolverFixture.js'
 
 interface FieldInput {
   readonly label: string
+  readonly dark?: boolean
 }
 
 const vnodeData = (value: unknown): Record<string, unknown> =>
@@ -33,6 +34,48 @@ describe('Style', () => {
   it('when is empty for a false condition and the piece otherwise', () => {
     expect(Style.when(false, Style.class('x'))).toBe(Style.empty)
     expect(Style.when(true, Style.class('x')).classes).toEqual(['x'])
+  })
+
+  it('whenInput applies class and inline pieces from the render input', () => {
+    const FieldStyle = Style.forSlots(FieldSlots)({
+      root: Style.compose(
+        Style.class('field'),
+        Style.whenInput<FieldInput>(
+          input => input.dark === true,
+          Style.compose(Style.class('dark'), Style.inline({ color: 'white' })),
+        ),
+      ),
+    })
+    const View = FieldView.pipe(Style.attach(FieldStyle))
+    const light = vnodeData(View({ label: 'Name', dark: false }, h))
+    const dark = vnodeData(View({ label: 'Name', dark: true }, h))
+    expect(light.class).toMatchObject({ field: true })
+    expect(light.class).not.toMatchObject({ dark: true })
+    expect(light.style).toBeUndefined()
+    expect(dark.class).toMatchObject({ field: true, dark: true })
+    expect(dark.style).toMatchObject({ color: 'white' })
+  })
+
+  it('resolves every active input condition, including nested ones', () => {
+    const FieldStyle = Style.forSlots(FieldSlots)({
+      root: Style.compose(
+        Style.whenInput<FieldInput>(input => input.dark === true, Style.class('dark')),
+        Style.whenInput<FieldInput>(
+          input => input.label === 'Name',
+          Style.whenInput<FieldInput>(input => input.dark !== true, Style.class('light')),
+        ),
+      ),
+    })
+    const View = FieldView.pipe(Style.attach(FieldStyle))
+    expect(vnodeData(View({ label: 'Name', dark: true }, h)).class).toMatchObject({
+      dark: true,
+    })
+    expect(vnodeData(View({ label: 'Name', dark: false }, h)).class).toMatchObject({
+      light: true,
+    })
+    expect(vnodeData(View({ label: 'Other', dark: true }, h)).class).toMatchObject({
+      dark: true,
+    })
   })
 
   it('forSlots compiles pieces into one Mixin', () => {

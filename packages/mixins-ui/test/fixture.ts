@@ -4,7 +4,9 @@ import type { MixinValue, SlotAttributes, StaticMixin } from 'foldkit-mixins'
 
 export type TestMessage = { readonly _tag: 'Clicked' } | { readonly _tag: 'Other' }
 
-export type Mixins = ReadonlyArray<MixinValue<TestMessage> | StaticMixin<TestMessage>>
+export type Mixins = ReadonlyArray<
+  MixinValue<TestMessage> | MixinValue<never> | StaticMixin<TestMessage>
+>
 
 /** `inertHtml` cast to a real Message universe; the tagged shape `h` builds. */
 export const h = inertHtml as unknown as HtmlBuilder<TestMessage>
