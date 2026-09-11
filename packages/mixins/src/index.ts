@@ -20,6 +20,7 @@ export * as Slots from './slots.js'
 export * as SlotView from './slotView.js'
 
 export { Style } from './style.js'
+export { Theme } from './theme.js'
 
 export type { AttrToken } from './attr.js'
 export type {
@@ -52,3 +53,4 @@ export type {
 } from './slotView.js'
 export type { Contract as SlotsContract } from './slots.js'
 export type { NamedStyle, StylePieces, StyleValue } from './style.js'
+export type { Theme as ThemeValue, ThemeTokens } from './theme.js'

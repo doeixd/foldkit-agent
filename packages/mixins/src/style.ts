@@ -58,7 +58,7 @@ export const forSlots =
     const known = slots as unknown as Record<string, unknown>
     const contributions: Record<string, StaticContribution<never>> = {}
     for (const [key, piece] of Object.entries(pieces as Record<string, StyleValue | undefined>)) {
-      if (!(key in known)) {
+      if (!Object.hasOwn(known, key)) {
         throw new DiagnosticError({
           source: 'mixins',
           code: 'mixins:unknown-slot',
@@ -83,6 +83,37 @@ export const attach =
   ): SlotView.SlotView<ViewSlots, Input, Message> =>
     SlotView.attach(style.mixin)(view)
 
+export type RecipeVariantDef = Readonly<Record<string, StyleValue>>
+
+export interface RecipeDef<Variants extends Readonly<Record<string, RecipeVariantDef>>> {
+  readonly base?: StyleValue
+  readonly variants: Variants
+  readonly defaults?: { readonly [K in keyof Variants]?: keyof Variants[K] & string }
+}
+
+export type AnyRecipeDef = RecipeDef<Record<string, RecipeVariantDef>>
+
+export type RecipeSelection<D extends AnyRecipeDef> = {
+  readonly [K in keyof D['variants']]?: keyof D['variants'][K] & string
+}
+
+/** A recipe is just Style data: base + one piece per selected variant. */
+export const recipe =
+  <D extends AnyRecipeDef>(def: D) =>
+  (selection: RecipeSelection<D>): StyleValue => {
+    const pieces: Array<StyleValue> = []
+    if (def.base !== undefined) pieces.push(def.base)
+    for (const [variant, values] of Object.entries(def.variants)) {
+      const chosen =
+        (selection as Record<string, string | undefined>)[variant] ??
+        (def.defaults as Record<string, string | undefined> | undefined)?.[variant]
+      if (chosen === undefined) continue
+      const piece = (values as Record<string, StyleValue>)[chosen]
+      if (piece !== undefined) pieces.push(piece)
+    }
+    return compose(...pieces)
+  }
+
 export const Style = {
   class: classPiece,
   inline,
@@ -92,4 +123,5 @@ export const Style = {
   toContribution,
   forSlots,
   attach,
+  recipe,
 } as const

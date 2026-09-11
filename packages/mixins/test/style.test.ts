@@ -64,4 +64,17 @@ describe('Style', () => {
     expect(data.class).toMatchObject({ field: true })
     expect(data.style).toMatchObject({ display: 'grid' })
   })
+
+  it('recipe applies base, selected variants, and defaults', () => {
+    const Button = Style.recipe({
+      base: Style.class('button'),
+      variants: {
+        intent: { primary: Style.class('primary'), secondary: Style.class('secondary') },
+        size: { sm: Style.class('sm'), md: Style.class('md') },
+      },
+      defaults: { size: 'md' },
+    })
+    expect(Button({ intent: 'secondary' }).classes).toEqual(['button', 'secondary', 'md'])
+    expect(Button({ intent: 'primary', size: 'sm' }).classes).toEqual(['button', 'primary', 'sm'])
+  })
 })
