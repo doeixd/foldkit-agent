@@ -251,16 +251,11 @@ generalize to **A3** if computed values must compose through selections.
 
 ### Nullable ordered columns
 
-`keysetWhere` emits `gt(col, null)` when a cursor value is null, which is
-invalid SQL, and it does not encode Postgres NULL ordering (NULLs last for ASC,
-first for DESC). Any cursor option (C1 or C2) needs NULL-aware branches:
-
-```
-(col IS NOT NULL AND col > $x) OR (col IS NULL)   -- ASC, ascending traversal
-```
-
-This is independent of D1–D4 and should be fixed before cursoring nullable
-columns ships, in both `query` and relations.
+**Resolved in `6aca3b7`.** `keysetWhere` follows Postgres' default NULL ordering
+(ASC: nulls last, DESC: nulls first): a null cursor value becomes `IS NOT NULL`
+or `false`, a non-null value adds `IS NULL` on the nulls-last side, and equality
+uses `IS NULL` rather than comparing to NULL. Both `query` and relations share
+the kernel.
 
 ### SQL window optimization
 
@@ -290,7 +285,8 @@ dialects in one client is a bug factory.
    write path D1 wants.
 2. **D1 server cursor (A2)** — done (`ce7dec6`): `last` per parent and
    `after`/`before` for a single parent, reusing the query source's id cursor.
-3. **Nullable ordering fix** — required before cursoring nullable columns.
+3. **Nullable ordering fix** — done (`6aca3b7`): NULL-aware keyset branches
+   shared by `query` and relations.
 4. **D1 client accumulation (B2 -> B3, B4 long-term)** — the library-grade
    connection; design B4 together with top-level queries.
 5. **D3 (A2 row-level relation `where`)** — small, when an app needs it.
@@ -306,7 +302,7 @@ dialects in one client is a bug factory.
 | D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
 | D3 relation authz | A1/A5 now, A2 row-level later | S–M | adapter (A2) | Reveals target ids |
 | D4 computed | A1 defer, A2 counts later | S–M | adapter | No aggregates |
-| Nullable ordering | Fix before nullable cursors | S | cursor kernel | Invalid SQL on a null cursor |
+| Nullable ordering | NULL-aware keyset | S | cursor kernel | Resolved (`6aca3b7`) |
 | Window functions | Defer, benchmark-driven | L | database contract | N queries for N parents |
 
 ## Open questions
