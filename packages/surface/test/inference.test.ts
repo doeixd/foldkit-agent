@@ -43,6 +43,28 @@ describe('Phase 0 runtime smoke', () => {
     expect(projection.read(example)).toEqual({ name: 'ada' })
   })
 
+  it('merges and de-duplicates projection dependencies', () => {
+    // A raw-Schema projection is not a Model projection: no dependencies.
+    expect(Projection.of(User.schema)({ id: true, name: true }).dependencies).toEqual([])
+
+    const once = Projection.struct({ a: App.model.session, b: App.model.session })
+    expect(once.dependencies).toEqual([['session']])
+
+    const nested = Projection.struct({
+      a: App.model.session,
+      b: App.model.session.user.name,
+    })
+    expect(nested.dependencies).toEqual([['session'], ['session', 'user', 'name']])
+
+    const reordered = Projection.struct({
+      b: App.model.session.user.name,
+      a: App.model.session,
+    })
+    expect(new Set(reordered.dependencies.map(path => path.join('.')))).toEqual(
+      new Set(['session', 'session.user.name']),
+    )
+  })
+
   it('starts a Remote selection as Initial', () => {
     const Data = Remote.make({ entities: [User] })
     const selection = Selection.make(User, { id: true, name: true })

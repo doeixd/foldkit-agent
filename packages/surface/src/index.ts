@@ -93,6 +93,19 @@ function makeTree(
 
 export type DependencyTree = readonly (readonly string[])[]
 
+/** Unions dependency trees, dropping duplicates; the result is a set. */
+function mergeDependencies(dependencies: DependencyTree): DependencyTree {
+  const seen = new Set<string>()
+  const merged: (readonly string[])[] = []
+  for (const dependency of dependencies) {
+    const key = dependency.join('\u0000')
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(dependency)
+  }
+  return merged
+}
+
 export interface Projection<Root, Value> {
   readonly Model: Schema.Schema<Value>
   readonly dependencies: DependencyTree
@@ -157,10 +170,11 @@ export const Projection = {
         for (const [key, reader] of readers) out[key] = reader(root)
         return out
       }
-      return makeProjection(Schema.Struct(picked), dependencies, read) as unknown as Projection<
-        Schema.Struct.Type<F>,
-        OfValue<F, Sel>
-      >
+      return makeProjection(
+        Schema.Struct(picked),
+        mergeDependencies(dependencies),
+        read,
+      ) as unknown as Projection<Schema.Struct.Type<F>, OfValue<F, Sel>>
     },
 
   struct: <const Entries extends Record<string, Projection<any, any> | ModelRef<any, any>>>(
@@ -188,10 +202,11 @@ export const Projection = {
       for (const [key, reader] of readers) out[key] = reader(root)
       return out
     }
-    return makeProjection(Schema.Struct(picked), dependencies, read) as unknown as Projection<
-      EntryRoot<Entries[keyof Entries]>,
-      StructValue<Entries>
-    >
+    return makeProjection(
+      Schema.Struct(picked),
+      mergeDependencies(dependencies),
+      read,
+    ) as unknown as Projection<EntryRoot<Entries[keyof Entries]>, StructValue<Entries>>
   },
 
   read: <Root, Value>(projection: Projection<Root, Value>, root: Root): Value =>
