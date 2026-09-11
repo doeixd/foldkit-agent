@@ -285,10 +285,29 @@ Effect Schema derivation from tables (`drizzle-orm/effect-schema`).
 - `drizzle-orm/effect-schema`: `createSelectSchema` / `createInsertSchema` /
   `createUpdateSchema` plus the `BuildSchema` / `BuildRefine` types.
 
+**Runtime correction (probed 2026-09-11, not static).** Reading the `.d.ts` is
+not enough: importing `drizzle-orm/effect-postgres` under `effect@4.0.0-rc.112`
+fails immediately with `TypeError: Schema.TaggedErrorClass is not a function`.
+No published Effect exports `TaggedErrorClass` (checked rc.112 through rc.115),
+and `drizzle-orm@1.0.0-beta.22` — the last line that uses the rc.112-era
+`Schema.TaggedError` — builds on Effect 3 (`Effect.Service`, `@effect/sql-pg@^0.49`).
+So **no published Drizzle version's `effect-postgres` driver runs on this
+workspace's pinned Effect.** The compiler half (`drizzle-orm/pg-core`,
+`drizzle-orm/effect-schema`, `PgDialect`) is unaffected and works at runtime.
+
+**Proven execution path instead:** render the compiled Drizzle `SQL` with
+`PgDialect.sqlToQuery` and execute the `{ sql, params }` through
+`@effect/sql-pg`'s `SqlClient.unsafe` (rc.112-compatible). Verified end-to-end
+against a real `postgres:17` container: a parameterized `select` with a pruned
+column list returned the expected rows. This keeps the "no connection captured"
+invariant — the connection stays in the Effect Layer, not in the adapter. The
+entity-source executor should target this path, not `EffectPgDatabase`.
+
 **`@effect/sql-drizzle` is not used.** It has no `4.0.0-rc` line and its latest
-peers `effect@^3.22.0`, so it is incompatible with the pinned rc; Drizzle's own
-`effect-postgres` integration supersedes it. `foldkit-remote-drizzle` stays
-provisional and value-bar gated — nothing imports Drizzle yet.
+peers `effect@^3.22.0`, so it is incompatible with the pinned rc. Because
+Drizzle's own `effect-postgres` integration is equally unusable here, the
+executor is the `PgDialect` + `SqlClient` bridge above. `foldkit-remote-drizzle`
+stays provisional and value-bar gated.
 
 
 ---
