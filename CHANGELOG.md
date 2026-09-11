@@ -53,18 +53,22 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 ### `foldkit-mixins-ui` (private)
 
 - **`@foldkit/ui` adapter.** New private package formalizing the attribute
-  bundles of Button, Input, Textarea, Checkbox, Switch, Fieldset, and Disclosure
-  as `Slots`, and resolving attached Mixins into them. Base attributes, event
-  Messages and `ChildAttribute`s are preserved; a Behavior cannot take over an
-  event the component already owns. The remaining components and the Surface
-  adapter are not in this slice.
+  bundles of Button, Input, Textarea, Select, Checkbox, Switch, Fieldset, and
+  Disclosure as `Slots`, and resolving attached Mixins into them. Base
+  attributes, event Messages and `ChildAttribute`s are preserved; a Behavior
+  cannot take over an event the component already owns.
 - **Submodel adapter.** Dialog's seven `ChildAttribute` groups are published as
   `DialogSlots`; `resolve` preserves them by identity and passes `isVisible`
-  through. Popover's four groups (with its anchor/portal Mounts) and Tooltip's
-  two are published the same way. All three are tested DOM-free with
+  through. Popover's four groups (with its anchor/portal Mounts), Tooltip's two,
+  and Slider's six are published the same way. All are tested DOM-free with
   `foldkit/test`'s `Scene`, so real ChildAttributes exercise the resolver,
-  including the owned close/trigger `click` or `focus`. `Event.Cancel` was added
-  for the dialog's Escape handler.
+  including the owned close/trigger `click`, `focus` or `pointerdown`.
+  `Event.Cancel` was added for the dialog's Escape handler.
+- **Out of reach with this seam.** `Menu`, `Listbox`, `ComboBox` and `DatePicker`
+  own their markup and expose no `toView`/attribute bundles, so there is nothing
+  to resolve against. `Tabs`, `RadioGroup` and `Calendar` publish nested per-item
+  bundles the flat resolver cannot address; they wait on a nested/keyed resolver.
+  The Surface adapter is also not in this slice.
 
 ### `foldkit-agent`
 

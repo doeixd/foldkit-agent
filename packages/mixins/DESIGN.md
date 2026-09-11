@@ -249,23 +249,30 @@ override even when a later attachment would otherwise win.
   Messages and `ChildAttribute`s are preserved by identity; non-slot entries
   (`Disclosure.animatePanel`) pass through unchanged.
 - Published contracts: Button (`button`), Input (`input`/`label`/`description`),
-  Textarea (`textarea`/`label`/`description`), Checkbox
-  (`checkbox`/`label`/`description`/`hiddenInput`), Switch, Fieldset
-  (`fieldset`/`legend`/`description`), Disclosure (`button`/`panel`), Dialog
-  (`dialog`/`backdrop`/`panel`/`title`/`description`/`initialFocus`/
-  `closeButton`), Popover (`button`/`panel`/`backdrop`/`arrow`), and Tooltip
-  (`trigger`/`panel`). A slot advertises the capability, events and attributes a
-  Behavior may require; the base bundle's ownership is what turns taking over a
+  Textarea (`textarea`/`label`/`description`), Select (`select`/`label`/
+  `description`), Checkbox (`checkbox`/`label`/`description`/`hiddenInput`),
+  Switch, Fieldset (`fieldset`/`legend`/`description`), Disclosure
+  (`button`/`panel`), Dialog (`dialog`/`backdrop`/`panel`/`title`/`description`/
+  `initialFocus`/`closeButton`), Popover (`button`/`panel`/`backdrop`/`arrow`),
+  Tooltip (`trigger`/`panel`), and Slider (`root`/`track`/`filledTrack`/`thumb`/
+  `label`/`hiddenInput`). A slot advertises the capability, events and attributes
+  a Behavior may require; the base bundle's ownership is what turns taking over a
   click into a `mixins:event-conflict` rather than a second silent handler.
-- Dialog, Popover and Tooltip are Submodels: their bundles are `ChildAttribute`
-  groups carrying the child boundary's dispatcher and, for Popover/Tooltip, its
-  anchor/portal Mounts. `resolve` preserves them by identity and passes
-  `isVisible` through. All three are tested with `foldkit/test`'s `Scene`, which
-  supplies a runtime frame and the real `h` without a DOM, so the resolver is
-  exercised against real ChildAttributes — including the owned
-  close/trigger `click` or `focus`.
-- The remaining Submodels (Menu, Tabs, ComboBox, ...) and the Surface adapter
-  remain.
+- Dialog, Popover, Tooltip and Slider are Submodels: their bundles are
+  `ChildAttribute` groups carrying the child boundary's dispatcher and, for
+  Popover/Tooltip, its anchor/portal Mounts. `resolve` preserves them by identity
+  and passes `isVisible` through. All are tested with `foldkit/test`'s `Scene`,
+  which supplies a runtime frame and the real `h` without a DOM, so the resolver
+  is exercised against real ChildAttributes — including the owned
+  close/trigger `click`, `focus` or `pointerdown`.
+- **Not every component is adaptable.** `Menu`, `Listbox`, `ComboBox` and
+  `DatePicker` own their markup outright: their views build the whole element
+  tree internally, expose no `toView`/`RenderInfo`, and never hand the consumer
+  attribute bundles, so there is no seam for `resolve` to attach to. `Tabs`,
+  `RadioGroup` and `Calendar` publish per-item **nested** bundles
+  (`tabs[i].tab`, `options[i].option`, `weeks[].cells[].cellAttributes`) that the
+  flat `resolveFor` cannot address; those need a nested/keyed resolver first.
+- The Surface adapter remains.
 
 ## Phase plan (this package)
 
@@ -278,8 +285,9 @@ override even when a later attachment would otherwise win.
 6. Behavior v1 (no hidden state). Done.
 7. Mount composition. Done.
 8. A11y patterns + diagnostics. Done.
-9. `@foldkit/ui` adapter (separate package). Stateless set + Dialog (Submodel)
-   done; further Submodel components remain.
+9. `@foldkit/ui` adapter (separate package). Stateless set plus Submodels
+   Dialog/Popover/Tooltip/Slider done. Menu/Listbox/ComboBox/DatePicker expose
+   no consumer seam; Tabs/RadioGroup/Calendar need a nested resolver.
 10. Surface adapter (separate package).
 
 Style CSS compiler, DevTools, and agent metadata wait until the core
