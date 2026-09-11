@@ -286,6 +286,17 @@ type EntryValue<E> =
 type EntryRoot<E> =
   E extends Projection<infer R, any> ? R : E extends ModelRef<infer R, any> ? R : never
 
+type EntryRoots<Entries> = { readonly [K in keyof Entries]: EntryRoot<Entries[K]> }
+
+/** `true` when the union has more than one member. Used to reject mixed roots. */
+type IsUnion<T, U = T> = [T] extends [never]
+  ? false
+  : T extends unknown
+    ? [U] extends [T]
+      ? false
+      : true
+    : never
+
 type StructValue<Entries> = {
   readonly [K in keyof Entries]: EntryValue<Entries[K]>
 }
@@ -329,7 +340,7 @@ export const Projection = {
     },
 
   struct: <const Entries extends Record<string, Projection<any, any> | ModelRef<any, any>>>(
-    entries: Entries,
+    entries: Entries & (IsUnion<EntryRoots<Entries>[keyof Entries]> extends true ? never : unknown),
   ): Projection<EntryRoot<Entries[keyof Entries]>, StructValue<Entries>> => {
     const picked: Record<string, AnySchema> = {}
     const dependencies: (readonly string[])[] = []

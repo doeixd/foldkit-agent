@@ -102,6 +102,14 @@ const _listProjection: Projection<
   }
 > = listProjection
 
+const OtherMixModel = Schema.Struct({ route: Schema.String })
+const OtherMixApp = Surface.make({ Model: OtherMixModel, Message })
+// @ts-expect-error entries must share one Root
+Projection.struct({
+  name: App.model.session.user.name,
+  route: OtherMixApp.model.route,
+})
+
 const projectCards = Projection.array(ProjectSummary)
 const _projectCards: Projection<
   ReadonlyArray<Schema.Schema.Type<typeof ProjectSchema>>,
