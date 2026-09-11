@@ -8,7 +8,7 @@
  * core attach/pipe algebra applies unchanged.
  */
 import type { HtmlBuilder } from 'foldkit/html'
-import type { Renderer, Surface } from 'foldkit-surface'
+import { Surface, type Requirement, type Renderer } from 'foldkit-surface'
 import { Slots, SlotView, type SlotViewRender } from 'foldkit-mixins'
 
 export const define = <Root, Model, Message, Params, Slots_>(
@@ -53,3 +53,60 @@ export const inspect = <Slots_, Model, Message>(
   slots: Slots.describe(view.slots as unknown as Parameters<typeof Slots.describe>[0]).slots,
   mixins: view.mixins.map(mixin => mixin.name),
 })
+
+/** Reads the tag off a Foldkit Message constructor without constructing one. */
+const constructorTag = (constructor: unknown): string => {
+  const literal = (constructor as { fields?: { _tag?: { ast?: { literal?: unknown } } } }).fields
+    ?._tag?.ast?.literal
+  if (typeof literal === 'string') return literal
+  const name = (constructor as { readonly name?: unknown }).name
+  return typeof name === 'string' ? name : 'unknown'
+}
+
+export interface SurfaceViewDescription {
+  readonly name: string
+  readonly observes: ReturnType<typeof Surface.inspect>['dependencies']
+  readonly requirements: ReadonlyArray<Requirement>
+  /** Emitted Message tags, not constructors, so the value stays serializable. */
+  readonly emits: ReadonlyArray<string>
+  readonly slots: ReturnType<typeof Slots.describe>['slots']
+  readonly mixins: ReadonlyArray<string>
+}
+
+/**
+ * One serializable description of a Surface and the SlotView that renders it:
+ * what it observes and may emit, and where Style/Behavior attach. No functions,
+ * so it can be committed, diffed, or handed to DevTools and agent tooling.
+ */
+export const describe = <Root, Model, Message, Params, Slots_>(
+  surface: Surface<Root, Model, Message, Params>,
+  params: Params,
+  view: SlotView.SlotView<Slots_, Model, Message>,
+): SurfaceViewDescription => {
+  const inspection = Surface.inspect(surface, params)
+  const ui = inspect(view)
+  return {
+    name: ui.name === '' ? inspection.name : ui.name,
+    observes: inspection.dependencies,
+    requirements: inspection.requirements,
+    emits: inspection.emits.map(constructorTag),
+    slots: ui.slots,
+    mixins: ui.mixins,
+  }
+}
+
+/** Deterministic Markdown for a description; stable key order, no timestamps. */
+export const toMarkdown = (description: SurfaceViewDescription): string => {
+  const lines: string[] = [`# ${description.name}`, '', '## Observes', '']
+  for (const path of description.observes) lines.push(`- \`${path.join('.')}\``)
+  lines.push('', '## May emit', '')
+  for (const tag of description.emits) lines.push(`- \`${tag}\``)
+  lines.push('', '## Slots', '')
+  for (const [name, slot] of Object.entries(description.slots)) {
+    const events = slot.events.length === 0 ? '' : ` (events: ${slot.events.join(', ')})`
+    lines.push(`- \`${name}\` — ${slot.capability}${events}`)
+  }
+  lines.push('', '## Mixins', '')
+  for (const name of description.mixins) lines.push(`- \`${name}\``)
+  return lines.join('\n')
+}

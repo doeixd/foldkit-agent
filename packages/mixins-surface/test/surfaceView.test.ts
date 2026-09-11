@@ -106,4 +106,31 @@ describe('SurfaceView', () => {
     expect(info.mixins).toEqual(['Style'])
     expect(JSON.parse(JSON.stringify(info))).toEqual(info)
   })
+
+  it('describes the surface and slots as serializable data', () => {
+    const view = SurfaceView.define(TodoList, TodoSlots, (_model, slots, h) =>
+      h.ul(slots.root.attrs(), []),
+    ).pipe(Style.attach(Style.forSlots(TodoSlots)({ root: Style.class('todo-list') })))
+    const description = SurfaceView.describe(TodoList, undefined, view)
+    expect(description.name).toBe('TodoList')
+    expect(description.observes).toEqual([['todos'], ['selectedId']])
+    expect(description.emits).toEqual(['SelectedTodo', 'ArchivedTodo'])
+    expect(Object.keys(description.slots)).toEqual(['root', 'archive'])
+    expect(description.mixins).toEqual(['Style'])
+    expect(JSON.parse(JSON.stringify(description))).toEqual(description)
+  })
+
+  it('renders deterministic markdown', () => {
+    const view = SurfaceView.define(TodoList, TodoSlots, (_model, slots, h) =>
+      h.ul(slots.root.attrs(), []),
+    )
+    const render = (): string =>
+      SurfaceView.toMarkdown(SurfaceView.describe(TodoList, undefined, view))
+    expect(render()).toBe(render())
+    const markdown = render()
+    expect(markdown).toContain('# TodoList')
+    expect(markdown).toContain('- `todos`')
+    expect(markdown).toContain('- `SelectedTodo`')
+    expect(markdown).toContain('- `archive` — Interactive (events: click)')
+  })
 })

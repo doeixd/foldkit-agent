@@ -86,9 +86,11 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   rejections, and runtime tests drive `Surface.rootView` end-to-end, including a
   Style and a Behavior reading the projected input. `SurfaceView.inspect(view)`
   returns serializable `{ name, slots, mixins }` (no functions), composing with
-  `Surface.inspect`. A `@foldkit/ui` component composes inside a SurfaceView: the
-  Surface's Message subset flows into its config and a Mixin resolves around its
-  bundle. Phase 10 started, not complete.
+  `Surface.inspect`. `SurfaceView.describe(surface, params, view)` merges both
+  into one serializable description (emitted Messages as tags, not constructors),
+  with a deterministic `toMarkdown` for docs and CI. A `@foldkit/ui` component
+  composes inside a SurfaceView: the Surface's Message subset flows into its
+  config and a Mixin resolves around its bundle. Phase 10 started, not complete.
 
 ### `foldkit-mixins-example` (example)
 
