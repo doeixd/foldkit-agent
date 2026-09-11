@@ -2155,6 +2155,34 @@ contract in `test/inference.test-d.ts` green. The builder-seam decision (open
 question 2) is not a Phase 1 blocker; record it before Phase 2 composition. The
 spike's sound cast is the working assumption.
 
+**Review findings (open, lower severity).** Fixed in `de53997`: RemoteServer no
+longer reads/returns fields the client did not request; `RemotePersistence.restore`
+clears a wrong-shape snapshot instead of throwing; `classifyLive` accepts a
+non-1 first cursor; `Remote.observe` emits an `onError` rather than a defect; the
+dead `Remote.live` `policy` option is gone. Still open:
+
+- **`Projection.struct` mixes roots silently.** `EntryRoot<Entries[keyof Entries]>`
+  is a union; mixing ModelRefs/Projections with different `Root`s type-checks and
+  reads wrong. All entries share the Root in practice, but a guard is warranted.
+- **`Remote.select` does not decode.** It returns `values as Value` and types
+  `Model` as `Schema.Unknown`, so the projected `RemoteData` value is not
+  validated against the Selection schema. Phase 4 spike shortcut.
+- **`storeOf`/`Remote.select` cast the store shape.** A change to the Remote Model
+  layout would fail silently.
+- **Unbounded mutation state.** `MutationState.applied`/`failed` grow without GC;
+  define a retention policy.
+- **`Connection` dedupe can leave a hole.** Removing a mid-segment duplicate keeps
+  the segment's boundaries, which no longer describe its edges (contradictory
+  input only).
+- **`live.invalidateConnection` never clears `stale`.** A later successful merge
+  does not mark the connection fresh; the clearing path is unspecified.
+- **remote-drizzle assumes the id column is named `id`** and does not check that
+  the table-derived Schema agrees with the Remote Entity's `id` schema.
+- **`handlers(server, principal)` binds one principal per handler set**, not per
+  request; authentication middleware integration is deferred (§8.10).
+- **`ModelRef.fromOptic` throws** via `Result.getOrThrow` on a non-focusing optic;
+  the alternative is returning `Option`.
+
 **Open questions to resolve during or before Phase 1:**
 
 1. In-repo `foldkit-surface` (recommended) vs an upstream Foldkit proposal.
