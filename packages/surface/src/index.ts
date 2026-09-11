@@ -12,6 +12,7 @@
 import { Optic, Option, Result, Schema } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import type { MessageUnion } from 'foldkit/message'
+import type * as Update from 'foldkit/update'
 
 // ===========================================================================
 // ModelRef and the typed Model tree (Phase 0 cases 1)
@@ -527,6 +528,50 @@ type PickFields<Refs extends readonly FieldRef<any, any, string>[]> = {
   readonly [R in Refs[number] as R['key']]: R['Schema']
 }
 
+/**
+ * An application definition: the Model and Message schemas, the initial Model,
+ * the transition function, and the generated field references. It is data, not a
+ * running instance, so it can be inspected and tested without mounting anything.
+ */
+export interface Application<
+  Root,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+> extends AppScope<Root, F, Cases> {
+  readonly initial: Root
+  /** Reference-based field selection: `App.fields.todos`. */
+  readonly fields: RefTree<Root, F>
+  readonly update: (
+    model: Root,
+    message: Schema.Schema.Type<MessageUnion<Cases>>,
+  ) => Update.Return<Root, Schema.Schema.Type<MessageUnion<Cases>>>
+}
+
+const makeScope = <
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+>(config: {
+  readonly Model: Schema.Struct<F>
+  readonly Message: MessageUnion<Cases>
+}): AppScope<Schema.Struct.Type<F>, F, Cases> => {
+  // One token per application, so a selection cannot silently mix two
+  // applications whose Models happen to be structurally identical.
+  const owner: object = {}
+  return {
+    Model: config.Model,
+    Message: config.Message,
+    model: makeTree(
+      config.Model,
+      [],
+      Optic.id(),
+      root => root,
+      false,
+      undefined,
+      owner,
+    ) as unknown as RefTree<Schema.Struct.Type<F>, F>,
+  }
+}
+
 export const Surface = {
   make: <
     F extends Schema.Struct.Fields,
@@ -534,23 +579,27 @@ export const Surface = {
   >(config: {
     readonly Model: Schema.Struct<F>
     readonly Message: MessageUnion<Cases>
-  }): AppScope<Schema.Struct.Type<F>, F, Cases> => {
-    // One token per application, so a selection cannot silently mix two
-    // applications whose Models happen to be structurally identical.
-    const owner: object = {}
-    return {
-      Model: config.Model,
-      Message: config.Message,
-      model: makeTree(
-        config.Model,
-        [],
-        Optic.id(),
-        root => root,
-        false,
-        undefined,
-        owner,
-      ) as unknown as RefTree<Schema.Struct.Type<F>, F>,
-    }
+  }): AppScope<Schema.Struct.Type<F>, F, Cases> => makeScope(config),
+
+  /**
+   * Captures an application's pure references once: the Model and Message
+   * schemas, the initial Model, the transition function, and the field
+   * references (`App.fields`). `Sync` and `Agent` interpret the same value.
+   */
+  application: <
+    F extends Schema.Struct.Fields,
+    Cases extends Record<string, Schema.Struct.Fields>,
+  >(config: {
+    readonly Model: Schema.Struct<F>
+    readonly Message: MessageUnion<Cases>
+    readonly initial: Schema.Struct.Type<F>
+    readonly update: (
+      model: Schema.Struct.Type<F>,
+      message: Schema.Schema.Type<MessageUnion<Cases>>,
+    ) => Update.Return<Schema.Struct.Type<F>, Schema.Schema.Type<MessageUnion<Cases>>>
+  }): Application<Schema.Struct.Type<F>, F, Cases> => {
+    const scope = makeScope(config)
+    return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
   },
 
   /**
