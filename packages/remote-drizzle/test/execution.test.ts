@@ -13,6 +13,7 @@ import {
   type DrizzleDatabaseService,
   type DrizzleStatement,
 } from '../src/index.js'
+import { fakeDatabase, fakeDatabaseQueue } from './fakeDatabase.js'
 
 const users = pgTable('users', {
   id: uuid('id').primaryKey(),
@@ -98,56 +99,6 @@ const PostBinding = entity('Post', posts, {
     }),
   },
 })
-
-/** Projects each row to the selected columns, as Drizzle's typed select would. */
-const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<string, unknown>>) => {
-  const calls: Array<{
-    selection: Record<string, unknown>
-    where: unknown
-    innerJoin: unknown
-    orderBy: ReadonlyArray<unknown> | undefined
-  }> = []
-  let index = 0
-  const database: DrizzleDatabaseService = {
-    select: selection => {
-      const rows = rowsAt(index)
-      index += 1
-      const call = {
-        selection,
-        where: undefined as unknown,
-        innerJoin: undefined as unknown,
-        orderBy: undefined as ReadonlyArray<unknown> | undefined,
-      }
-      calls.push(call)
-      const promise = Promise.resolve(
-        rows.map(row => Object.fromEntries(Object.keys(selection).map(key => [key, row[key]]))),
-      )
-      const statement = {
-        where: (condition: unknown) => {
-          call.where = condition
-          return statement
-        },
-        innerJoin: (table: unknown, on: unknown) => {
-          call.innerJoin = { table, on }
-          return statement
-        },
-        orderBy: (...order: ReadonlyArray<unknown>) => {
-          call.orderBy = order
-          return statement
-        },
-        limit: () => statement,
-        then: promise.then.bind(promise),
-      } as unknown as DrizzleStatement
-      return { from: () => statement }
-    },
-  }
-  return { database, calls }
-}
-
-const fakeDatabase = (rows: ReadonlyArray<Record<string, unknown>>) => makeDatabase(() => rows)
-
-const fakeDatabaseQueue = (batches: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>) =>
-  makeDatabase(index => batches[index] ?? [])
 
 describe('RemoteDrizzle execution', () => {
   it('reads through the DrizzleDatabase service with a pruned projection', async () => {
