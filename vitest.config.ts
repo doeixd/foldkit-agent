@@ -26,6 +26,7 @@ export default defineConfig({
       'foldkit-remote-server': fileURLToPath(
         new URL('./packages/remote-server/src/index.ts', import.meta.url),
       ),
+      'foldkit-mixins': fileURLToPath(new URL('./packages/mixins/src/index.ts', import.meta.url)),
     },
   },
   test: {

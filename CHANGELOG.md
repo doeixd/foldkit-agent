@@ -10,6 +10,12 @@ version changed; `pnpm` skips versions already in the registry.
 Correctness fixes from a review of the implementation. Breaking for `foldkit-sync`
 (the storage and presence APIs) and `foldkit-durable` (`append`'s result).
 
+### `foldkit-mixins` (private)
+
+- **Slot contracts.** New private package: branded Capability / Event / Attr
+  tokens and `Slots.define` contracts. Style, Behavior, and the resolver are
+  not in this slice.
+
 ### `foldkit-agent`
 
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The
