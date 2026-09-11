@@ -1,14 +1,21 @@
 import { Agent } from 'foldkit-agent'
-import { Projection } from 'foldkit-surface'
+import { Surface } from 'foldkit-surface'
 import { Option, Schema } from 'effect'
-import { Message, Model, Todo } from './app.js'
+import { Message, Model, Todo, initialModel, update } from './app.js'
 
 /** Who is calling. A real app would resolve this from a session. */
 export interface Principal {
   readonly canDelete: boolean
 }
 
-const TodoAgent = Agent.forModel<Model, Principal>()
+const App = Surface.application({
+  Model,
+  Message,
+  initial: initialModel,
+  update: (model, message) => ({ model: update(model, message) }),
+})
+
+const TodoAgent = Agent.forApplication<Model, Principal>(App)
 
 /**
  * The agent contract: what an agent may see, and what an agent may do.
@@ -18,7 +25,7 @@ const TodoAgent = Agent.forModel<Model, Principal>()
  */
 export const AppAgent = TodoAgent.define({
   // What an agent may see. `lastError` is deliberately not projected.
-  context: Projection.of(Model)({ todos: true, selectedTodoId: true }),
+  context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {
     // Most capabilities need nothing but a description.

@@ -1,14 +1,16 @@
 # `foldkit-agent`
 
-A thin, Schema-first agent layer for Foldkit. It adds two projections and
+A thin, Schema-first agent layer for Foldkit. It adds two boundaries and
 nothing else:
 
 ```text
-Model         -> Agent.context   what an agent may see
-Message union -> Agent.expose    what an agent may do
+Model         -> context projection   what an agent may see
+Message union -> Agent.expose         what an agent may do
 ```
 
-Everything else is an adapter. `update` remains the single source of truth.
+Context is a `foldkit-surface` projection (`Surface.pick` / `Surface.compose`),
+so the same value an application replicates is what an agent may see. Everything
+else is an adapter. `update` remains the single source of truth.
 
 See the [design rationale](https://github.com/doeixd/foldkit-plus/blob/main/packages/agent/DESIGN.md)
 for the full proposal, and [examples/todo](../../examples/todo) for a worked
@@ -55,17 +57,26 @@ const Message = defineMessageUnion({
 })
 ```
 
-Bind the constructors to your Model, then declare the contract:
+Bind the constructors to your application, then declare the contract:
 
 ```ts
 import { Agent } from 'foldkit-agent'
+import { Surface } from 'foldkit-surface'
 import { Option, Schema } from 'effect'
 
-const TodoAgent = Agent.forModel<Model>()
+const App = Surface.application({
+  Model,
+  Message,
+  initial: { todos: [], selectedTodoId: Option.none() },
+  update: (model, message) => ({ model: update(model, message) }), // your update
+})
+
+const TodoAgent = Agent.forApplication(App)
 
 const AppAgent = TodoAgent.define({
-  // Derives the context schema and the projection from one field list.
-  context: Agent.pick(Model, ['selectedTodoId', 'todos']),
+  // What an agent may see: a Surface projection, so sync and the agent can share
+  // the same value. `lastError` is deliberately not selected.
+  context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {
     // A variant that needs nothing but a description can be written as one.
@@ -104,14 +115,16 @@ principal must be given a `principal` provider of the matching type.
 
 | Function | Purpose |
 | --- | --- |
-| `Agent.context({ schema, select })` | The information boundary: what an agent may see. |
-| `Agent.pick(Model, keys)` | The same, derived from a list of Model fields. |
+| `Surface.application({ Model, Message, initial, update })` | Captures the application once; `App.fields` are typed field references. |
+| `Surface.pick(App.fields.todos, ...)` | The information boundary: what an agent may see. |
+| `Surface.compose(...)` | Compose disjoint picks into one context. |
 | `Agent.expose(Message, variants)` | The capability boundary: what an agent may do. |
 | `Agent.variant(config)` | A mapped variant whose callbacks are inferred from its `input`. |
 | `Agent.resource(name, options)` | A named read-only projection of Model state. |
-| `Agent.define({ context, messages, resources })` | The protocol-neutral contract. |
+| `Agent.define({ context, messages, resources })` | The protocol-neutral contract; `context` is any Surface projection. |
+| `Agent.forApplication(App)` | The above, with `Model` inferred from a `Surface.application`. |
+| `Agent.forModel<Model>()` | The same, when only a Model (no application) is available. |
 | `Agent.bind({ definition, host })` | Binds the contract to a live Runtime. |
-| `Agent.forModel<Model>()` | The above, with `Model` fixed. |
 | `Agent.schema/messages/resources/contextSchema` | Introspection, as plain data. |
 | `Agent.toManifest(definition)` | The contract as `agent.json`, for committing and diffing. |
 | `Agent.toMarkdown(definition)` | The contract as documentation. |
@@ -418,11 +431,12 @@ dispatch function, so that option cannot be implemented from outside foldkit.
 proposal describes, with the application supplying `model` and `dispatch`. If
 Foldkit later accepts an `agent` option, it can construct the same seam.
 
-**`Agent.forModel`.** TypeScript cannot infer `Model` from an `available` or
-`select` callback alone, so `available: model => ...` in the proposal's examples
-would leave `model` as `any`. `Agent.forModel<Model>()` fixes the Model once and
-type-checks every callback against it. `Agent.expose` is still available
-directly when the Model does not matter.
+**Fixing the Model.** TypeScript cannot infer `Model` from an `available` or
+`select` callback alone, so `available: model => ...` would leave `model` as
+`any`. `Agent.forApplication(App)` infers it from a `Surface.application` (with
+`App.fields` typed), and `Agent.forModel<Model>()` fixes it when there is no
+application. `Agent.expose` is still available directly when the Model does not
+matter.
 
 **Effect 4.** Foldkit `0.158.2` peer-depends on `effect@4.0.0-rc.112`. The
 proposal's snippets use Effect 3 names; `Schema.OptionFromSelf` is

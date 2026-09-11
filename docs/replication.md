@@ -113,20 +113,11 @@ A local-first replica: the UI writes locally and never waits on the network, and
 the replica reconciles with the server's authoritative order.
 
 ```ts
-const App = Surface.make({ Model, Message })
-const TodoSync = make(App, 'TodoSync', {
+const App = Surface.application({ Model, Message, initial, update })
+const TodoSync = forApplication(App, {
   documentId: documentId('todos'),
-  initial,
-  model: project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo, Message.RenamedTodo], // the durable subset
-  replay: (shared, message) =>
-    message._tag === 'CreatedTodo'
-      ? { todos: [...shared.todos, { id: message.id, title: message.title }] }
-      : {
-          todos: shared.todos.map(todo =>
-            todo.id === message.id ? { id: todo.id, title: message.title } : todo,
-          ),
-        },
+  shared: Surface.pick(App.fields.todos),
+  durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo]),
 })
 
 const replica = yield* TodoSync.openReplica(replicaId('tab-1'), yield* indexedDb('todos-tab-1'))
@@ -134,18 +125,18 @@ yield* replica.submit(Message.CreatedTodo({ id, title: 'Milk' }))  // instant, l
 yield* Effect.provide(replica.synchronize, layerSocket({ url }))   // reconcile
 ```
 
-`Sync.make` derives the shared projection, the durable subset, and the initial
-snapshot from the application; `defineSync` remains the protocol primitive it
-compiles to. `TodoSync.journalContract()` gives the server's journal the same
-operation and snapshot codecs, empty snapshot, and reducer, so the client and
-server never declare the shared state twice.
+`Sync.forApplication` derives the shared projection, the durable subset, the
+initial snapshot, and replay from one application declaration; `defineSync`
+remains the protocol primitive it compiles to. `TodoSync.journalContract()` gives
+the server's journal the same operation and snapshot codecs, empty snapshot, and
+reducer, so the client and server never declare the shared state twice.
 
 It owns:
 
-- **A derived contract** (`Sync.make`): one application declaration produces the
-  writable projection, the durable Message subset, the initial snapshot, and the
-  durable journal contract. `Sync.project` builds the projection; only the
-  declared Messages reach durable state.
+- **A derived contract** (`Sync.forApplication`): one application declaration
+  produces the writable projection, the durable Message subset, the initial
+  snapshot, and the durable journal contract. `Surface.pick` builds the
+  projection; only the declared Messages reach durable state.
 - **A persisted outbox and optimistic projection.** `submit` writes locally;
   `replica.shared` shows the change immediately.
 - **Reconciliation.** `synchronize` applies the committed order, drops
