@@ -83,23 +83,123 @@ Two hooks make the binding transparent; a third makes it ergonomic.
    exposed imperatively) let a host compute projections and submit agent
    Messages without declaring a Port per Message.
 
-A minimal hook shape, to be refined against Foldkit's internals:
+### Proposed Foldkit API (for upstream discussion)
+
+The runtime gains one optional config field and one handle method. Everything
+else stays as it is.
 
 ```ts
-type Admission<Model, Message> = (request: {
-  readonly model: Model
-  readonly message: Message
-  readonly origin: 'ui' | 'port' | 'command' | 'external'
-}) => Effect.Effect<
-  | { readonly _tag: 'Admit' }
-  | { readonly _tag: 'Install'; readonly model: Model }, // projection install
-  AdmissionError
->
+type AdmissionOutcome<Model> =
+  | { readonly _tag: 'Admit' }                       // run `update` normally
+  | { readonly _tag: 'Drop' }                        // already applied; ignore
+  | { readonly _tag: 'Install'; readonly model: Model } // replace, no transition
+  | { readonly _tag: 'Refuse'; readonly error: unknown }
+
+interface Admission<Model, Message> {
+  readonly admit: (request: {
+    readonly model: Model
+    readonly message: Message
+    /** Where the Message entered: a UI dispatch, a subscription, a Command
+     *  result, or the host's imperative dispatch. */
+    readonly origin: 'dispatch' | 'subscription' | 'command' | 'external'
+  }) => Effect.Effect<AdmissionOutcome<Model>, unknown>
+}
+
+Runtime.makeApplication({
+  Model,
+  Message,
+  init,
+  update,
+  view,
+  subscriptions,
+  admission,          // NEW: optional
+})
+
+// On the EmbedHandle (NEW):
+handle.dispatch(message)          // routes through admission, returns an Exit
+handle.model()                    // current Model, for projections
+handle.install(model)             // imperative Install, for reconcile/checkpoint
 ```
 
-`Admit` runs the application `update`; `Install` replaces the Model without a
-transition. Both are serialized with other admissions, and disposal waits for the
-in-flight admission (or cancels it explicitly).
+**Runtime guarantees.** For every Message, the runtime reads the Model, awaits
+`admit`, and only then acts:
+
+- `Admit` → run `update`, apply the Model and its Commands.
+- `Install` → replace the Model wholesale; no `update`, no Command diff, and the
+  install does not itself re-enter admission.
+- `Drop` → nothing applied.
+- `Refuse` → nothing applied; the error goes back through the caller's channel
+  (`dispatch` returns it) or the subscription error path.
+
+Admissions are **serialized in arrival order**; a Message that arrives during an
+admission queues behind it. With `admission` omitted the runtime is exactly as it
+is today. `dispose` awaits the in-flight admission, or cancels it and reports the
+cancellation; it does not silently interrupt a mount's persistence.
+
+### How a binding uses it
+
+`foldkit-sync` would ship a mount that supplies admission and reconcile:
+
+```ts
+const { dispatch, install, dispose } = mountReplica({
+  app: App,                       // Surface.application(...)
+  replica,                        // durable subset = Surface.messages(App, [...])
+  shared: Surface.pick(App.fields.todos),
+  view, container,
+})
+
+// admission, conceptually:
+admit: ({ message }) =>
+  isDurable(message)
+    ? replica.submit(message).pipe(Effect.as({ _tag: 'Admit' }))  // enqueue, then apply
+    : Effect.succeed({ _tag: 'Admit' })
+
+// after `replica.synchronize` or a checkpoint:
+install({ ...handle.model(), ...Effect.runSync(replica.shared) })
+```
+
+`foldkit-agent` would use the same seam:
+
+```ts
+const host = Agent.surfaceHost({ surface: BrowserContext, principal })
+// host.dispatch(message) -> handle.dispatch (admitted)
+// host.model()           -> handle.model()
+// host.subscribe         -> processed-Message stream (see open questions)
+```
+
+### Ordering and failure semantics
+
+| Concern | Guarantee |
+| --- | --- |
+| Ordering | Admissions run serially in arrival order; overlapping ones queue. |
+| Origin | `dispatch` / `subscription` / `command` / `external`, so a mount can treat them differently. |
+| Install | No `update` and no Command; the Model is replaced and admission is not re-entered. |
+| Refuse | The Model is unchanged; the error is typed to the caller (`dispatch`) or the subscription. |
+| Dispose | Awaits the in-flight admission, or cancels and reports it. |
+| Idempotency | The runtime does not dedupe; the mount keys operations by `opId` and returns `Drop` for a repeat. |
+
+Journal protocol mapping and effect policy stay with the integrations that
+understand them; the hook carries no Foldkit- or Sync-specific vocabulary.
+
+### Open questions for Foldkit
+
+- **Where the hook lives.** `makeApplication` config is simplest; a setter on the
+  started handle would allow swapping, which no binding here needs.
+- **`Install` as an outcome or a separate call.** Both `admit`'s `Install` and a
+  handle `install(model)` are proposed above; if one suffices, drop the other.
+- **Command-result Messages.** Should they enter `admit` with `origin: 'command'`,
+  and may the hook rewrite or drop one? `Agent` completion tracking needs to see
+  them.
+- **A refused external dispatch.** Is an `Exit` return from `dispatch` enough, or
+  should the typed error be on an Effect channel?
+- **Disposal.** Await by default and cancel explicitly (assumed here), or let the
+  mount decide?
+- **Processed-Message observation.** A stream of Messages the runtime has applied,
+  from any origin, is what `Agent` needs for completion; is it part of admission
+  or a separate seam?
+- **Model access.** A `model()` getter on the handle is enough for projections; is
+  there any case that needs the Model during `update` beyond the `admit` request?
+
 
 ## What can be supported today
 
