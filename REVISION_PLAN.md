@@ -2174,8 +2174,9 @@ pagination acceptance against a real Postgres and decide whether the package
 ships or is dropped (open question 7); the Surface-based `Sync.make` on top of
 `Sync.project` landed as `5d5a2d3` (it adds an explicit `initial` Model, which the
 §10 sketch omitted); the durable contract landed as `5be48f3` as a method —
-`TodoSync.journalContract()`, not `Sync.journalContract(TodoSync)`; work through
-the review findings and open questions below.
+`TodoSync.journalContract()`, not `Sync.journalContract(TodoSync)`; `examples/sync`
+now uses both, replacing its hand-written replica and journal contracts
+(`0cb9d0e`); work through the review findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
