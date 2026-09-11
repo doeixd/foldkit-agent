@@ -10,14 +10,17 @@
  * Keyset pagination and required-column projection are adapted from fate's
  * Drizzle integration (MIT); see `THIRD_PARTY_NOTICES.md`.
  */
-import { and, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
+import type { PgTable } from 'drizzle-orm/pg-core'
 import { Effect } from 'effect'
-import type { Selection } from 'foldkit-remote'
-import { RemoteServerError, type EntitySource } from 'foldkit-remote-server'
+import type { QueryDescriptor, Selection } from 'foldkit-remote'
+import { RemoteServerError, type EntitySource, type QuerySource } from 'foldkit-remote-server'
 import type { EntityBinding, RelationBinding } from './binding.js'
 import { idColumn, projectsAny, requiredColumns } from './columns.js'
-import type { OrderTerm } from './cursor.js'
-import { DrizzleDatabase } from './database.js'
+import { keysetWhere, orderByTerms, type OrderTerm } from './cursor.js'
+import { DrizzleDatabase, type DrizzleDatabaseService } from './database.js'
+import { toQueryPage } from './page.js'
+import { shapeWindow } from './window.js'
 
 export * from './binding.js'
 export * from './columns.js'
@@ -81,7 +84,7 @@ export interface ReadContext {
 }
 
 export interface SourceQuery {
-  readonly columns: Readonly<Record<string, AnyColumn>>
+  readonly columns: Record<string, AnyColumn>
   readonly where: SQL
 }
 
@@ -93,7 +96,7 @@ export interface SourceQuery {
 export const selectColumns = (
   binding: EntityBinding<any, any>,
   fields: readonly string[],
-): Readonly<Record<string, AnyColumn>> => {
+): Record<string, AnyColumn> => {
   const columns: Record<string, AnyColumn> = { id: idColumn(binding) }
   for (const field of fields) {
     const column = binding.columns[field]
@@ -128,6 +131,26 @@ export const reader =
       return rows.map(row => ({ id: String(row.id), values: row }))
     })
 
+const failDrizzle = (error: unknown): RemoteServerError =>
+  new RemoteServerError({ message: error instanceof Error ? error.message : String(error) })
+
+const selectRows = (
+  database: DrizzleDatabaseService,
+  table: PgTable,
+  columns: Record<string, AnyColumn>,
+  options: {
+    readonly where?: SQL | undefined
+    readonly orderBy?: readonly SQL[] | undefined
+    readonly limit?: number | undefined
+  } = {},
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RemoteServerError> => {
+  let statement = database.select(columns).from(table)
+  if (options.where !== undefined) statement = statement.where(options.where)
+  if (options.orderBy !== undefined) statement = statement.orderBy(...options.orderBy)
+  if (options.limit !== undefined) statement = statement.limit(options.limit)
+  return Effect.tryPromise({ try: () => Promise.resolve(statement), catch: failDrizzle })
+}
+
 const runDrizzle =
   (binding: EntityBinding<any, any>) =>
   (
@@ -135,14 +158,7 @@ const runDrizzle =
   ): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RemoteServerError, DrizzleDatabase> =>
     Effect.gen(function* () {
       const database = yield* DrizzleDatabase
-      return yield* Effect.tryPromise({
-        try: () =>
-          Promise.resolve(database.select(query.columns).from(binding.table).where(query.where)),
-        catch: error =>
-          new RemoteServerError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
-      })
+      return yield* selectRows(database, binding.table, query.columns, { where: query.where })
     })
 
 /** A `RemoteServer.entity` source backed by the `DrizzleDatabase` service. */
@@ -151,4 +167,71 @@ export const source = <P = unknown>(
 ): EntitySource<P, DrizzleDatabase> => ({
   entity: binding.name,
   read: reader(binding, runDrizzle(binding)),
+})
+
+/**
+ * A `RemoteServer.query` source over a keyset-paginated table. The connection's
+ * cursor is the row identity; a requested cursor's ordering tuple is re-read
+ * before the page query, so the wire cursor stays a string.
+ */
+export const query = <P = unknown, Input = unknown>(
+  descriptor: QueryDescriptor<string, Input, unknown>,
+  options: {
+    readonly entity: EntityBinding<any, any>
+    readonly orderBy: readonly OrderTerm[]
+    readonly where?: ((input: Input, principal: P) => SQL | undefined) | undefined
+    readonly defaultPageSize?: number | undefined
+  },
+): QuerySource<P, DrizzleDatabase> => ({
+  query: descriptor.name,
+  Input: descriptor.Input,
+  run: ({ input, window, principal }) =>
+    Effect.gen(function* () {
+      const binding = options.entity
+      const shape = shapeWindow(window, options.defaultPageSize ?? 20)
+      const database = yield* DrizzleDatabase
+      const id = idColumn(binding)
+      const baseWhere = options.where?.(input as Input, principal)
+      let where = baseWhere
+
+      if (shape.cursor !== undefined) {
+        const cursorSelection = Object.fromEntries(
+          options.orderBy.map(term => [term.column.name, term.column]),
+        )
+        const cursorRows = yield* selectRows(database, binding.table, cursorSelection, {
+          where:
+            baseWhere === undefined ? eq(id, shape.cursor) : and(baseWhere, eq(id, shape.cursor)),
+          limit: 1,
+        })
+        const cursorRow = cursorRows[0]
+        if (cursorRow !== undefined) {
+          const values = options.orderBy.map(term => cursorRow[term.column.name])
+          const predicate = keysetWhere(options.orderBy, values, shape.traversal)
+          where =
+            where === undefined
+              ? predicate
+              : predicate === undefined
+                ? where
+                : and(where, predicate)
+        }
+      }
+
+      const columns: Record<string, AnyColumn> = { id }
+      for (const term of options.orderBy) {
+        if (!Object.values(columns).includes(term.column)) columns[term.column.name] = term.column
+      }
+      const rows = yield* selectRows(database, binding.table, columns, {
+        where,
+        orderBy: orderByTerms(options.orderBy, shape.traversal),
+        limit: shape.pageSize + 1,
+      })
+      return toQueryPage({
+        entity: binding.name,
+        rows,
+        pageSize: shape.pageSize,
+        traversal: shape.traversal,
+        cursor: shape.cursor,
+        cursorOf: row => String(row.id),
+      })
+    }),
 })
