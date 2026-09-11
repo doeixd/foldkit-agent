@@ -202,6 +202,12 @@ override even when a later attachment would otherwise win.
 - Behavior owns no state. Stateful widgets stay `@foldkit/ui` Submodels; a
   continuous element listener is a Mount; a network call is Message -> update ->
   Command.
+- Mount composition is runtime-tested. A composed `f` merges every inner stream
+  with `Stream.mergeAll` (unbounded); a failing inner stream fails the merge
+  rather than being swallowed; and `foldkit/test`'s `Scene` observes two
+  Behaviors' mounts as exactly one Mount named `Mixins[<slot>](A,B)`. Element
+  lifetime, finalizer ordering, time travel and re-render identity stay
+  Foldkit's, not this package's.
 
 ### Input-driven Style
 

@@ -33,6 +33,10 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   `input` and `h` at resolve time, so the view's Message universe governs them.
   Definition-time validation rejects an unknown slot, an unsatisfied capability,
   and an unpublished event or attribute; a Behavior owns no state.
+- **Mount runtime coverage.** Composition is tested through `foldkit/test`'s
+  `Scene` (two Behaviors yield exactly one observed Mount) and directly on the
+  merged stream: every inner stream's Messages are collected, and a failing
+  inner stream fails the merge rather than being swallowed.
 - **Theme and recipes.** `Theme.define` is typed token data, with
   `Theme.variable`/`Theme.variables` compiling to CSS custom properties;
   `Style.recipe` is a typed variant selector returning Style data.
