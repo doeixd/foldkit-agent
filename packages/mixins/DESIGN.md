@@ -142,7 +142,7 @@ call it. No random class names, no `Date.now` ids.
 
 `__proto__` is a legal custom name. Lookups go through a `Map`, never `{}`.
 
-## Merge policy (resolver, later phase)
+## Merge policy (resolver, Phase 2)
 
 | Kind | Policy |
 | --- | --- |
@@ -157,6 +157,27 @@ call it. No random class names, no `Date.now` ids.
 
 Protected Slot pieces (`events`, `attributes`, `style` properties) reject
 override even when a later attachment would otherwise win.
+
+### Resolver decisions
+
+- Attributes are classified by `_tag`. `On*` (except `OnMount`) are events,
+  `OnMount` contributes a MountAction, `Class`/`Style` are decomposed into the
+  canonical class/style merge, and `Key`/`InnerHTML` are structural.
+- Ownership is by tag, except `Prop`, `Attribute`, `DataAttribute`
+  (tag + `key`) and `OnCustomEvent` (tag + `name`), so distinct keys do not
+  falsely conflict.
+- Event tags normalize to token names by stripping `On` and lowercasing:
+  `OnKeyDown` -> `keydown`, matching `Event.KeyDown`.
+- Protected names normalize punctuation, so `AriaLabel` and `aria-label` agree.
+- Canonical emit order: one `Class`, one `Style`, preserved base attributes,
+  Mixin-added attributes, one composed `OnMount`. Determinism comes from input
+  order, not object traversal.
+- `ChildAttribute` detection is the `__childAttribute` brand key (Foldkit's
+  guard is private). Its inner `_tag` is read for ownership only; the value is
+  never rebuilt.
+- A composite Mount is named `Mixins[<slot>](A,B)`; two Mounts sharing one name
+  is a `mixins:duplicate-mount-name` error.
+- Conflicts throw `DiagnosticError` with a stable `code`; see `diagnostics.ts`.
 
 ## Phase plan (this package)
 

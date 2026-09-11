@@ -13,8 +13,13 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 ### `foldkit-mixins` (private)
 
 - **Slot contracts.** New private package: branded Capability / Event / Attr
-  tokens and `Slots.define` contracts. Style, Behavior, and the resolver are
-  not in this slice.
+  tokens and `Slots.define` contracts.
+- **Resolver.** A `Mixin` contribution model and a pure, deterministic
+  `Resolver.resolve`: additive deduplicated classes, per-property inline styles,
+  single-owner events and scalar attributes, protected slots, opaque
+  `ChildAttribute` preservation, and one composed `OnMount`. Conflicts throw a
+  structured `DiagnosticError`. Style, Behavior, and `SlotView` are not in this
+  slice.
 
 ### `foldkit-agent`
 
