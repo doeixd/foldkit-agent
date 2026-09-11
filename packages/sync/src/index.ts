@@ -60,6 +60,7 @@ export {
   type Checkpoint,
   type Committed,
   type Exchange,
+  type JournalContract,
   type Operation,
   type Replica,
   type ReplicaState,

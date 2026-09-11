@@ -91,4 +91,25 @@ describe('Sync.make', () => {
 
     expect(pending(replica)).toHaveLength(2)
   })
+
+  it('compiles the journal contract over the shared snapshot', () => {
+    const contract = TodoSync.journalContract()
+    expect(contract.empty()).toEqual({ todos: [] })
+
+    const operation = TodoSync.normalizeOperation({
+      protocolVersion: 1,
+      schemaVersion: 1,
+      documentId: documentId('todos'),
+      replicaId: 'a',
+      localSequence: 1,
+      opId: 'a:1',
+      baseCursor: 0,
+      message: Message.CreatedTodo({ id: 'a', title: 'A' }),
+    })
+
+    const snapshot = contract.reduce(contract.empty(), operation)
+    expect(snapshot).toEqual({ todos: [{ id: 'a', title: 'A' }] })
+    expect(contract.snapshot.decode(contract.snapshot.encode(snapshot))).toEqual(snapshot)
+    expect(contract.operation.decode(contract.operation.encode(operation))).toEqual(operation)
+  })
 })

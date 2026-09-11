@@ -141,10 +141,26 @@ export interface Sync<Message, Shared> {
   readonly operationFrom: (input: unknown, documentId: DocumentId) => Operation
   readonly committedFrom: (input: unknown, documentId: DocumentId) => Committed
   readonly decodeExchange: (input: unknown) => Exchange<Shared>
+  /** The codecs and pure reducer `foldkit-durable`'s `makeJournal` consumes. */
+  readonly journalContract: () => JournalContract<Operation, Shared>
   readonly openReplica: (
     replicaId: ReplicaId,
     storage: Storage,
   ) => Effect.Effect<Replica<Message, Shared>, ReplicaError>
+}
+
+/** Structural match for `foldkit-durable`'s journal options; Sync stays independent. */
+export interface JournalContract<Operation, Shared> {
+  readonly operation: {
+    readonly encode: (operation: Operation) => unknown
+    readonly decode: (input: unknown) => Operation
+  }
+  readonly snapshot: {
+    readonly encode: (snapshot: Shared) => unknown
+    readonly decode: (input: unknown) => Shared
+  }
+  readonly empty: () => Shared
+  readonly reduce: (snapshot: Shared, operation: Operation) => Shared
 }
 
 /**
@@ -160,6 +176,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const documentId = definition.documentId
   const decodeMessage = Schema.decodeUnknownSync(definition.message, { onExcessProperty: 'error' })
   const encodeMessage = Schema.encodeSync(definition.message)
+  const decodeShared = Schema.decodeUnknownSync(definition.shared, { onExcessProperty: 'error' })
+  const encodeShared = Schema.encodeSync(definition.shared)
 
   const ReplicaStateSchema = Schema.Struct({
     protocolVersion: Schema.Literal(PROTOCOL_VERSION),
@@ -254,6 +272,15 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   }
   const committedFrom = (input: unknown, key: DocumentId): Committed =>
     decodeCommittedOperation(input, key).committed
+
+  const journalContract = (): JournalContract<Operation, Shared> => ({
+    // Operations are stored in their encoded form: `normalizeOperation` has
+    // already encoded the Message and validated the identity.
+    operation: { encode: operation => operation, decode: normalizeOperation },
+    snapshot: { encode: encodeShared, decode: decodeShared },
+    empty: () => definition.empty,
+    reduce: (snapshot, operation) => definition.replay(snapshot, decodeMessage(operation.message)),
+  })
 
   const optimistic = (state: ReplicaState<Shared>): Shared =>
     state.pending.reduce(
@@ -553,6 +580,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     operationFrom,
     committedFrom,
     decodeExchange,
+    journalContract,
     openReplica,
   }
 }
