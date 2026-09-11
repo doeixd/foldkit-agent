@@ -28,19 +28,27 @@ export type RefTree<Root, F extends Schema.Struct.Fields> = {
   readonly [K in keyof F]: RefNode<Root, F[K]>
 }
 
+type Selectable<Root, Value> = [Value] extends [Option.Option<infer Inner>]
+  ? ModelRef<Root, Value> & {
+      readonly select: <P>(projection: Projection<Inner, P>) => Projection<Root, Option.Option<P>>
+    }
+  : ModelRef<Root, Value> & {
+      readonly select: <P>(projection: Projection<Value, P>) => Projection<Root, P>
+    }
+
 type RefNode<Root, S> =
   S extends Schema.Struct<infer F>
-    ? ModelRef<Root, Schema.Struct.Type<F>> & RefTree<Root, F>
+    ? Selectable<Root, Schema.Struct.Type<F>> & RefTree<Root, F>
     : S extends Schema.Schema<infer A>
       ? A extends ReadonlyArray<infer E>
-        ? ModelRef<Root, ReadonlyArray<E>> & {
-            readonly index: (index: number) => ModelRef<Root, Option.Option<E>>
+        ? Selectable<Root, ReadonlyArray<E>> & {
+            readonly index: (index: number) => Selectable<Root, Option.Option<E>>
           }
         : A extends Readonly<Record<string, infer V>>
-          ? ModelRef<Root, Readonly<Record<string, V>>> & {
-              readonly at: (key: string) => ModelRef<Root, Option.Option<V>>
+          ? Selectable<Root, Readonly<Record<string, V>>> & {
+              readonly at: (key: string) => Selectable<Root, Option.Option<V>>
             }
-          : ModelRef<Root, A>
+          : Selectable<Root, A>
       : never
 
 type AnySchema = Schema.Schema<unknown>
@@ -58,6 +66,7 @@ function makeTree(
   path: readonly string[],
   optic: Optic.Optional<unknown, unknown>,
   read: (root: unknown) => unknown,
+  optional = false,
 ): Record<string, unknown> {
   const erasedOptic = optic as {
     key(key: string): Optic.Optional<unknown, unknown>
@@ -75,15 +84,32 @@ function makeTree(
   }
 
   node.at = (key: string) =>
-    makeTree(schema, [...path, key], erasedOptic.at(key), root =>
-      optionalReader(propertyReader(read(root), key)),
+    makeTree(
+      schema,
+      [...path, key],
+      erasedOptic.at(key),
+      root => optionalReader(propertyReader(read(root), key)),
+      true,
     )
   node.index = (index: number) =>
-    makeTree(schema, [...path, String(index)], optic, root =>
-      optionalReader(
-        Array.isArray(read(root)) ? (read(root) as ReadonlyArray<unknown>)[index] : undefined,
-      ),
+    makeTree(
+      schema,
+      [...path, String(index)],
+      optic,
+      root =>
+        optionalReader(
+          Array.isArray(read(root)) ? (read(root) as ReadonlyArray<unknown>)[index] : undefined,
+        ),
+      true,
     )
+  node.select = (projection: Projection<unknown, unknown>) => {
+    const dependencies = mergeDependencies([path, ...projection.dependencies])
+    return optional
+      ? makeProjection(Schema.Option(projection.Model), dependencies, root =>
+          Option.map(read(root) as Option.Option<unknown>, value => projection.read(value)),
+        )
+      : makeProjection(projection.Model, dependencies, root => projection.read(read(root)))
+  }
   return node
 }
 

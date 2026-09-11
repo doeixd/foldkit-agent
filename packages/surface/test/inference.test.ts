@@ -7,6 +7,7 @@ const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema
 
 const Model = Schema.Struct({
   session: Schema.Struct({ user: Schema.Struct({ name: Schema.String }) }),
+  projects: Schema.Record(Schema.String, Schema.Struct({ id: Schema.String, name: Schema.String })),
   todos: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
 })
 const Message = defineMessageUnion({ Ping: {} })
@@ -14,6 +15,7 @@ const App = Surface.make({ Model, Message })
 
 const example = {
   session: { user: { name: 'ada' } },
+  projects: {},
   todos: [{ id: 't1', title: 'write the spike' }],
 }
 
@@ -82,6 +84,18 @@ describe('Surface runtime', () => {
     // Dependencies pass through unchanged.
     const selected = Projection.array(Projection.struct({ name: App.model.session.user.name }))
     expect(selected.dependencies).toEqual([['session', 'user', 'name']])
+  })
+
+  it('selects a Projection through a ModelRef and preserves optional absence', () => {
+    const projectSchema = Schema.Struct({ id: Schema.String, name: Schema.String })
+    const nameOnly = Projection.of(projectSchema)({ name: true })
+
+    const selected = App.model.projects.at('p1').select(nameOnly)
+    expect(selected.dependencies).toEqual([['projects', 'p1']])
+
+    const withProject = { ...example, projects: { p1: { id: 'p1', name: 'Apollo' } } }
+    expect(selected.read(withProject)).toEqual(Option.some({ name: 'Apollo' }))
+    expect(selected.read({ ...example, projects: {} })).toEqual(Option.none())
   })
 
   it('starts a Remote selection as Initial', () => {

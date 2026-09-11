@@ -124,6 +124,16 @@ const _maybeUser: Projection<
   Option.Option<{ readonly id: string; readonly name: string }>
 > = maybeUser
 
+const selectedProject = App.model.projects.at('p1').select(ProjectSummary)
+const _selectedProject: Projection<
+  ModelValue,
+  Option.Option<{
+    readonly id: string
+    readonly name: string
+    readonly owner: { readonly id: string; readonly name: string }
+  }>
+> = selectedProject
+
 // --- case 3: Surface.view narrows the projected Model and Message set ------
 
 const ProjectCard = Surface.define(App, 'ProjectCard', {
