@@ -2184,8 +2184,11 @@ owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
 landed next (`8daf52b`); typed Message subsets landed as `Surface.messages`
 (`fbf5368`); the derivation landed as `Sync.forApplication` (`f779fc9`);
 `Surface.compose` landed as `0d29bc1`; `examples/sync` now builds on the whole
-reference-based layer (`a915c0b`); `Agent.forApplication` remains. Work through
-the review findings and open questions below.
+reference-based layer (`a915c0b`); `Agent.forApplication` landed as `a32c2e4`, so
+agent and sync consume the same application/projection references. The remaining
+integration work is the Foldkit binding (step 3 onward in
+`packages/agent/DESIGN.md`). Work through the review findings and open questions
+below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
