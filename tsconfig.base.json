@@ -15,6 +15,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "isolatedModules": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "plugins": [{ "name": "@effect/language-service" }]
   }
 }
