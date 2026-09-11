@@ -9,8 +9,9 @@ const App = Surface.make({ Model, Message })
  * shared projection, the durable Message subset, and the initial snapshot from
  * the application, and exposes a read-only Surface over the same projection.
  *
- * Annotated with the low-level `Sync` type: the example emits declarations, and
- * the inferred type expands a Foldkit-internal message path.
+ * Annotated with the low-level `Sync` type because this example emits
+ * declarations: the inferred type contains `Schema.Schema.Type<MessageUnion<...>>`,
+ * which expands a Foldkit-private alias that declaration emit cannot name.
  */
 export const Sync: SyncContract<Message, Shared> = make(App, 'TodoSync', {
   documentId: documentId('todos'),

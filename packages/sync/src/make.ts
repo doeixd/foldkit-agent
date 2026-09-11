@@ -9,11 +9,10 @@ import type { DocumentId } from './ids.js'
 import type { WritableProjection } from './project.js'
 import { defineSync, type Sync } from './sync.js'
 
-type MessageOf<App> = App extends { readonly Message: Schema.Schema<infer M> } ? M : never
-
 type MessageConstructor<Message> = (...args: never[]) => Message
 
-type MsgOf<Ms extends readonly unknown[]> = {
+/** The Message union a tuple of constructors produces. */
+export type MsgOf<Ms extends readonly unknown[]> = {
   readonly [K in keyof Ms]: Ms[K] extends (...args: never[]) => infer M ? M : never
 }[number]
 
@@ -43,6 +42,22 @@ export interface SyncConfig<
 }
 
 /**
+ * The value `Sync.make` returns: the low-level `Sync` protocol plus the writable
+ * projection, the declared Messages, and a read-only Surface over the projection.
+ * Exported so a consumer can name the type.
+ */
+export interface DefinedSync<
+  AppModel,
+  Fields extends Schema.Struct.Fields,
+  Message,
+  Ms extends readonly unknown[],
+> extends Sync<Message, Schema.Struct.Type<Fields>> {
+  readonly surface: Surface<AppModel, Schema.Struct.Type<Fields>, MsgOf<Ms>, void>
+  readonly projection: WritableProjection<AppModel, Fields>
+  readonly messages: Ms
+}
+
+/**
  * `Sync.make(App, name, config)` returns the low-level `Sync` contract plus the
  * projection, the declared Messages, and a read-only `surface` that observes and
  * writes the projection.
@@ -59,11 +74,12 @@ export const make = <
   app: AppScope<AppModel, F, Cases>,
   name: string,
   config: SyncConfig<AppModel, Fields, Ms>,
-): Sync<Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>, Schema.Struct.Type<Fields>> & {
-  readonly surface: Surface<AppModel, Schema.Struct.Type<Fields>, MsgOf<Ms>, void>
-  readonly projection: WritableProjection<AppModel, Fields>
-  readonly messages: Ms
-} => {
+): DefinedSync<
+  AppModel,
+  Fields,
+  Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>,
+  Ms
+> => {
   type AppMessage = Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>
   type Shared = Schema.Struct.Type<Fields>
 
