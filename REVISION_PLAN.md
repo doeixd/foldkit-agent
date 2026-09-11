@@ -2182,9 +2182,9 @@ documented in `docs/sync-runtime-binding.md` (`fdd9789`); the reference-based
 selection from `packages/agent/DESIGN.md` started as `Surface.pick` over keyed,
 owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
 landed next (`8daf52b`); typed Message subsets landed as `Surface.messages`
-(`fbf5368`); the derivation landed as `Sync.forApplication` (`f779fc9`).
-`Surface.compose` and `Agent.forApplication` remain. Work through the review
-findings and open questions below.
+(`fbf5368`); the derivation landed as `Sync.forApplication` (`f779fc9`);
+`Surface.compose` landed as `0d29bc1`; `Agent.forApplication` remains. Work
+through the review findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
