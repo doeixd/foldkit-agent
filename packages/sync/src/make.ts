@@ -4,7 +4,13 @@
  * contract, and exposes a read-only Surface over the same projection.
  */
 import { Schema } from 'effect'
-import { Surface, type AppScope, type Projection } from 'foldkit-surface'
+import {
+  Surface,
+  type AppScope,
+  type Application,
+  type MessageSubset,
+  type Projection,
+} from 'foldkit-surface'
 import type { DocumentId } from './ids.js'
 import type { WritableProjection } from './project.js'
 import { defineSync, type Sync } from './sync.js'
@@ -12,9 +18,9 @@ import { defineSync, type Sync } from './sync.js'
 type MessageConstructor<Message> = (...args: never[]) => Message
 
 /** The Message union a tuple of constructors produces. */
-export type MsgOf<Ms extends readonly unknown[]> = {
-  readonly [K in keyof Ms]: Ms[K] extends (...args: never[]) => infer M ? M : never
-}[number]
+export type MsgOf<Ms extends readonly unknown[]> = Ms[number] extends (...args: never[]) => infer M
+  ? M
+  : never
 
 /** Reads the tag off a Foldkit Message constructor without constructing one. */
 const messageTag = (constructor: unknown): string | undefined => {
@@ -58,11 +64,10 @@ export interface DefinedSync<
 }
 
 /**
- * `Sync.make(App, name, config)` returns the low-level `Sync` contract plus the
- * projection, the declared Messages, and a read-only `surface` that observes and
- * writes the projection.
+ * Compiles a contract into `defineSync` plus a read-only Surface. Shared by
+ * `make` (explicit config) and `forApplication` (derived config).
  */
-export const make = <
+const compile = <
   AppModel,
   F extends Schema.Struct.Fields,
   Cases extends Record<string, Schema.Struct.Fields>,
@@ -113,4 +118,81 @@ export const make = <
   })
 
   return { ...sync, surface, projection: config.model, messages: config.messages }
+}
+
+/**
+ * `Sync.make(App, name, config)` compiles an explicit contract: a writable
+ * projection, the durable Message constructors, the initial Model, and a pure
+ * replay function.
+ */
+export const make = <
+  AppModel,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+  Fields extends Schema.Struct.Fields,
+  const Ms extends readonly MessageConstructor<
+    Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>
+  >[],
+>(
+  app: AppScope<AppModel, F, Cases>,
+  name: string,
+  config: SyncConfig<AppModel, Fields, Ms>,
+): DefinedSync<AppModel, Fields, Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>, Ms> =>
+  compile(app, name, config)
+
+export interface ForApplicationConfig<
+  AppModel,
+  Fields extends Schema.Struct.Fields,
+  Subset,
+  Ms extends readonly MessageConstructor<any>[],
+> {
+  readonly documentId: DocumentId
+  /** Name for the generated `surface`; defaults to the document id. */
+  readonly name?: string
+  readonly shared: WritableProjection<AppModel, Fields>
+  readonly durable: MessageSubset<AppModel, any, Subset, Ms>
+}
+
+/**
+ * `Sync.forApplication(App, { documentId, shared, durable })` derives the
+ * contract from a `Surface.application`: the initial shared value, the durable
+ * predicate, and replay. Replay installs the shared slice into the application's
+ * initial Model, applies the Message with the application's own `update`, and
+ * reads the shared slice back — the state-only, deterministic subset. Use
+ * `Sync.make` or `defineSync` when replay must be custom.
+ */
+export const forApplication = <
+  AppModel,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+  Fields extends Schema.Struct.Fields,
+  Subset,
+  const Ms extends readonly MessageConstructor<
+    Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>
+  >[],
+>(
+  app: Application<AppModel, F, Cases>,
+  config: ForApplicationConfig<AppModel, Fields, Subset, Ms>,
+): DefinedSync<
+  AppModel,
+  Fields,
+  Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>,
+  Ms
+> => {
+  const { shared } = config
+  const { initial, update } = app
+  return compile(app, config.name ?? String(config.documentId), {
+    documentId: config.documentId,
+    initial,
+    model: shared,
+    messages: config.durable.constructors,
+    replay: (value, message) =>
+      shared.get(
+        update(
+          shared.set(initial, value),
+          // Only durable Messages reach replay, so the subset is an App Message.
+          message as Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>,
+        ).model,
+      ),
+  })
 }

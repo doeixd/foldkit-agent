@@ -2,7 +2,8 @@ import { Effect, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
-import { documentId, make, project, replicaId, type Storage } from '../src/index.js'
+import { documentId, make, project, replicaId } from '../src/index.js'
+import { memoryStorage } from './memoryStorage.js'
 
 const Todo = Schema.Struct({ id: Schema.String, title: Schema.String })
 const ModelSchema = Schema.Struct({
@@ -34,18 +35,6 @@ const TodoSync = make(App, 'TodoSync', {
           ),
         },
 })
-
-const memoryStorage = (): Storage => {
-  let state: unknown
-  return {
-    load: () => Effect.sync(() => state),
-    save: next =>
-      Effect.sync(() => {
-        state = structuredClone(next)
-      }),
-    close: Effect.void,
-  }
-}
 
 const open = () => Effect.runPromise(TodoSync.openReplica(replicaId('a'), memoryStorage()))
 type Replica = Awaited<ReturnType<typeof open>>

@@ -7,7 +7,14 @@
  * journal provides authoritative order.
  */
 export { indexedDb, type Storage } from './indexedDb.js'
-export { make, type DefinedSync, type MsgOf, type SyncConfig } from './make.js'
+export {
+  forApplication,
+  make,
+  type DefinedSync,
+  type ForApplicationConfig,
+  type MsgOf,
+  type SyncConfig,
+} from './make.js'
 export { project, type WritableProjection } from './project.js'
 export { DocumentId, OpId, ReplicaId, documentId, opId, replicaId } from './ids.js'
 export {
