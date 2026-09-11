@@ -43,4 +43,18 @@ describe('RemoteData', () => {
       ),
     ).toEqual({ _tag: 'Failed', error: { _tag: 'Boom', message: 'x' }, previous: 3 })
   })
+
+  it('maps refreshing values and leaves valueless states untouched', () => {
+    const inc = (n: number) => n + 1
+    expect(RemoteData.map({ _tag: 'Refreshing', value: 2 }, inc)).toEqual({
+      _tag: 'Refreshing',
+      value: 3,
+    })
+    expect(RemoteData.map({ _tag: 'Initial' }, inc)).toEqual({ _tag: 'Initial' })
+    expect(RemoteData.map({ _tag: 'Loading' }, inc)).toEqual({ _tag: 'Loading' })
+    expect(RemoteData.map({ _tag: 'Failed', error: { _tag: 'Boom', message: 'x' } }, inc)).toEqual({
+      _tag: 'Failed',
+      error: { _tag: 'Boom', message: 'x' },
+    })
+  })
 })

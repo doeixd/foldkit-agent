@@ -27,4 +27,44 @@ describe('Remote core', () => {
     expect(Schema.decodeSync(codec)('Node:n1')).toEqual({ entity: 'Node', id: 'n1' })
     expect(Schema.encodeSync(codec)({ entity: 'Node', id: 'n1' })).toBe('Node:n1')
   })
+
+  it('round-trips an id that contains the separator', () => {
+    const codec = Entity.ref(User)
+    const ref = User.ref('a:b:c')
+    expect(Schema.encodeSync(codec)(ref)).toBe('User:a:b:c')
+    expect(Schema.decodeSync(codec)('User:a:b:c')).toEqual(ref)
+  })
+
+  it('decodes a reference with no separator to an empty id', () => {
+    expect(Schema.decodeSync(Entity.ref(User))('User')).toEqual({ entity: 'User', id: '' })
+  })
+
+  it('stringifies a non-string id', () => {
+    const Numeric = Entity.make(
+      'Numeric',
+      Schema.Struct({ id: Schema.Number, value: Schema.Number }),
+    )
+    expect(Numeric.ref(7).id).toBe('7')
+  })
+
+  it('preserves nested selection key order and schema', () => {
+    const Owner = Entity.make('Owner', Schema.Struct({ id: Schema.String, name: Schema.String }))
+    const Project = Entity.make(
+      'Project',
+      Schema.Struct({ id: Schema.String, name: Schema.String, owner: Owner.schema }),
+    )
+    const selection = Selection.make(Project, {
+      name: true,
+      owner: Selection.make(Owner, { id: true, name: true }),
+    })
+
+    expect(selection.fields).toEqual(['name', 'owner'])
+    const decoded = Schema.decodeUnknownSync(
+      selection.schema as unknown as Schema.ConstraintDecoder<unknown>,
+    )({
+      name: 'ada',
+      owner: { id: 'o1', name: 'A' },
+    })
+    expect(decoded).toEqual({ name: 'ada', owner: { id: 'o1', name: 'A' } })
+  })
 })

@@ -114,6 +114,8 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
 - **`Optic.at` cannot insert.** It is a prism, not a lens: `replace` is a no-op on
   an absent key, so writing a new key (or clearing one) needs a container-aware
   setter, not `optic.replace`. Silent no-op otherwise.
+- **Untrusted field names are prototype keys.** `field in values` walks the
+  prototype chain; filter with `Object.hasOwn` and accumulate with no prototype.
 - **Effect 4 `Rpc.make` streams via `stream: true`,** not `success:
   RpcSchema.Stream(...)`. Handlers come from `RpcGroup.toLayer`; the in-process
   test client is `RpcTest.makeClient(group)`.
