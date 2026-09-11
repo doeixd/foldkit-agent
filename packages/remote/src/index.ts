@@ -28,6 +28,7 @@ export * from './plan.js'
 export * from './connection.js'
 export * from './query.js'
 export * from './mutation.js'
+export * from './optimistic.js'
 export * from './wire.js'
 
 // ===========================================================================
