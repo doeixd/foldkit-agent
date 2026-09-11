@@ -5,4 +5,5 @@
  * resolver runs.
  */
 export * as SurfaceView from './surfaceView.js'
-export { define, toRenderer } from './surfaceView.js'
+export { define, inspect, toRenderer } from './surfaceView.js'
+export type { SurfaceViewInspection } from './surfaceView.js'

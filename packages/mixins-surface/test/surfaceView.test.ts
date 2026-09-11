@@ -93,4 +93,17 @@ describe('SurfaceView', () => {
     expect(classValue(resolved)).toBe('todo-list')
     expect(resolved.map(tagOf)).toContain('AriaDisabled')
   })
+
+  it('inspects serializable slot and mixin metadata', () => {
+    const view = SurfaceView.define(TodoList, TodoSlots, (_model, slots, h) =>
+      h.ul(slots.root.attrs(), []),
+    ).pipe(Style.attach(Style.forSlots(TodoSlots)({ root: Style.class('todo-list') })))
+    const info = SurfaceView.inspect(view)
+    expect(info.name).toBe('TodoList')
+    expect(Object.keys(info.slots)).toEqual(['root', 'archive'])
+    expect(info.slots.root?.capability).toBe('Container')
+    expect(info.slots.archive?.events).toEqual(['click'])
+    expect(info.mixins).toEqual(['Style'])
+    expect(JSON.parse(JSON.stringify(info))).toEqual(info)
+  })
 })

@@ -84,8 +84,9 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   pipe unchanged; `SurfaceView.toRenderer` adapts it to `Surface.view` /
   `Surface.rootView`. Type tests pin the projected-Model and Message-subset
   rejections, and runtime tests drive `Surface.rootView` end-to-end, including a
-  Style and a Behavior reading the projected input. Phase 10 started, not
-  complete.
+  Style and a Behavior reading the projected input. `SurfaceView.inspect(view)`
+  returns serializable `{ name, slots, mixins }` (no functions), composing with
+  `Surface.inspect`. Phase 10 started, not complete.
 
 ### `foldkit-agent`
 

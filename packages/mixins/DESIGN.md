@@ -297,8 +297,10 @@ override even when a later attachment would otherwise win.
   throughout — was prototyped and rejected: it forces every render/Behavior
   annotation to switch types under contravariance, for little gain.
 - Started, not complete: runtime composition through `Surface.rootView` in a real
-  application, introspection metadata (slot contracts in `Surface.inspect`), and
-  the `@foldkit/ui` + Surface combination remain.
+  application is covered by tests, and `SurfaceView.inspect(view)` returns
+  serializable `{ name, slots, mixins }` (no functions), composing with
+  `Surface.inspect`'s observation/emit metadata. The `@foldkit/ui` + Surface
+  combination and a worked application example remain.
 
 ## Phase plan (this package)
 

@@ -9,15 +9,15 @@
  */
 import type { HtmlBuilder } from 'foldkit/html'
 import type { Renderer, Surface } from 'foldkit-surface'
-import { SlotView, type SlotViewRender } from 'foldkit-mixins'
+import { Slots, SlotView, type SlotViewRender } from 'foldkit-mixins'
 
-export const define = <Root, Model, Message, Params, Slots>(
+export const define = <Root, Model, Message, Params, Slots_>(
   surface: Surface<Root, Model, Message, Params>,
-  slots: Slots,
-  render: SlotViewRender<Slots, Model, Message>,
+  slots: Slots_,
+  render: SlotViewRender<Slots_, Model, Message>,
   options?: { readonly name?: string },
-): SlotView.SlotView<Slots, Model, Message> =>
-  SlotView.define<Slots, Model, Message>(slots, render, {
+): SlotView.SlotView<Slots_, Model, Message> =>
+  SlotView.define<Slots_, Model, Message>(slots, render, {
     name: options?.name ?? surface.name,
   })
 
@@ -28,8 +28,28 @@ export const define = <Root, Model, Message, Params, Slots>(
  * constructs the Surface's Message subset.
  */
 export const toRenderer =
-  <Slots, Model, Message>(
-    view: SlotView.SlotView<Slots, Model, Message>,
+  <Slots_, Model, Message>(
+    view: SlotView.SlotView<Slots_, Model, Message>,
   ): Renderer<Model, Message> =>
   (model, h) =>
     view(model, h as unknown as HtmlBuilder<Message>)
+
+export interface SurfaceViewInspection {
+  /** The SlotView's name, defaulted from the Surface's name. */
+  readonly name: string
+  readonly slots: ReturnType<typeof Slots.describe>['slots']
+  readonly mixins: ReadonlyArray<string>
+}
+
+/**
+ * Serializable metadata for DevTools and docs: the published slots and the
+ * names of the attached Mixins, with no functions. It composes with
+ * `Surface.inspect`, which reports what the Surface observes and emits.
+ */
+export const inspect = <Slots_, Model, Message>(
+  view: SlotView.SlotView<Slots_, Model, Message>,
+): SurfaceViewInspection => ({
+  name: view.name ?? '',
+  slots: Slots.describe(view.slots as unknown as Parameters<typeof Slots.describe>[0]).slots,
+  mixins: view.mixins.map(mixin => mixin.name),
+})
