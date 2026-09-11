@@ -28,6 +28,10 @@ suggested sequence are at the end.
 
 ## D1 — Relation cursoring and connection accumulation
 
+**Status: server cursor (A2) implemented in `ce7dec6`.** `last` pages per
+parent; `after`/`before` work for a single parent. Client accumulation (B2/B3/B4)
+remains open.
+
 ### Current behaviour
 
 `Selection.connection(Target, { first })` produces a `RefPage` value
@@ -284,7 +288,8 @@ dialects in one client is a bug factory.
 1. **D2 (window-change refetch)** — done (`8bdebdd`): `EntityEntry.windows`,
    `Remote.writeRead`, and persistence version 2. It established the shared
    write path D1 wants.
-2. **D1 server cursor (A2)** — complete the adapter for single-parent relations.
+2. **D1 server cursor (A2)** — done (`ce7dec6`): `last` per parent and
+   `after`/`before` for a single parent, reusing the query source's id cursor.
 3. **Nullable ordering fix** — required before cursoring nullable columns.
 4. **D1 client accumulation (B2 -> B3, B4 long-term)** — the library-grade
    connection; design B4 together with top-level queries.
@@ -296,7 +301,7 @@ dialects in one client is a bug factory.
 
 | Decision | Recommended option | Effort | Blast radius | Risk if deferred |
 | --- | --- | --- | --- | --- |
-| D1 cursor | A2 single-parent, C1 id cursor | M | adapter + server | No load-more for batched relations |
+| D1 cursor | A2 single-parent, C1 id cursor | M | adapter + server | Resolved server-side (`ce7dec6`); batched relations are first/last only |
 | D1 accumulation | B2 now, B3 next, B4 long-term | L | client model | Apps own merge correctness |
 | D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
 | D3 relation authz | A1/A5 now, A2 row-level later | S–M | adapter (A2) | Reveals target ids |
@@ -307,7 +312,9 @@ dialects in one client is a bug factory.
 ## Open questions
 
 - Does a paginated relation ever need per-parent cursors in a **batched** read,
-  or is a single-parent view always the case? (Decides A2 vs A3.)
+  or is a single-parent view always the case? **Resolved: A2.** A cursor needs a
+  single parent; A3 (a per-parent window protocol) remains available if a batched
+  per-parent cursor is ever needed.
 - Should `observe`'s Message carry the plan's requests so `writeRead` can record
   windows, or should the app recompute them?
 - Is `RemoteModel.connections` one slot for nested and top-level connections, or
