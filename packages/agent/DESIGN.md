@@ -35,12 +35,12 @@ integration layer; it is not a shipped API.
 
 | Package | What it is |
 | --- | --- |
-| [`foldkit-agent`](./packages/agent) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
-| [`foldkit-agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
-| [`foldkit-agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
-| [`foldkit-agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
-| [`foldkit-durable`](./packages/durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
-| [`foldkit-sync`](./packages/sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
+| [`foldkit-agent`](./README.md) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
+| [`foldkit-agent-webmcp`](../agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
+| [`foldkit-agent-mcp`](../agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
+| [`foldkit-agent-a2a`](../agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
+| [`foldkit-durable`](../durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
+| [`foldkit-sync`](../sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
 | [`foldkit-agent-native`](../agent-native) | A private prototype adapting the contract to Agent Native, with integration tests against the real framework. |
 | `foldkit-surface` (proposed) | A common contract and Foldkit binding for interacting with a running application; no implementation yet. |
 
@@ -1104,7 +1104,7 @@ change while decoding or authorization is pending does not retarget an
 invocation already in flight. That is snapshot consistency, not live-state
 freshness: the next invocation sees the newer Model. Nothing rejects a dispatch
 because the live Model has advanced; see the
-[package README](./packages/agent#the-model-snapshot).
+[package README](./README.md#the-model-snapshot).
 
 The host must replace Models rather than mutate them in place: the runtime
 retains the returned reference, without cloning it. Unknown capabilities and
@@ -1129,7 +1129,7 @@ const registration = AgentWebMcp.register({ agent: agentRuntime })
 
 The registration exposes `refresh()` to reconcile against the current Model,
 `registered()` for the capability names currently registered, and
-`unregister()`. See the [package README](./packages/agent-webmcp) for the
+`unregister()`. See the [package README](../agent-webmcp) for the
 options.
 
 The adapter projects exposed Message variants into `document.modelContext.registerTool(...)` calls.
@@ -2016,7 +2016,7 @@ Command  = effects
 Schema   = runtime contract
 ```
 
-The missing primitive is a deliberate projection:
+The agent layer adds deliberate projections:
 
 ```text
 Model ─────────► Agent.context
@@ -2034,6 +2034,11 @@ From there:
 ```
 
 WebMCP is particularly compelling because it can expose these capabilities directly from the page that already owns the Foldkit Runtime — no DOM automation and no external browser-session bridge required.
+
+The proposed surface layer makes the connection to that running application
+reusable across agent access and replication. Its acceptance is concrete: less
+application glue, explicit submission and lifecycle guarantees, preserved type
+inference, and continued independent use of the packages.
 
 ## References
 
