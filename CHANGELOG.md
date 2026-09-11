@@ -40,11 +40,11 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 ### `foldkit-mixins-ui` (private)
 
 - **`@foldkit/ui` adapter.** New private package formalizing the attribute
-  bundles of Button, Input, Checkbox, and Disclosure as `Slots`, and resolving
-  attached Mixins into them. Base attributes, event Messages and
-  `ChildAttribute`s are preserved; a Behavior cannot take over an event the
-  component already owns. The remaining components and the Surface adapter are
-  not in this slice.
+  bundles of Button, Input, Textarea, Checkbox, Switch, Fieldset, and Disclosure
+  as `Slots`, and resolving attached Mixins into them. Base attributes, event
+  Messages and `ChildAttribute`s are preserved; a Behavior cannot take over an
+  event the component already owns. The remaining components and the Surface
+  adapter are not in this slice.
 
 ### `foldkit-agent`
 

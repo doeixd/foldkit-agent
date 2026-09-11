@@ -6,12 +6,18 @@
 export * as Button from './button.js'
 export * as Checkbox from './checkbox.js'
 export * as Disclosure from './disclosure.js'
+export * as Fieldset from './fieldset.js'
 export * as Input from './input.js'
+export * as Switch from './switch.js'
+export * as Textarea from './textarea.js'
 
 export { ButtonSlots } from './button.js'
 export { CheckboxSlots } from './checkbox.js'
 export { DisclosureSlots } from './disclosure.js'
+export { FieldsetSlots } from './fieldset.js'
 export { InputSlots } from './input.js'
+export { SwitchSlots } from './switch.js'
+export { TextareaSlots } from './textarea.js'
 
 export { resolveFor as resolve } from './resolve.js'
 export type { MixinList, ResolveContext, ResolvedSlots } from './resolve.js'

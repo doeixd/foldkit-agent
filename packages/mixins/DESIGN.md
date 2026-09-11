@@ -227,10 +227,12 @@ override even when a later attachment would otherwise win.
   Messages and `ChildAttribute`s are preserved by identity; non-slot entries
   (`Disclosure.animatePanel`) pass through unchanged.
 - Published contracts: Button (`button`), Input (`input`/`label`/`description`),
-  Checkbox (`checkbox`/`label`/`description`/`hiddenInput`), Disclosure
-  (`button`/`panel`). A slot advertises the capability, events and attributes a
-  Behavior may require; the base bundle's ownership is what turns taking over a
-  click into a `mixins:event-conflict` rather than a second silent handler.
+  Textarea (`textarea`/`label`/`description`), Checkbox
+  (`checkbox`/`label`/`description`/`hiddenInput`), Switch, Fieldset
+  (`fieldset`/`legend`/`description`), and Disclosure (`button`/`panel`). A slot
+  advertises the capability, events and attributes a Behavior may require; the
+  base bundle's ownership is what turns taking over a click into a
+  `mixins:event-conflict` rather than a second silent handler.
 - The later component set (Dialog, Menu, Tabs, ComboBox, ...) and the Surface
   adapter remain.
 
