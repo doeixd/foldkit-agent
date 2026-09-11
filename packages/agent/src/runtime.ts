@@ -354,9 +354,12 @@ export const bind = <
       // Excess properties are an error, not stripped: the derived JSON Schema
       // advertises additionalProperties: false, so accepting them would enforce
       // something looser than the contract the agent was handed.
-      const decoded: unknown = yield* Effect.mapError(
-        Schema.decodeUnknownEffect(variant.inputSchema, { onExcessProperty: 'error' })(input),
-        cause => InvalidInputError.of(name, variant.tag, cause),
+      const decoded: unknown = yield* Schema.decodeUnknownEffect(variant.inputSchema, {
+        onExcessProperty: 'error',
+      })(input).pipe(
+        Effect.catchTag('SchemaError', cause =>
+          Effect.fail(InvalidInputError.of(name, variant.tag, cause)),
+        ),
       )
 
       const principal = host.principal?.(invocation) as Principal

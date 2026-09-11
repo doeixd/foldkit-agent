@@ -91,6 +91,9 @@ export interface HttpHandlerOptions<Model, Context_, Principal, ByName, ByTag> {
   /** Idle sessions are dropped after this long. Defaults to 30 minutes. */
   readonly sessionTtlMs?: number | undefined
 
+  /** Injected for tests. Defaults to `Date.now`. */
+  readonly clock?: (() => number) | undefined
+
   /** Events kept per stream for `Last-Event-ID` resumption. Defaults to 100. */
   readonly replayBuffer?: number | undefined
 
@@ -205,6 +208,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
 ): HttpHandler => {
   const ttl = options.sessionTtlMs ?? 30 * 60 * 1000
   const replayBuffer = options.replayBuffer ?? 100
+  const clock = options.clock ?? Date.now
   const sessions = new Map<string, Session>()
 
   const drop = (session: Session): void => {
@@ -225,7 +229,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
   }
 
   const expire = (): void => {
-    const cutoff = Date.now() - ttl
+    const cutoff = clock() - ttl
     for (const session of [...sessions.values()]) {
       if (session.lastSeen < cutoff) drop(session)
     }
@@ -308,7 +312,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
     // leak, and the caller re-initializes into a session of its own -- and its
     // last-seen is left alone, so an outsider cannot keep the session alive.
     if (session.owner !== owner) return undefined
-    session.lastSeen = Date.now()
+    session.lastSeen = clock()
     return session
   }
 
@@ -426,7 +430,7 @@ export const httpHandler = <Model, Context_, Principal, ByName, ByTag>(
         }),
         streams: [],
         nextEventId: 1,
-        lastSeen: Date.now(),
+        lastSeen: clock(),
         terminated: false,
       }
       sessions.set(id, session)

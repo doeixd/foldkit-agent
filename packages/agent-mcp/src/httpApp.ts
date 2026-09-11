@@ -18,7 +18,7 @@ const frame = (event: SseEvent): Uint8Array =>
 /** Bridges the adapter's push-style stream onto an Effect `Stream`. */
 const toStream = (sse: SseStream): Stream.Stream<Uint8Array> =>
   Stream.callback<Uint8Array>(queue =>
-    Effect.gen(function* () {
+    Effect.fn('AgentMcp.toStream')(function* () {
       // Whatever the client missed while disconnected goes out first, in order.
       for (const event of sse.backlog) {
         yield* Queue.offer(queue, frame(event))
@@ -39,7 +39,7 @@ const toStream = (sse: SseStream): Stream.Stream<Uint8Array> =>
       // The queue outlives this effect: the stream stays open until the session
       // ends it or the client disconnects, and the finalizer runs either way.
       yield* Effect.addFinalizer(() => Effect.sync(unsubscribe))
-    }),
+    })(),
   )
 
 /** Header names arrive lowercased already, which is what the core expects. */
@@ -85,7 +85,7 @@ export const httpApp = <Model, Context_, Principal, ByName, ByTag>(
 > => {
   const server = options.server ?? httpHandler(options)
 
-  return Effect.gen(function* () {
+  return Effect.fn('AgentMcp.httpApp')(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
 
     // A body that is absent or unparseable is not a reason to fail the request:
@@ -114,5 +114,5 @@ export const httpApp = <Model, Context_, Principal, ByName, ByTag>(
             headers: response.headers,
           }),
         )
-  })
+  })()
 }
