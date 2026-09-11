@@ -5,6 +5,7 @@ export interface FakeCall {
   where: unknown
   innerJoin: unknown
   orderBy: ReadonlyArray<unknown> | undefined
+  groupBy: ReadonlyArray<unknown> | undefined
   limit: number | undefined
 }
 
@@ -25,6 +26,7 @@ export const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<str
         where: undefined,
         innerJoin: undefined,
         orderBy: undefined,
+        groupBy: undefined,
         limit: undefined,
       }
       calls.push(call)
@@ -42,6 +44,10 @@ export const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<str
         },
         orderBy: (...order: ReadonlyArray<unknown>) => {
           call.orderBy = order
+          return statement
+        },
+        groupBy: (...columns: ReadonlyArray<unknown>) => {
+          call.groupBy = columns
           return statement
         },
         limit: (count: number) => {

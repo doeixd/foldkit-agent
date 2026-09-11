@@ -10,7 +10,7 @@
  * Keyset pagination and required-column projection are adapted from fate's
  * Drizzle integration (MIT); see `THIRD_PARTY_NOTICES.md`.
  */
-import { and, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, sql, type AnyColumn, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { Effect } from 'effect'
 import type { QueryDescriptor, Selection } from 'foldkit-remote'
@@ -168,10 +168,11 @@ export const reader =
 const selectRows = (
   database: DrizzleDatabaseService,
   table: PgTable,
-  columns: Record<string, AnyColumn>,
+  columns: Record<string, AnyColumn | SQL>,
   options: {
     readonly where?: SQL | undefined
     readonly innerJoin?: { readonly table: PgTable; readonly on: SQL } | undefined
+    readonly groupBy?: readonly AnyColumn[] | undefined
     readonly orderBy?: readonly SQL[] | undefined
     readonly limit?: number | undefined
   } = {},
@@ -181,6 +182,7 @@ const selectRows = (
   if (options.innerJoin !== undefined) {
     statement = statement.innerJoin(options.innerJoin.table, options.innerJoin.on)
   }
+  if (options.groupBy !== undefined) statement = statement.groupBy(...options.groupBy)
   if (options.orderBy !== undefined) statement = statement.orderBy(...options.orderBy)
   if (options.limit !== undefined) statement = statement.limit(options.limit)
   return Effect.tryPromise({
@@ -222,12 +224,18 @@ export const source = <P = unknown>(
       if (context.ids.length === 0) return []
       if (!projectsAny(binding, context.fields)) return []
       const database = yield* DrizzleDatabase
-      const rows = yield* selectRows(
-        database,
-        binding.table,
-        selectColumns(binding, context.fields),
-        { where: whereIds(binding, context.ids) },
-      )
+      const columns = selectColumns(binding, context.fields)
+      for (const field of context.fields) {
+        const computed = binding.computed[field]
+        if (computed === undefined) continue
+        const relation = binding.relations[computed.relation]
+        if (relation === undefined || relation.kind === 'one') continue
+        const parentColumn = relation.kind === 'many' ? relation.localKey : idColumn(binding)
+        columns[parentColumn.name] = parentColumn
+      }
+      const rows = yield* selectRows(database, binding.table, columns, {
+        where: whereIds(binding, context.ids),
+      })
 
       for (const field of context.fields) {
         const relation = binding.relations[field]
@@ -408,6 +416,60 @@ export const source = <P = unknown>(
         for (const row of rows) {
           const key = row[field]
           row[field] = key === null || key === undefined ? [] : (byParent.get(String(key)) ?? [])
+        }
+      }
+
+      for (const field of context.fields) {
+        const computed = binding.computed[field]
+        if (computed === undefined) continue
+        const relation = binding.relations[computed.relation]
+        if (relation === undefined || relation.kind === 'one') {
+          return yield* new RemoteServerError({
+            message: `Computed field "${field}" needs collection relation "${computed.relation}"`,
+          })
+        }
+        const parentColumn = relation.kind === 'many' ? relation.localKey : idColumn(binding)
+        const parentKeys = [
+          ...new Set(
+            rows
+              .map(row => row[parentColumn.name])
+              .filter(key => key !== null && key !== undefined),
+          ),
+        ]
+        const counts = new Map<string, number>()
+        if (parentKeys.length > 0) {
+          const count = sql<number>`count(*)`.mapWith(Number)
+          const countRows =
+            relation.kind === 'many'
+              ? yield* selectRows(
+                  database,
+                  relation.entity.table,
+                  { count, parent: relation.foreignKey },
+                  {
+                    where: withFilters(inArray(relation.foreignKey, parentKeys), computed.where),
+                    groupBy: [relation.foreignKey],
+                  },
+                )
+              : yield* selectRows(
+                  database,
+                  relation.through,
+                  { count, parent: relation.localColumn },
+                  {
+                    where: withFilters(inArray(relation.localColumn, parentKeys), computed.where),
+                    innerJoin: {
+                      table: relation.entity.table,
+                      on: eq(relation.foreignColumn, idColumn(relation.entity)),
+                    },
+                    groupBy: [relation.localColumn],
+                  },
+                )
+          for (const countRow of countRows) {
+            counts.set(String(countRow.parent), Number(countRow.count))
+          }
+        }
+        for (const row of rows) {
+          const key = row[parentColumn.name]
+          row[field] = key === null || key === undefined ? 0 : (counts.get(String(key)) ?? 0)
         }
       }
 

@@ -16,13 +16,19 @@ const missingId = (name: string): never => {
 export const idColumn = (binding: EntityBinding<any, any>): AnyColumn =>
   binding.columns.id ?? missingId(binding.name)
 
-/** Whether at least one requested field maps to a column or a relation. */
+/** Whether at least one requested field maps to a column, relation, or computed value. */
 export const projectsAny = (
   binding: EntityBinding<any, any>,
   fields: Iterable<string>,
 ): boolean => {
   for (const field of fields) {
-    if (binding.columns[field] !== undefined || binding.relations[field] !== undefined) return true
+    if (
+      binding.columns[field] !== undefined ||
+      binding.relations[field] !== undefined ||
+      binding.computed[field] !== undefined
+    ) {
+      return true
+    }
   }
   return false
 }

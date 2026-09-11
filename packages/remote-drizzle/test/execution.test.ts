@@ -505,4 +505,67 @@ describe('RemoteDrizzle execution', () => {
     expect(where.sql).toContain('"comments"."body" =')
     expect(where.params).toContain('ada')
   })
+
+  it('attaches a computed count over a collection relation', async () => {
+    const counted = entity('Post', posts, {
+      relations: {
+        comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+      },
+      computed: { commentCount: { relation: 'comments' } },
+    })
+    const { database, calls } = fakeDatabaseQueue([[{ id: 'p1' }], [{ count: 2, parent: 'p1' }]])
+
+    const records = await Effect.runPromise(
+      source(counted)
+        .read({ ids: ['p1'], fields: ['id', 'commentCount'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records).toEqual([{ id: 'p1', values: { id: 'p1', commentCount: 2 } }])
+    expect(calls).toHaveLength(2)
+    expect(Object.keys(calls[1]!.selection)).toEqual(['count', 'parent'])
+    expect(calls[1]!.groupBy).toHaveLength(1)
+  })
+
+  it('attaches a computed count over a many-to-many relation', async () => {
+    const counted = entity('Post', posts, {
+      relations: {
+        tags: manyToMany(TagBinding, {
+          through: postTags,
+          localColumn: postTags.postId,
+          foreignColumn: postTags.tagId,
+        }),
+      },
+      computed: { tagCount: { relation: 'tags' } },
+    })
+    const { database, calls } = fakeDatabaseQueue([[{ id: 'p1' }], [{ count: 3, parent: 'p1' }]])
+
+    const records = await Effect.runPromise(
+      source(counted)
+        .read({ ids: ['p1'], fields: ['id', 'tagCount'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records[0]!.values.tagCount).toBe(3)
+    expect(Object.keys(calls[1]!.selection)).toEqual(['count', 'parent'])
+    expect(calls[1]!.innerJoin).toBeDefined()
+  })
+
+  it('projects a computed field even with no scalar field selected', async () => {
+    const counted = entity('Post', posts, {
+      relations: {
+        comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+      },
+      computed: { commentCount: { relation: 'comments' } },
+    })
+    const { database } = fakeDatabaseQueue([[{ id: 'p1' }], [{ count: 5, parent: 'p1' }]])
+
+    const records = await Effect.runPromise(
+      source(counted)
+        .read({ ids: ['p1'], fields: ['commentCount'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records[0]!.values.commentCount).toBe(5)
+  })
 })

@@ -59,6 +59,14 @@ export interface ManyToManyRelation extends RelationTarget {
 
 export type RelationBinding = OneRelation | ManyRelation | ManyToManyRelation
 
+/** An aggregate over a collection relation, attached to each owning row. */
+export interface ComputedConfig {
+  /** The collection relation whose target rows are counted. */
+  readonly relation: string
+  /** An optional filter on the counted rows. */
+  readonly where?: SQL | undefined
+}
+
 export type RelationConfig =
   | {
       readonly kind?: 'one' | undefined
@@ -156,6 +164,7 @@ export interface EntityBinding<Name extends string, Table extends PgTable> {
   readonly Schema: SelectSchema<Table>
   readonly columns: Readonly<Record<string, AnyColumn>>
   readonly relations: Readonly<Record<string, RelationBinding>>
+  readonly computed: Readonly<Record<string, ComputedConfig>>
 }
 
 export const entity = <const Name extends string, Table extends PgTable>(
@@ -164,6 +173,7 @@ export const entity = <const Name extends string, Table extends PgTable>(
   options?: {
     readonly schema?: Schema.Codec<unknown> | undefined
     readonly relations?: Readonly<Record<string, RelationConfig>> | undefined
+    readonly computed?: Readonly<Record<string, ComputedConfig>> | undefined
   },
 ): EntityBinding<Name, Table> => {
   const columns = getTableColumns(table)
@@ -188,5 +198,6 @@ export const entity = <const Name extends string, Table extends PgTable>(
     columns,
     Schema: (options?.schema ?? createSelectSchema(table)) as SelectSchema<Table>,
     relations,
+    computed: options?.computed ?? {},
   }
 }

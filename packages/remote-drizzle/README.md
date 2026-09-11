@@ -224,6 +224,24 @@ Applying a cursor page through `Remote.writeRead` merges it onto the stored page
 (append for `after`, prepend for `before`), so "load more" accumulates; a page
 without a cursor replaces.
 
+## Computed fields
+
+An aggregate over a collection relation is a binding-level `computed`; the read
+runs a grouped `count(*)` and attaches the number to each row.
+
+```ts
+const Post = entity('Post', posts, {
+  relations: {
+    comments: many(Comment, { foreignKey: comments.postId, localKey: posts.id }),
+  },
+  computed: { commentCount: { relation: 'comments' } },
+})
+```
+
+The Entity declares `commentCount` as a number and the Selection selects it. The
+config's `where` filters the counted rows. The count is the total, not the page,
+and `reader`, the injected-executor path, does not compute fields.
+
 ## Mutation results
 
 Reads are where the adapter compiles query shape. A mutation uses Drizzle
