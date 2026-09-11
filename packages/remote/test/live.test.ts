@@ -17,6 +17,7 @@ import {
   classifyLive,
   emptyLiveState,
   isStale,
+  liveHasNext,
   liveHasPrevious,
   shouldWake,
 } from '../src/live.js'
@@ -139,5 +140,72 @@ describe('Live data', () => {
     expect(
       visibleItems(connection, 'Feed', removed.optimistic.overlays).map(v => v.ref.id),
     ).toEqual(['a'])
+  })
+
+  it('duplicates and gaps on connection events are dropped and surfaced', () => {
+    const insert = (value: number) => ({
+      _tag: 'ConnectionInsert' as const,
+      connection: 'Feed',
+      position: 'prepend' as const,
+      edge: edge({ entity: 'E', id: 'x' }),
+      cursor: value,
+    })
+    const applied = applyConnectionEvent(emptyLiveState, emptyOptimistic, insert(1), {
+      prepend: 'visible',
+    })
+    const duplicate = applyConnectionEvent(applied.state, applied.optimistic, insert(1), {
+      prepend: 'visible',
+    })
+    expect(duplicate.outcome).toBe('duplicate')
+    expect(duplicate.optimistic.overlays).toHaveLength(1)
+
+    const gap = applyConnectionEvent(applied.state, applied.optimistic, insert(3), {
+      prepend: 'visible',
+    })
+    expect(gap.outcome).toBe('gap')
+    expect(gap.optimistic.overlays).toHaveLength(1)
+  })
+
+  it('records an append at the boundary, visible to liveHasNext only', () => {
+    const connection = merge(
+      emptyConnection,
+      segment([edge({ entity: 'E', id: 'a' })], terminal, cursor('c1')),
+    )
+    const applied = applyConnectionEvent(
+      emptyLiveState,
+      emptyOptimistic,
+      {
+        _tag: 'ConnectionInsert',
+        connection: 'Feed',
+        position: 'append',
+        edge: edge({ entity: 'E', id: 'y' }),
+        cursor: 1,
+      },
+      { append: 'boundary' },
+    )
+
+    expect(liveHasNext(connection, applied.state, 'Feed')).toBe(true)
+    expect(liveHasPrevious(connection, applied.state, 'Feed')).toBe(false)
+  })
+
+  it('a remove for an edge not in an overlay is harmless and advances the cursor', () => {
+    const result = applyConnectionEvent(emptyLiveState, emptyOptimistic, {
+      _tag: 'ConnectionRemove',
+      connection: 'Feed',
+      edge: edge({ entity: 'E', id: 'z' }),
+      cursor: 1,
+    })
+    expect(result.state.cursor).toBe(1)
+    expect(result.optimistic.overlays).toEqual([])
+  })
+
+  it('a ConnectionInvalidate marks the connection stale', () => {
+    const result = applyConnectionEvent(emptyLiveState, emptyOptimistic, {
+      _tag: 'ConnectionInvalidate',
+      connection: 'Feed',
+      cursor: 1,
+    })
+    expect(isStale(result.state, 'Feed')).toBe(true)
+    expect(result.outcome).toBe('applied')
   })
 })

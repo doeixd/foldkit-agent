@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest'
 import {
   emptyStore,
   entityKey,
+  isTombstone,
   markStale,
   readField,
+  tombstone,
   writeEntity,
   type EntityStore,
 } from '../src/index.js'
@@ -92,5 +94,18 @@ describe('RemotePersistence', () => {
   it('restores an empty store for a missing key', async () => {
     const restored = await run(RemotePersistence.restore({ key: 'absent' }))
     expect(restored).toEqual(emptyStore)
+  })
+
+  it('round-trips a tombstone', async () => {
+    const store = tombstone(emptyStore, user)
+    const restored = await run(
+      Effect.gen(function* () {
+        yield* RemotePersistence.save(store, { key: 'cache' })
+        return yield* RemotePersistence.restore({ key: 'cache' })
+      }),
+    )
+
+    expect(restored).toEqual(store)
+    expect(isTombstone(restored, user)).toBe(true)
   })
 })

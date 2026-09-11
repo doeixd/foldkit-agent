@@ -42,8 +42,9 @@ export interface Reconciled {
 }
 
 /**
- * Applies a mutation result once. A second call with the same `requestId` (a
- * retry, or a live event describing the same change) is a no-op.
+ * Applies a mutation result once and marks the request settled. A second call
+ * with the same `requestId` (a retry, or a live event describing the same change)
+ * does not re-apply the entities, but still clears `pending`.
  */
 export const reconcileMutation = (
   store: EntityStore,
@@ -51,11 +52,13 @@ export const reconcileMutation = (
   requestId: string,
   entities: ReadonlyArray<NormalizedPatch>,
 ): Reconciled => {
-  if (state.applied.has(requestId)) return { store, state }
-  const next = entities.reduce(
-    (current, entity) => writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
-    store,
-  )
+  const next = state.applied.has(requestId)
+    ? store
+    : entities.reduce(
+        (current, entity) =>
+          writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
+        store,
+      )
   const applied = new Set(state.applied)
   applied.add(requestId)
   const pending = new Set(state.pending)

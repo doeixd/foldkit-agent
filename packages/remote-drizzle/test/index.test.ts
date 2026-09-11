@@ -114,4 +114,24 @@ describe('RemoteDrizzle', () => {
     ).toEqual([])
     expect(called).toBe(false)
   })
+
+  it('queryPlan with no options has no where and no limit', () => {
+    const plan = queryPlan(UserBinding, Selection.make(User, { id: true }))
+    expect(plan.where).toBeUndefined()
+    expect(plan.limit).toBeUndefined()
+    expect(plan.columns.map(column => column.name)).toEqual(['id'])
+  })
+
+  it('cursorCondition is > ascending and < descending', () => {
+    const dialect = new PgDialect()
+    expect(dialect.sqlToQuery(cursorCondition(users.id, 'asc', 'c')).sql).toContain('>')
+    expect(dialect.sqlToQuery(cursorCondition(users.id, 'desc', 'c')).sql).toContain('<')
+  })
+
+  it('throws a clear error when the table has no id column', () => {
+    const legs = pgTable('legs', { key: text('key').primaryKey() })
+    const Leg = entity('Leg', legs)
+
+    expect(() => whereIds(Leg, ['a'])).toThrow(/no "id" column/)
+  })
 })

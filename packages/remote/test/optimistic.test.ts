@@ -141,4 +141,41 @@ describe('Optimistic layers', () => {
       'a',
     ])
   })
+
+  it('visibleStore is the base with no layers; a success with no entities reverts', () => {
+    const base = writeEntity(emptyStore, user, { name: 'A' })
+    expect(visibleStore(base, emptyOptimistic)).toEqual(base)
+
+    const optimistic = addLayer(emptyOptimistic, {
+      id: 'l1',
+      patches: [{ entity: 'User', id: 'u1', values: { name: 'B' } }],
+    })
+    const settled = settleSuccess(base, optimistic, emptyMutationState, 'l1', [])
+    expect(name(settled.store)).toEqual(Option.some('A'))
+    expect(settled.optimistic.layers).toEqual([])
+  })
+
+  it('an edge in both a prepend and an append overlay appears once', () => {
+    const connection = merge(
+      emptyConnection,
+      segment([edge({ entity: 'E', id: 'a' })], terminal, cursor('c1')),
+    )
+    let optimistic = addOverlay(emptyOptimistic, {
+      id: 'p',
+      connection: 'Feed',
+      position: 'prepend',
+      edges: [edge({ entity: 'E', id: 'x' })],
+    })
+    optimistic = addOverlay(optimistic, {
+      id: 'a',
+      connection: 'Feed',
+      position: 'append',
+      edges: [edge({ entity: 'E', id: 'x' })],
+    })
+
+    expect(visibleItems(connection, 'Feed', optimistic.overlays).map(value => value.key)).toEqual([
+      'E:x',
+      'E:a',
+    ])
+  })
 })

@@ -102,24 +102,54 @@ const join = (a: Segment, b: Segment): Segment | undefined => {
   return undefined
 }
 
-/** Global by edge identity: an edge appears once per connection. */
+/**
+ * Global by edge identity: an edge appears once per connection. Dropping a
+ * shared edge from the middle of a segment would otherwise imply that its
+ * surviving neighbours are adjacent, so a segment with holes is split at each
+ * hole and the new inner boundaries are `Unknown`.
+ */
 const dedupeConnection = (segments: readonly Segment[]): Segment[] => {
   const seen = new Set<string>()
   const out: Segment[] = []
-  for (const value of segments) {
-    const edges = value.edges.filter(edge => {
-      if (seen.has(edge.key)) return false
-      seen.add(edge.key)
-      return true
+  for (const segmentValue of segments) {
+    const runs: Edge[][] = []
+    let run: Edge[] = []
+    for (const edgeValue of segmentValue.edges) {
+      if (seen.has(edgeValue.key)) {
+        if (run.length > 0) {
+          runs.push(run)
+          run = []
+        }
+        continue
+      }
+      seen.add(edgeValue.key)
+      run.push(edgeValue)
+    }
+    if (run.length > 0) runs.push(run)
+    if (runs.length === 0) continue
+    if (runs.length === 1) {
+      out.push({ ...segmentValue, edges: runs[0]! })
+      continue
+    }
+    runs.forEach((edges, index) => {
+      out.push({
+        edges,
+        start: index === 0 ? segmentValue.start : unknown,
+        end: index === runs.length - 1 ? segmentValue.end : unknown,
+      })
     })
-    if (edges.length > 0) out.push({ ...value, edges })
   }
   return out
 }
 
 /** Adds a page to the connection, joining contiguous or overlapping segments. */
 export const merge = (current: Connection, page: Segment): Connection => {
-  const segments = [...current.segments.map(normalize), normalize(page)]
+  // A zero-edge page carries no ordering evidence; joining it would let its
+  // boundary overwrite a real segment's end. Ignore it.
+  const incoming = normalize(page)
+  if (incoming.edges.length === 0) return current
+
+  const segments = [...current.segments.map(normalize), incoming]
   let joined = true
   while (joined) {
     joined = false

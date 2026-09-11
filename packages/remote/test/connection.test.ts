@@ -10,6 +10,7 @@ import {
   merge,
   segment,
   terminal,
+  unknown,
   type Edge,
 } from '../src/index.js'
 
@@ -42,6 +43,53 @@ describe('Connection.merge', () => {
     expect(isGapped(gapped)).toBe(true)
     expect(gapped.segments).toHaveLength(2)
     expect(ids(gapped)).toEqual(['a', 'b', 'i', 'j'])
+  })
+
+  it('ignores a zero-edge page so it cannot corrupt a boundary', () => {
+    const connection = merge(emptyConnection, page(['a'], cursor('c1'), cursor('c2')))
+    const merged = merge(connection, segment([], cursor('c2'), terminal))
+    expect(merged).toEqual(connection)
+  })
+
+  it('reports no next/previous for an empty connection', () => {
+    expect(hasPrevious(emptyConnection)).toBe(false)
+    expect(hasNext(emptyConnection)).toBe(false)
+    expect(isGapped(emptyConnection)).toBe(false)
+    expect(items(emptyConnection)).toEqual([])
+  })
+
+  it('joins a page that precedes the known segment', () => {
+    const connection = merge(emptyConnection, page(['c', 'd'], cursor('c1'), cursor('c2')))
+    const merged = merge(connection, page(['a', 'b'], cursor('c0'), cursor('c1')))
+    expect(ids(merged)).toEqual(['a', 'b', 'c', 'd'])
+    expect(merged.segments).toHaveLength(1)
+  })
+
+  it('drops a page already fully contained in the known segment', () => {
+    const connection = merge(emptyConnection, page(['a', 'b', 'c'], terminal, terminal))
+    const merged = merge(connection, page(['b'], cursor('x'), cursor('y')))
+
+    expect(ids(merged)).toEqual(['a', 'b', 'c'])
+    expect(merged.segments).toHaveLength(1)
+  })
+
+  it('splits a segment rather than implying adjacency across a dropped interior edge', () => {
+    // Deliberately inconsistent pages: `c` is already known and the second page
+    // places it between `x` and `y`. Dropping `c` must not claim `x` is adjacent
+    // to `y`, so the survivors become two segments with an explicit gap.
+    const first = merge(emptyConnection, page(['a', 'b', 'c'], terminal, terminal))
+    const second = merge(first, page(['x', 'c', 'y'], cursor('s'), cursor('e')))
+
+    expect(ids(second)).toEqual(['a', 'b', 'c', 'x', 'y'])
+    expect(second.segments).toHaveLength(3)
+
+    const [x, y] = second.segments.slice(1)
+    expect(x!.edges.map(value => value.ref.id)).toEqual(['x'])
+    expect(x!.start).toEqual(cursor('s'))
+    expect(x!.end).toEqual(unknown)
+    expect(y!.edges.map(value => value.ref.id)).toEqual(['y'])
+    expect(y!.start).toEqual(unknown)
+    expect(y!.end).toEqual(cursor('e'))
   })
 
   it('derives hasNext/hasPrevious from boundaries, not row count', () => {

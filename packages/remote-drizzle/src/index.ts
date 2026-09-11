@@ -69,8 +69,15 @@ export const relationsFor = (
 }
 
 /** A whole id batch as one `IN (...)` — the normalized-store advantage. */
-export const whereIds = (binding: EntityBinding<any, any>, ids: ReadonlyArray<string>): SQL =>
-  inArray(binding.columns.id as Column, ids as ReadonlyArray<string>)
+export const whereIds = (binding: EntityBinding<any, any>, ids: ReadonlyArray<string>): SQL => {
+  const id = binding.columns.id
+  if (id === undefined) {
+    throw new Error(
+      `[foldkit-remote-drizzle] entity "${binding.name}" has no "id" column; a Remote entity must expose one`,
+    )
+  }
+  return inArray(id, ids as ReadonlyArray<string>)
+}
 
 /** Cursor pagination follows a stable total order (`orderBy` + tie-breaker). */
 export const cursorCondition = (column: Column, direction: 'asc' | 'desc', cursor: unknown): SQL =>

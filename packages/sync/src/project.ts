@@ -8,7 +8,9 @@ import { Schema } from 'effect'
 import type { ModelRef } from 'foldkit-surface'
 
 type EntrySchema<E> = E extends { readonly Schema: infer S } ? S : never
-type EntryModel<E> = E extends ModelRef<infer M, any> ? M : never
+// Tuple-wrapped so an empty entry map (E = never) yields `unknown` rather than
+// making every projection method uncallable.
+type EntryModel<E> = [E] extends [never] ? unknown : E extends ModelRef<infer M, any> ? M : never
 
 /** `ModelRef` is invariant in its focus, so the runtime uses an erased shape. */
 interface ErasedRef {

@@ -78,4 +78,22 @@ describe('Remote mutations', () => {
     expect(failed.pending.has('req-1')).toBe(false)
     expect(failed.failed.has('req-1')).toBe(true)
   })
+
+  it('clears pending even when a request is re-begun and reconciled again', () => {
+    const started = beginMutation(emptyMutationState, 'req-1')
+    const first = reconcileMutation(emptyStore, started, 'req-1', [
+      { entity: 'User', id: 'u1', values: { name: 'ada' } },
+    ])
+    expect(first.state.pending.has('req-1')).toBe(false)
+
+    // A retry re-begins the same request; settling it must not leave it pending,
+    // and must not re-apply the older entities.
+    const retried = beginMutation(first.state, 'req-1')
+    expect(retried.pending.has('req-1')).toBe(true)
+    const second = reconcileMutation(first.store, retried, 'req-1', [
+      { entity: 'User', id: 'u1', values: { name: 'grace' } },
+    ])
+    expect(second.state.pending.has('req-1')).toBe(false)
+    expect(readField(second.store, entityKey('User', 'u1'), 'name')).toEqual(Option.some('ada'))
+  })
 })

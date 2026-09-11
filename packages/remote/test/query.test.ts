@@ -72,4 +72,29 @@ describe('Query and QueryRef', () => {
     store = writeEntity(store, entityKey('E', 'a'), { label: 'new' })
     expect(labels()).toEqual([Option.some('new')])
   })
+
+  it('has no edgeKey or live by default', () => {
+    const spec = Query.connection({ name: 'Project' })
+    expect(spec.edgeKey).toBeUndefined()
+    expect(spec.live).toBeUndefined()
+  })
+
+  it('canonicalises nested and array input regardless of key order', () => {
+    const Nested = Query.make('Nested', {
+      Input: Schema.Struct({
+        filter: Schema.Struct({ a: Schema.Number, b: Schema.Number }),
+        tags: Schema.Array(Schema.String),
+      }),
+      Result: Query.connection({ name: 'X' }),
+    })
+    const left = Nested.ref({ filter: { a: 1, b: 2 }, tags: ['x', 'y'] })
+    const right = Nested.ref({ tags: ['x', 'y'], filter: { b: 2, a: 1 } })
+    expect(left.identity).toBe(right.identity)
+  })
+
+  it('a later window option replaces the earlier one', () => {
+    const base = ProjectsByOwner.ref({ ownerId: 'u1', sort: 'newest' })
+    const twice = Query.after('c2')(Query.after('c1')(base))
+    expect(twice.window.after).toBe('c2')
+  })
 })

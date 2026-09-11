@@ -28,4 +28,21 @@ describe('Sync.project', () => {
       selectedTodoId: 'x',
     })
   })
+
+  it('projects nothing and preserves the model for an empty entry map', () => {
+    const projection = project({})
+    const model = { todos: [{ id: 'a', title: 'A' }], selectedTodoId: null }
+
+    expect(projection.get(model)).toEqual({})
+    expect(projection.set(model, {})).toEqual(model)
+  })
+
+  it('set leaves fields not in the projection untouched', () => {
+    const projection = project({ todos: App.model.todos })
+    const model = { todos: [{ id: 'a', title: 'A' }], selectedTodoId: 'a' }
+
+    const next = projection.set(model, { todos: [] })
+    expect(next.todos).toEqual([])
+    expect(next.selectedTodoId).toBe('a')
+  })
 })

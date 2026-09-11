@@ -71,4 +71,44 @@ describe('EntityStore', () => {
     expect(missingFields(store, key, ['name'])).toEqual(['name'])
     expect(readField(store, key, 'name')).toEqual(Option.some('ada'))
   })
+
+  it('markStale is a no-op for an absent entity or a tombstone', () => {
+    expect(markStale(emptyStore, key, ['name'])).toBe(emptyStore)
+    const gone = tombstone(emptyStore, key)
+    expect(markStale(gone, key, ['name'])).toEqual(gone)
+  })
+
+  it('remove of an absent key returns the same store', () => {
+    expect(remove(emptyStore, key)).toBe(emptyStore)
+  })
+
+  it('writeEntity merges a partial patch and bumps updatedAt', () => {
+    const store = writeEntity(emptyStore, key, { name: 'ada', email: 'a@b.c' }, 1)
+    const patched = writeEntity(store, key, { name: 'grace' }, 2)
+
+    expect(entry(patched, key)).toEqual(
+      Option.some({
+        values: { name: 'grace', email: 'a@b.c' },
+        present: new Set(['name', 'email']),
+        stale: new Set(),
+        tombstone: false,
+        updatedAt: 2,
+      }),
+    )
+  })
+
+  it('a tombstone discards values and presence', () => {
+    const store = tombstone(writeEntity(emptyStore, key, { name: 'ada' }, 5), key)
+
+    expect(entry(store, key)).toEqual(
+      Option.some({
+        values: {},
+        present: new Set(),
+        stale: new Set(),
+        tombstone: true,
+        updatedAt: 0,
+      }),
+    )
+    expect(readField(store, key, 'name')).toEqual(Option.none())
+  })
 })

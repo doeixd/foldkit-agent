@@ -46,6 +46,27 @@ describe('Remote.plan', () => {
     ).toEqual([{ entity: 'User', id: 'u1', fields: ['name', 'email'] }])
   })
 
+  it('handles an empty requirement list', () => {
+    expect(plan(emptyStore, [])).toEqual([])
+  })
+
+  it('does not treat an entry as expired at exactly the freshness bound', () => {
+    const store = writeEntity(emptyStore, entityKey('User', 'u1'), { name: 'ada' }, 0)
+    const requirements = [{ entity: 'User', id: 'u1', fields: ['name'] }]
+
+    expect(plan(store, requirements, { now: 50, freshness: 50 })).toEqual([])
+    expect(plan(store, requirements, { now: 51, freshness: 50 })).toEqual([
+      { entity: 'User', id: 'u1', fields: ['name'] },
+    ])
+  })
+
+  it('a tombstone is never refreshed, even when stale by age', () => {
+    const store = tombstone(emptyStore, entityKey('User', 'u1'))
+    expect(
+      plan(store, [{ entity: 'User', id: 'u1', fields: ['name'] }], { now: 1000, freshness: 1 }),
+    ).toEqual([])
+  })
+
   it('is deterministic and never plans a field it was not asked for', () => {
     const fields = ['a', 'b', 'c', 'd'] as const
     let seed = 123456789
