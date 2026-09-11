@@ -220,6 +220,9 @@ The read runs one bounded query per parent (concurrency 10) and emits
 `{ refs, hasNext, hasPrevious }`. `first` and `last` page per parent; `after` and
 `before` cursors work when the read targets a single parent (a cursor across
 parents is ambiguous and fails). Changing the window refetches the relation.
+Applying a cursor page through `Remote.writeRead` merges it onto the stored page
+(append for `after`, prepend for `before`), so "load more" accumulates; a page
+without a cursor replaces.
 
 ## Mutation results
 

@@ -405,10 +405,44 @@ export class RemoteClient extends Context.Service<
   }
 >()('foldkit-remote/RemoteClient') {}
 
+interface WireRefPage {
+  readonly refs: ReadonlyArray<string>
+  readonly hasNext: boolean
+  readonly hasPrevious: boolean
+}
+
+const isWireRefPage = (value: unknown): value is WireRefPage => {
+  if (value === null || typeof value !== 'object') return false
+  const page = value as Record<string, unknown>
+  return (
+    Array.isArray(page.refs) &&
+    page.refs.every(ref => typeof ref === 'string') &&
+    typeof page.hasNext === 'boolean' &&
+    typeof page.hasPrevious === 'boolean'
+  )
+}
+
+/** Appends (after) or prepends (before) an incoming page onto the stored one. */
+const mergeWireRefPages = (
+  current: WireRefPage,
+  next: WireRefPage,
+  direction: 'after' | 'before',
+): WireRefPage => {
+  const refs =
+    direction === 'after'
+      ? [...new Set([...current.refs, ...next.refs])]
+      : [...new Set([...next.refs, ...current.refs])]
+  return direction === 'after'
+    ? { refs, hasNext: next.hasNext, hasPrevious: true }
+    : { refs, hasNext: true, hasPrevious: next.hasPrevious }
+}
+
 /**
  * Writes a read result into the store, recording each field's applied window so
- * a later request with a different window refetches. Every read path should use
- * this rather than reducing `writeEntity` by hand.
+ * a later request with a different window refetches. A relation page requested
+ * with a cursor is merged onto the page already stored, so "load more"
+ * accumulates rather than replaces. Every read path should use this rather than
+ * reducing `writeEntity` by hand.
  */
 const writeRead = (
   store: EntityStore,
@@ -416,19 +450,44 @@ const writeRead = (
   result: Schema.Schema.Type<typeof ReadBatchResult>,
   now = 0,
 ): EntityStore => {
-  const windowsByEntity = new Map<string, Record<string, string>>()
+  const byEntity = new Map<
+    string,
+    { windows: Record<string, string>; merge: Map<string, 'after' | 'before'> }
+  >()
   for (const request of requests) {
-    if (request.windows === undefined) continue
     const key = entityKey(request.entity, request.id)
-    const windows = windowsByEntity.get(key) ?? {}
-    for (const [field, window] of Object.entries(request.windows)) {
-      windows[field] = windowKey(window)
+    let entry = byEntity.get(key)
+    if (entry === undefined) {
+      entry = { windows: {}, merge: new Map() }
+      byEntity.set(key, entry)
     }
-    windowsByEntity.set(key, windows)
+    for (const [field, window] of Object.entries(request.windows ?? {})) {
+      entry.windows[field] = windowKey(window)
+      const direction =
+        window.after !== undefined ? 'after' : window.before !== undefined ? 'before' : undefined
+      if (direction !== undefined) entry.merge.set(field, direction)
+    }
   }
+
   return result.entities.reduce((current, entity) => {
     const key = entityKey(entity.entity, entity.id)
-    return writeEntity(current, key, entity.values, now, windowsByEntity.get(key))
+    const entry = byEntity.get(key)
+    let values = entity.values
+    if (entry !== undefined && entry.merge.size > 0) {
+      const previous = current[key]
+      if (previous !== undefined) {
+        const merged: Record<string, unknown> = { ...values }
+        for (const [field, direction] of entry.merge) {
+          const incoming = values[field]
+          const existing = previous.values[field]
+          if (isWireRefPage(incoming) && isWireRefPage(existing)) {
+            merged[field] = mergeWireRefPages(existing, incoming, direction)
+          }
+        }
+        values = merged
+      }
+    }
+    return writeEntity(current, key, values, now, entry?.windows)
   }, store)
 }
 

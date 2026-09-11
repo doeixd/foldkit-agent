@@ -29,4 +29,65 @@ describe('Remote.writeRead', () => {
 
     expect(Option.getOrThrow(entry(store, entityKey('User', 'u1'))).windows).toEqual({})
   })
+
+  const page = (refs: ReadonlyArray<string>, hasNext: boolean, hasPrevious: boolean) => ({
+    refs,
+    hasNext,
+    hasPrevious,
+  })
+
+  const commentsOf = (store: ReturnType<typeof Remote.writeRead>) =>
+    Option.getOrThrow(entry(store, entityKey('Project', 'p1'))).values.comments
+
+  const writePage = (
+    store: ReturnType<typeof Remote.writeRead>,
+    window: { first?: number; last?: number; after?: string; before?: string },
+    comments: ReturnType<typeof page>,
+  ) =>
+    Remote.writeRead(
+      store,
+      [{ entity: 'Project', id: 'p1', fields: ['comments'], windows: { comments: window } }],
+      { entities: [{ entity: 'Project', id: 'p1', values: { comments } }] },
+    )
+
+  it('appends an after page onto the stored page', () => {
+    const first = writePage(
+      emptyStore,
+      { first: 2 },
+      page(['Comment:c1', 'Comment:c2'], true, false),
+    )
+    const second = writePage(
+      first,
+      { first: 2, after: 'Comment:c2' },
+      page(['Comment:c3'], false, true),
+    )
+
+    expect(commentsOf(second)).toEqual(
+      page(['Comment:c1', 'Comment:c2', 'Comment:c3'], false, true),
+    )
+  })
+
+  it('prepends a before page ahead of the stored page', () => {
+    const stored = writePage(
+      emptyStore,
+      { first: 2, after: 'x' },
+      page(['Comment:c3', 'Comment:c4'], false, true),
+    )
+    const prepended = writePage(
+      stored,
+      { last: 2, before: 'Comment:c3' },
+      page(['Comment:c1', 'Comment:c2'], true, false),
+    )
+
+    expect(commentsOf(prepended)).toEqual(
+      page(['Comment:c1', 'Comment:c2', 'Comment:c3', 'Comment:c4'], true, false),
+    )
+  })
+
+  it('replaces rather than merges when the window has no cursor', () => {
+    const first = writePage(emptyStore, { first: 2 }, page(['Comment:c1'], true, false))
+    const second = writePage(first, { first: 2 }, page(['Comment:c1'], false, false))
+
+    expect(commentsOf(second)).toEqual(page(['Comment:c1'], false, false))
+  })
 })
