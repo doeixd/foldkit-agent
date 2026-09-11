@@ -34,6 +34,15 @@ export class InvalidReplicaHistoryError extends Schema.TaggedError<InvalidReplic
   },
 ) {}
 
+/** The server's exchange response did not match the protocol schema. */
+export class InvalidExchangeError extends Schema.TaggedError<InvalidExchangeError>()(
+  'InvalidExchangeError',
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Unknown),
+  },
+) {}
+
 /** A persisted pending operation could not have been produced by this replica. */
 export class InvalidOutboxError extends Schema.TaggedError<InvalidOutboxError>()(
   'InvalidOutboxError',
@@ -106,6 +115,7 @@ export type ReplicaError =
   | StorageError
   | WrongReplicaStorageError
   | InvalidReplicaHistoryError
+  | InvalidExchangeError
   | UnsupportedReplicaVersionError
   | InvalidOutboxError
   | CheckpointRegressionError

@@ -538,6 +538,37 @@ describe('the replica', () => {
     ).rejects.toThrow('both acknowledged and rejected')
     expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
   })
+
+  it.each([
+    ['missing fields', {}],
+    ['wrong rejected shape', { operations: [], rejected: 'a:1' }],
+    [
+      'invalid checkpoint cursor',
+      { operations: [], rejected: [], checkpoint: { cursor: -1, model: { todos: [] } } },
+    ],
+    ['excess property', { operations: [], rejected: [], extra: true }],
+  ])('fails a malformed exchange response as a typed error: %s', async (_, raw) => {
+    const replica = await open('a')
+    await submit(replica, created('local'))
+
+    const failed = await Effect.runPromise(
+      Effect.result(
+        Effect.provide(replica.synchronize, layerFromPromise({ exchange: async () => raw })),
+      ),
+    )
+    expect(failed).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'InvalidExchangeError' },
+    })
+    expect(cursor(replica)).toBe(0)
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
+    expect((await status(replica)).lastError).toBe('Invalid sync exchange response')
+
+    // A malformed response does not poison the replica: a valid one still works.
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: [] }) })
+    expect((await status(replica)).lastError).toBeUndefined()
+    await close(replica)
+  })
 })
 
 describe('a transforming shared codec', () => {

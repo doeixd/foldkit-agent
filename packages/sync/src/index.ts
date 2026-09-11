@@ -13,6 +13,7 @@ export {
   CommittedOrderError,
   ForeignAcknowledgementError,
   ForeignRejectionError,
+  InvalidExchangeError,
   InvalidOutboxError,
   InvalidReplicaHistoryError,
   ReplicaClosedError,

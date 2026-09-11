@@ -4,6 +4,7 @@ import {
   CommittedOrderError,
   ForeignAcknowledgementError,
   ForeignRejectionError,
+  InvalidExchangeError,
   InvalidOutboxError,
   InvalidReplicaHistoryError,
   ReplicaClosedError,
@@ -400,18 +401,25 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         const sent = yield* SynchronizedRef.get(stateRef)
         yield* Metric.update(syncMetrics.exchanges, 1)
         yield* Metric.update(syncMetrics.exchangePending, sent.pending.length)
-        const response = decodeExchange(
-          yield* transport.exchange(sent.cursor, sent.pending).pipe(
-            Effect.tapError(error =>
-              Effect.gen(function* () {
-                yield* Effect.logWarning('sync exchange failed', {
-                  documentId,
-                  replicaId,
-                  error: error.message,
-                })
-                yield* Ref.set(lastError, error.message)
-              }),
-            ),
+        const response = yield* Effect.gen(function* () {
+          const raw = yield* transport.exchange(sent.cursor, sent.pending)
+          // The response is untrusted: a malformed shape is a typed failure, not
+          // a defect that escapes the declared error channel.
+          return yield* Effect.try({
+            try: () => decodeExchange(raw),
+            catch: cause =>
+              new InvalidExchangeError({ message: 'Invalid sync exchange response', cause }),
+          })
+        }).pipe(
+          Effect.tapError(error =>
+            Effect.gen(function* () {
+              yield* Effect.logWarning('sync exchange failed', {
+                documentId,
+                replicaId,
+                error: error.message,
+              })
+              yield* Ref.set(lastError, error.message)
+            }),
           ),
         )
         yield* SynchronizedRef.modifyEffect(stateRef, current =>
