@@ -1,6 +1,6 @@
 {
   "name": "foldkit-durable",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A durable, ordered operation log with snapshots, cursors, idempotent append, compaction, and a durable effect ledger.",
   "keywords": [
     "foldkit",
