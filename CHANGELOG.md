@@ -118,6 +118,13 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   `Agent.forApplication(App)` infers the Model from a `Surface.application` and
   accepts either projection directly; `Agent.forModel<Model>()` remains when there
   is no application. `Agent.contextSchema` is unchanged.
+- **Subset exposure and a curried principal.** `Agent.exposeSubset(subset,
+  variants)` exposes only the variants of a `Surface.messages` subset, and
+  `Surface.unionMessages` composes disjoint subsets. `Agent.forApplication` infers
+  the Model, so a `Principal` is supplied by the curried
+  `Agent.forApplication<Principal>()(App)` — TypeScript cannot infer Model beside
+  an explicit principal. A `Surface.application` now takes optional
+  `initial`/`update` and accepts resource-carrying Commands.
 
 ### `foldkit-durable`
 
