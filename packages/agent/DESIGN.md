@@ -1,6 +1,7 @@
 # `foldkit-agent`
 
-> Design rationale and full documentation for `foldkit-agent`. For the API
+> Design rationale for `foldkit-agent` and its integration with the wider
+> project, including the proposed `foldkit-surface` package. For the API
 > summary see the [package README](./README.md); for the umbrella project see
 > the [root README](../../README.md).
 
@@ -28,8 +29,9 @@
 
 ## Status
 
-This document is both the design rationale and the documentation for what is
-implemented in this repository:
+The agent API sections describe the existing implementation. The
+[surface proposal](#project-cohesion-proposed-foldkit-surface) describes the next
+integration layer; it is not a shipped API.
 
 | Package | What it is |
 | --- | --- |
@@ -39,6 +41,8 @@ implemented in this repository:
 | [`foldkit-agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
 | [`foldkit-durable`](./packages/durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
 | [`foldkit-sync`](./packages/sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
+| [`foldkit-agent-native`](../agent-native) | A private prototype adapting the contract to Agent Native, with integration tests against the real framework. |
+| `foldkit-surface` (proposed) | A common contract and Foldkit binding for interacting with a running application; no implementation yet. |
 
 It is deliberately built on Foldkit's existing architecture rather than
 introducing a second application-action system.
@@ -52,6 +56,9 @@ One part of the original proposal cannot be built from outside Foldkit. As of
 handle exposes neither the current Model nor a dispatch function, so the
 application supplies that seam through `Agent.bind`. See
 [Runtime integration](#runtime-integration).
+
+The surface proposal makes that application-supplied integration reusable across
+agent access and replication, while preserving each package's independent use.
 
 As of Foldkit `v0.158.2`, Foldkit already has most of the underlying machinery:
 
@@ -1307,9 +1314,10 @@ The dependency direction matters:
 
 Foldkit remains the source of truth. Agent Native does **not** become a second application model.
 
-A prototype of this exists on the `prototype/agent-native` branch as
-`foldkit-agent-native`. It is private and only partly verified against the
-framework, so it is not part of the published set:
+The repository contains a private `foldkit-agent-native` prototype, tested
+against `@agent-native/core@0.177.1`'s registry, tool runtime, and schema wrapper.
+Full deployment integration remains unverified, so it is not part of the
+published set:
 
 ```text
 foldkit-agent-native
@@ -1730,6 +1738,236 @@ agentRuntime.messages.dispatch(Message.RequestedDeleteTodo, { id })
 That is the entire idea:
 
 > **Model describes what an agent can see. The exposed Message union describes what an agent can do. `update` remains the single source of truth.**
+
+# Project cohesion: proposed `foldkit-surface`
+
+The next project-wide improvement is a reusable way to attach packages to a
+running Foldkit application. `foldkit-surface` should provide that integration
+contract and a supported Foldkit binding. Foldkit's Model, Message, `update`, and
+Commands remain the application's architecture.
+
+This is an architectural direction, not a finalized API. Establish the runtime
+guarantees and prove the bindings before choosing public constructors or moving
+existing exports.
+
+## The integration gap
+
+The packages already share application behavior, but applications still assemble
+their runtime connections by hand:
+
+- `Agent.bind` requires Model access, dispatch, subscriptions, and Message
+  observation for completion tracking.
+- [`examples/sync/src/runtime.ts`](../../examples/sync/src/runtime.ts) wraps
+  Foldkit to persist durable Messages before displaying their optimistic result,
+  then installs reconciled shared state while preserving local fields.
+- [`examples/sync/src/serverAgent.ts`](../../examples/sync/src/serverAgent.ts)
+  binds agents to a journal-backed Model and dispatch path under a trusted
+  principal.
+- [`examples/sync/src/journal.ts`](../../examples/sync/src/journal.ts) adapts the
+  durable journal to the replica protocol and server effect policy.
+
+Surface should remove the repeated runtime wiring. Journal protocol mapping and
+effect policy still belong to the integrations that understand them. Moving all
+four files into a common package would obscure that distinction.
+
+One concrete failure the design must prevent: a port accepts `CreatedTodo`, an
+agent reports success, and IndexedDB later refuses the write. Port acceptance
+does not acknowledge persistence. A common handle is useful only if its caller
+can tell which boundary it has actually reached.
+
+## Definition and running instance
+
+Keep an application definition separate from its running instances. A definition
+identifies the Model and Message schemas and the existing transition function;
+it can be inspected and used in tests without mounting a browser or opening
+storage. Reuse the existing application configuration where possible rather
+than making authors declare the same schemas and `update` twice.
+
+A bound surface addresses one instance: a mounted browser application, a local
+replica, or an authoritative server document. It provides state access, Message
+submission, and observation with explicit lifecycle semantics. The same
+application can have several instances; there is no global current runtime.
+
+Each binding must state the Model it actually owns. A server with only shared
+state cannot satisfy a contract that reads browser selection. Neither a cast nor
+an invented default local Model makes those capabilities meaningful server-side.
+
+## Package responsibilities and dependency direction
+
+| Package | Responsibility with surface |
+| --- | --- |
+| `foldkit-surface` | The live application contract, Foldkit binding, readiness, submission and observation semantics, and binding lifecycle. |
+| `foldkit-agent` | Agent-visible context, explicit capability exposure, input mapping, availability, authorization, completion matching, and audit. Bind these to a compatible surface. |
+| Protocol adapters | Continue consuming `AgentRuntime`; interpret agent results for MCP, WebMCP, A2A, or Agent Native. |
+| `foldkit-sync` | Outbox persistence, optimistic state, authoritative reconciliation, checkpoints, presence, and replica transport. Its Foldkit integration supplies a compatible surface. |
+| `foldkit-durable` | Atomic journal operations, snapshots, compaction, identities, and effect records. Remains usable independently of surface and Foldkit. |
+| Application | Shared-state selection, durable Message classification, domain authorization, effect authority, and deployment policy. |
+
+Surface core must not import the agent adapters, IndexedDB, or SQLite. Keep
+browser mounting separate from the contract so a server can consume the contract
+without loading DOM code. Agent and sync integrations may depend on surface;
+surface must not depend back on them. A package dependency does not require an
+application to enable the associated feature.
+
+Retain the existing structural `AgentHost`, storage, and transport extension
+points during migration. Custom hosts and adapters remain valid ways to compose
+the packages. Surface should supply a well-defined default integration rather
+than require every consumer to adopt a new application builder.
+
+## Independent projections
+
+The application may share schemas and selectors, but these declarations carry
+different policies:
+
+| Declaration | Question it answers |
+| --- | --- |
+| Live Model | What state does this application instance own? |
+| Agent context and resources | What state may an agent observe? |
+| Exposed Messages | What may an agent request? |
+| Shared state | What state must replicas agree on? |
+| Durable Messages | What operations may be persisted and replayed? |
+
+An agent may select a local item without creating a durable operation. An
+internal result Message may be replicated without being agent-invocable. Shared
+state may contain fields excluded from agent context. Do not infer exposure from
+durability, or treat the shared projection as the agent information boundary.
+
+The raw surface is a trusted application integration handle. External callers
+still enter through an adapter's validation and agent capability boundary.
+Transport identity comes from authentication, never from a caller-supplied
+Message field or a replay marker. The authoritative journal's domain policy
+remains the final decision on a replicated write.
+
+## Submission, observation, and ordering
+
+Specify these guarantees before finalizing method names:
+
+- **Readiness.** Binding must expose when initial state and required storage are
+  ready. An early request waits or fails explicitly; it cannot observe fabricated
+  state or disappear into an uninitialized port.
+- **Submission.** Distinguish receipt by a queue from application of a Message.
+  A successful surface submission must acknowledge the binding's documented
+  application boundary. The replica binding persists the outbox before publishing
+  its optimistic transition. A failed save publishes no successful transition.
+- **Authority.** Local persistence does not imply server acceptance. Sync owns
+  the acknowledgement or rejection of the stable operation identity and the
+  resulting rebase. A generic surface must not manufacture that guarantee for a
+  local-only application.
+- **Business completion.** Applying a Message does not imply completion of its
+  Commands. Agent retains its explicit success/failure Message matching. Do not
+  hold the admission queue while waiting for business completion: the completing
+  Message may need to enter that same queue.
+- **Observation.** Define when a processed Message is observable relative to the
+  installed Model. Listeners must see the corresponding state, and completion
+  listeners must attach before submission can produce their event. Historical
+  replay and checkpoint installation must not masquerade as newly completed work.
+- **Reconciliation.** Apply validated shared state to the latest local Model,
+  preserving local fields. A checkpoint is state installation, not a newly
+  submitted Message; it cannot enqueue another outbound operation or rerun
+  external work. Keep this privileged operation in the sync binding.
+- **Concurrency.** Serialize conflicting state changes and reconcile against
+  the state current at application time. Network exchange must leave room for
+  offline edits. Specify which local transitions may proceed while persistence
+  is pending; do not accidentally freeze selection behind a network request.
+- **Lifecycle.** Declare who owns the instance, storage scope, and subscriptions.
+  Detaching one adapter must not dispose a shared application. Disposal refuses
+  new submissions and settles pending callers; cancellation after persistence
+  or delivery cannot promise rollback. Define reentrant listener behavior and
+  isolate observer failures from committed work.
+
+A create operation can therefore be locally persisted and visible, later
+accepted by the authority, and later completed by an external service. These
+are separate facts. The public result types must let integrations distinguish
+the facts they need without requiring all applications to implement every stage.
+
+Preserve the agent runtime's existing snapshot semantics: availability,
+authorization, and input mapping use one Model snapshot for an invocation.
+Admission can happen later against newer application state. Surface does not
+silently reinterpret the target or turn that snapshot into a concurrency lock;
+version checks, when required, must be explicit and enforced at the authoritative
+transition boundary.
+
+## Replay and Command authority
+
+The current sync example permits only state-only durable transitions. Its replay
+helper rejects Commands and changes to local fields, while server effects are
+declared separately. Surface must preserve that supported subset until a broader
+execution policy is designed and tested.
+
+Deriving replay from `update` and a field list cannot prove it correct. A
+transition can read local selection to choose a shared entity without changing
+any local field. Supplying initial local state during replay would then produce
+a different result. Durable Messages must carry the inputs needed to replay
+deterministically; schemas and runtime guards cannot prove arbitrary JavaScript
+pure or independent of local state.
+
+A future Command integration needs explicit execution authority, stable semantic
+effect identities, and a policy for how result Messages return to shared state.
+Rebase and historical replay must not rerun external effects. The durable ledger
+reuses recorded successes, but cannot atomically commit an external provider's
+action and its local result. Surface adds no exactly-once guarantee. Preserve
+the [durable recovery requirements](../durable/README.md#effect-recovery), and
+keep recovery and effect ownership outside the initial surface contract.
+
+## Type safety and composability
+
+The common contract must preserve the distinctions the packages already check:
+
+- Infer Model and Message from their owning definition; reject an incompatible
+  host, shared-state binding, or principal provider. A host may accept a wider
+  Message union than an agent exposes, but never a narrower one.
+- Distinguish encoded wire/storage values from decoded application Messages and
+  Models. Validate unknown input at the boundary that consumes it; preserve
+  transforming codecs without double decoding or silently stripping fields.
+- Preserve each capability's input inference and constructor-based dispatch.
+  Do not flatten variants into `any` or require annotations at every callback.
+- Describe supported operations in types. A binding without processed-Message
+  observation cannot promise agent completion tracking; a local binding cannot
+  promise authoritative acknowledgement. Avoid an all-optional interface that
+  pushes every incompatibility to runtime.
+- Keep Effect failures, required services, and scopes visible through adapters.
+  Use the installed Effect 4 APIs; execute Effects at browser/protocol edges
+  instead of hiding `runSync` inside a supposedly portable service.
+- Preserve branded document, producer, operation, and caller identities. An
+  invocation id is not automatically a durable operation id or a retry key.
+
+Prove rejection as well as acceptance in type tests. Public examples must compile
+against real Foldkit and peer types, including transforming schemas and bindings
+whose Models intentionally differ. Prefer small structural contracts to a
+registration framework or an unrestricted middleware chain whose ordering each
+application must rediscover.
+
+## Incremental implementation and acceptance
+
+1. Specify readiness, submission acknowledgement, event ordering, and ownership
+   against the current examples. Keep public API spelling provisional.
+2. Implement a local Foldkit binding and use it in the todo example. Preserve
+   direct `Agent.bind` hosts and protocol adapter APIs.
+3. Replace the handwritten sync runtime wrapper for its existing state-only
+   subset. Route UI events, subscriptions, Command result Messages, and agent
+   submissions through the intended admission path. Wrapping only external
+   dispatch would leave UI Messages able to bypass persistence.
+4. Bind a server document through the same minimal contract with its actual
+   shared Model. Keep journal exchange mapping and recovery policy in their
+   owning integrations. Remove example glue only after its behavior is covered.
+5. Compare the application setup before and after. Publish surface when the
+   examples require less wiring, custom integrations still compose, and no
+   existing guarantee has been weakened. Broader Command support is separate.
+
+Acceptance must exercise failed persistence, synchronous completion, concurrent
+local edits during persistence and exchange, server rejection and rebase,
+checkpoint installation without resubmission, multiple bound instances, and
+disposal with pending work. Verify that all entry paths honor admission and that
+observers cannot mistake history for fresh execution. Mutation-check behavioral
+tests and include negative type cases, following the repository agreements.
+
+Foldkit `0.158.2` exposes ports and disposal on its embedded handle, without a
+public asynchronous admission hook or direct live Model access. Use supported
+configuration and port APIs for the initial binding; do not depend on private
+runtime internals or start a competing state loop beside Foldkit. If transparent
+integration for arbitrary applications requires an upstream hook, document the
+specific missing guarantee and propose that hook. Keep the supported subset
+explicit rather than claiming a wrapper has solved it.
 
 # Open questions
 

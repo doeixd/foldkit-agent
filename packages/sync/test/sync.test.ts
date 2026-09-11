@@ -622,4 +622,26 @@ describe('a transforming shared codec', () => {
     expect(Effect.runSync(second.shared)).toEqual({ count: 1 })
     await Effect.runPromise(second.close)
   })
+
+  it('adopts a checkpoint through the encoded wire form', async () => {
+    const replica = await Effect.runPromise(Counter.openReplica(replicaId('a'), memoryStorage()))
+    await Effect.runPromise(
+      Effect.provide(
+        replica.synchronize,
+        layerFromPromise({
+          // The wire carries the encoded `count` (a string); the decoder turns it
+          // back into the decoded number, so callers only see `Shared`.
+          exchange: async () => ({
+            operations: [],
+            rejected: [],
+            checkpoint: { cursor: 5, model: { count: '5' } },
+          }),
+        }),
+      ),
+    )
+
+    expect(Effect.runSync(replica.cursor)).toBe(5)
+    expect(Effect.runSync(replica.shared)).toEqual({ count: 5 })
+    await Effect.runPromise(replica.close)
+  })
 })

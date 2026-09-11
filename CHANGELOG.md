@@ -20,6 +20,12 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   operation as the committed one — which could otherwise run an effect for
   content that was never committed. The `user_version` migration to 2 adds and
   backfills the column.
+- **Newer databases are refused.** A database whose `user_version` is above this
+  build's `SCHEMA_VERSION` fails during `makeJournal` with
+  `UnsupportedJournalVersionError` instead of being treated as migrated.
+- **Reads below the floor fail closed.** `read(key, after)` fails with
+  `CompactedCursorError` when `after < compact_before`, rather than returning a
+  tail that silently starts late.
 
 ### `foldkit-sync`
 
@@ -35,6 +41,14 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   matching `openLwwClock`, instead of leaking the handle.
 - **Presence identity.** `servePresence` stamps the connection's own peer id and
   ignores a client-supplied one, so a peer cannot spoof, move, or remove another.
+- **Malformed responses are typed.** A malformed exchange response fails with
+  `InvalidExchangeError` (and records `lastError`) instead of becoming an Effect
+  defect.
+- **Terminal transport after retries.** Once the reconnect schedule is exhausted,
+  later exchanges fail immediately with the terminal error rather than queueing
+  behind a fiber that is gone.
+- **Interrupted exchanges free their slot.** An exchange interrupted before a
+  reply no longer counts toward the queue limit; a late reply for it is ignored.
 
 ## 0.2.0
 
