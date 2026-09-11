@@ -207,6 +207,10 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
       let ready = false
       let nextId = 0
       let disposed = false
+      // Once the reconnect schedule is exhausted there is no fiber left to
+      // service the queue, so the transport is terminal until the layer is
+      // recreated; a later exchange fails with this rather than waiting forever.
+      let terminalError: TransportError | undefined
 
       const send = (entry: Entry): void => {
         inFlight.set(entry.id, entry)
@@ -278,7 +282,9 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
           Effect.retry(retry),
           Effect.catch(error =>
             Effect.sync(() => {
-              if (!disposed) failAll(error.message)
+              if (disposed) return
+              terminalError = error
+              failAll(error.message)
             }),
           ),
         ),
@@ -300,6 +306,10 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
               resume(Effect.fail(new TransportError({ message: 'transport closed' })))
               return
             }
+            if (terminalError !== undefined) {
+              resume(Effect.fail(terminalError))
+              return
+            }
             if (queued.length + inFlight.size >= maxQueue) {
               resume(Effect.fail(new TransportError({ message: 'transport queue full' })))
               return
@@ -307,6 +317,15 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
             const entry: Entry = { id: String(nextId++), cursor, pending, resume }
             if (ready) send(entry)
             else queued.push(entry)
+            // A caller interrupted before a reply must release its slot, or a
+            // socket that never replies can exhaust the queue with abandoned
+            // work. The frame may already be on the wire; only the local waiter
+            // is forgotten, and a late reply for it is ignored.
+            return Effect.sync(() => {
+              const queuedIndex = queued.indexOf(entry)
+              if (queuedIndex >= 0) queued.splice(queuedIndex, 1)
+              if (inFlight.get(entry.id) === entry) inFlight.delete(entry.id)
+            })
           }),
       }
     }),

@@ -324,6 +324,90 @@ describe('the socket transport', () => {
       failure: { _tag: 'SyncTransportError', message: 'transport queue full' },
     })
   })
+
+  it('fails a new exchange immediately once retries are exhausted', async () => {
+    const makeClosing = (): SocketLike => {
+      const closes = new Set<() => void>()
+      const fire = (): void => {
+        for (const listener of [...closes]) listener()
+      }
+      return {
+        send: fire,
+        close: fire,
+        onMessage: () => () => {},
+        onClose: listener => {
+          closes.add(listener)
+          return () => closes.delete(listener)
+        },
+      }
+    }
+
+    const program = Effect.gen(function* () {
+      const transport = yield* Effect.service(Transport)
+      const first = yield* Effect.result(transport.exchange(0, []))
+      // With the reconnect fiber gone, this must fail rather than queue forever.
+      const second = yield* Effect.result(transport.exchange(1, []))
+      return [first, second]
+    })
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        program.pipe(
+          Effect.provide(
+            layerSocket({
+              url: 'ws://test',
+              makeSocket: makeClosing,
+              retryBase: '1 millis',
+              maxRetries: 0,
+            }),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toMatchObject([
+      { _tag: 'Failure', failure: { _tag: 'SyncTransportError', message: 'transport closed' } },
+      { _tag: 'Failure', failure: { _tag: 'SyncTransportError', message: 'transport closed' } },
+    ])
+  })
+
+  it('ignores a late reply and frees the slot of an interrupted exchange', async () => {
+    const { client, server } = socketPair()
+    const frames: Array<{ id: string }> = []
+    server.onMessage(data => frames.push(JSON.parse(data) as { id: string }))
+
+    const program = Effect.gen(function* () {
+      const transport = yield* Effect.service(Transport)
+      const held = yield* Effect.forkScoped(transport.exchange(0, []))
+      yield* Effect.yieldNow
+      expect(frames).toHaveLength(1)
+      const interrupted = frames[0]!.id
+      yield* Fiber.interrupt(held)
+
+      // The interrupted exchange released its slot, so a second is accepted.
+      const second = yield* Effect.forkScoped(Effect.result(transport.exchange(1, [])))
+      yield* Effect.yieldNow
+      expect(frames).toHaveLength(2)
+      const secondId = frames[1]!.id
+
+      // A reply for the interrupted frame must not resolve the second exchange.
+      server.send(JSON.stringify({ id: interrupted, result: 'late' }))
+      yield* Effect.yieldNow
+
+      server.send(JSON.stringify({ id: secondId, result: 'ok' }))
+      const joined = yield* Fiber.join(second)
+      expect(joined).toMatchObject({ _tag: 'Success' })
+      expect(JSON.stringify(joined)).toContain('ok')
+      expect(JSON.stringify(joined)).not.toContain('late')
+    })
+
+    await Effect.runPromise(
+      Effect.scoped(
+        program.pipe(
+          Effect.provide(layerSocket({ url: 'ws://test', makeSocket: () => client, maxQueue: 1 })),
+        ),
+      ),
+    )
+  })
 })
 
 describe('the default socket', () => {
