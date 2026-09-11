@@ -251,17 +251,18 @@ override even when a later attachment would otherwise win.
 - Published contracts: Button (`button`), Input (`input`/`label`/`description`),
   Textarea (`textarea`/`label`/`description`), Checkbox
   (`checkbox`/`label`/`description`/`hiddenInput`), Switch, Fieldset
-  (`fieldset`/`legend`/`description`), Disclosure (`button`/`panel`), and
-  Dialog (`dialog`/`backdrop`/`panel`/`title`/`description`/`initialFocus`/
-  `closeButton`). A slot advertises the capability, events and attributes a
-  Behavior may require; the base bundle's ownership is what turns taking over a
-  click into a `mixins:event-conflict` rather than a second silent handler.
-- Dialog is a Submodel: its bundles are `ChildAttribute` groups carrying the
-  dialog boundary's dispatcher. `Dialog.resolve` preserves them by identity and
-  passes `isVisible` through. It is tested with `foldkit/test`'s `Scene`, which
-  supplies a runtime frame and the real `h` without a DOM, so the resolver is
-  exercised against real ChildAttributes — including the close button's owned
-  `click`.
+  (`fieldset`/`legend`/`description`), Disclosure (`button`/`panel`), Dialog
+  (`dialog`/`backdrop`/`panel`/`title`/`description`/`initialFocus`/
+  `closeButton`), and Popover (`button`/`panel`/`backdrop`/`arrow`). A slot
+  advertises the capability, events and attributes a Behavior may require; the
+  base bundle's ownership is what turns taking over a click into a
+  `mixins:event-conflict` rather than a second silent handler.
+- Dialog and Popover are Submodels: their bundles are `ChildAttribute` groups
+  carrying the child boundary's dispatcher and, for Popover, its anchor/portal
+  Mounts. `resolve` preserves them by identity and passes `isVisible` through.
+  Both are tested with `foldkit/test`'s `Scene`, which supplies a runtime frame
+  and the real `h` without a DOM, so the resolver is exercised against real
+  ChildAttributes — including the close/trigger button's owned `click`.
 - The remaining Submodels (Menu, Tabs, ComboBox, ...) and the Surface adapter
   remain.
 
