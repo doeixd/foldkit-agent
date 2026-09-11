@@ -111,6 +111,9 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
   empty result is worse than one that throws.
 - **Enforce what you advertise.** Deriving a JSON Schema that says
   `additionalProperties: false` is not validation; the decoder has to agree.
+- **`Optic.at` cannot insert.** It is a prism, not a lens: `replace` is a no-op on
+  an absent key, so writing a new key (or clearing one) needs a container-aware
+  setter, not `optic.replace`. Silent no-op otherwise.
 - **Keep intermediate validators strict too.** Agent Native's Standard Schema
   stripped excess fields before dispatch, bypassing its strict decoder. Pass
   `parseOptions: { onExcessProperty: 'error' }` to `toStandardSchemaV1`.

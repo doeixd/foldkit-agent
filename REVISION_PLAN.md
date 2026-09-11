@@ -1668,6 +1668,9 @@ directory (a probe from the repo root may resolve a different `effect`).
 - `Clock` is a `Context.Reference`; `provide` does not narrow it out of a
   `Clock | Scope` requirement. `TestClock` is in `effect/testing`; install
   `TestClock.layer()` before reading, or the "test clock" reads the live clock.
+- `Optic.at` is a **prism**, not a lens: `replace` is a no-op on an absent key, so
+  it cannot insert or remove. Keyed/optional `ModelRef` writes need container-aware
+  setters (Phase 1).
 
 **Effect Schema**
 
