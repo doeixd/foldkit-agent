@@ -1,14 +1,15 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { text, uuid, pgTable, PgDialect } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
 import { Entity, Selection } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import {
-  columnsFor,
-  cursorCondition,
   entity,
+  keysetWhere,
+  orderByTerms,
   queryPlan,
   relationsFor,
+  requiredColumns,
   source,
   whereIds,
   type SourceQuery,
@@ -22,6 +23,7 @@ const users = pgTable('users', {
 const projects = pgTable('projects', {
   id: uuid('id').primaryKey(),
   name: text('name').notNull(),
+  createdAt: text('created_at').notNull(),
   ownerId: uuid('owner_id').notNull(),
 })
 
@@ -44,9 +46,27 @@ describe('RemoteDrizzle', () => {
     expect(UserBinding.Schema).toBeDefined()
   })
 
-  it('prunes a Selection to its scalar columns', () => {
-    const selection = Selection.make(User, { id: true, name: true })
-    expect(columnsFor(UserBinding, selection).map(column => column.name)).toEqual(['id', 'name'])
+  it('always projects the primary key, selected fields, and relation keys', () => {
+    expect(requiredColumns(UserBinding, ['name']).map(column => column.name)).toEqual([
+      'id',
+      'name',
+    ])
+    expect(requiredColumns(ProjectBinding, ['id', 'owner']).map(column => column.name)).toEqual([
+      'id',
+      'owner_id',
+    ])
+    expect(requiredColumns(UserBinding, ['id', 'name']).map(column => column.name)).toEqual([
+      'id',
+      'name',
+    ])
+  })
+
+  it('folds ordering columns into the projection', () => {
+    const columns = requiredColumns(ProjectBinding, ['id'], {
+      order: [{ column: projects.createdAt, direction: 'desc' }],
+    }).map(column => column.name)
+
+    expect(columns).toEqual(['id', 'created_at'])
   })
 
   it('separates relation fields from scalar columns', () => {
@@ -55,7 +75,10 @@ describe('RemoteDrizzle', () => {
       owner: Selection.make(User, { id: true, name: true }),
     })
 
-    expect(columnsFor(ProjectBinding, selection).map(column => column.name)).toEqual(['id'])
+    expect(requiredColumns(ProjectBinding, selection.fields).map(column => column.name)).toEqual([
+      'id',
+      'owner_id',
+    ])
     expect(relationsFor(ProjectBinding, selection).map(relation => relation.entity.name)).toEqual([
       'User',
     ])
@@ -63,10 +86,10 @@ describe('RemoteDrizzle', () => {
 
   it('batches ids into one IN and prunes the column list', () => {
     const dialect = new PgDialect()
-    const sql = dialect.sqlToQuery(whereIds(UserBinding, ['a', 'b']))
+    const predicate = dialect.sqlToQuery(whereIds(UserBinding, ['a', 'b']))
 
-    expect(sql.sql).toContain('"users"."id" in')
-    expect(sql.params).toEqual(['a', 'b'])
+    expect(predicate.sql).toContain('"users"."id" in')
+    expect(predicate.params).toEqual(['a', 'b'])
     expect(
       queryPlan(UserBinding, Selection.make(User, { id: true, name: true })).columns.map(
         column => column.name,
@@ -74,16 +97,21 @@ describe('RemoteDrizzle', () => {
     ).toEqual(['id', 'name'])
   })
 
-  it('renders a cursor condition and combines it with the filter', () => {
+  it('combines a filter, a keyset cursor, and the ordering columns', () => {
     const dialect = new PgDialect()
-    expect(dialect.sqlToQuery(cursorCondition(projects.id, 'desc', 'c1')).sql).toContain('<')
-
+    const order = [
+      { column: projects.createdAt, direction: 'desc' as const },
+      { column: projects.id, direction: 'desc' as const },
+    ]
     const plan = queryPlan(ProjectBinding, Selection.make(Project, { id: true }), {
       where: eq(projects.name, 'x'),
-      cursor: cursorCondition(projects.id, 'desc', 'c1'),
+      cursor: keysetWhere(order, ['t1', 'p1'], 'forward'),
+      order,
       limit: 25,
     })
+
     expect(plan.limit).toBe(25)
+    expect(plan.columns.map(column => column.name)).toEqual(['id', 'created_at'])
     expect(dialect.sqlToQuery(plan.where as NonNullable<typeof plan.where>).sql).toContain('and')
   })
 
@@ -91,17 +119,29 @@ describe('RemoteDrizzle', () => {
     const calls: SourceQuery[] = []
     const read = source(UserBinding, query => {
       calls.push(query)
-      return Effect.succeed([{ id: 'a', name: 'A', email: 'a@b.c' }])
+      return Effect.succeed([{ id: 'a', name: 'A' }])
     })
 
     const records = await Effect.runPromise(
       read({ ids: ['a', 'b'], fields: ['id', 'name'], principal: null }),
     )
-    expect(records).toEqual([{ id: 'a', values: { id: 'a', name: 'A', email: 'a@b.c' } }])
+    expect(records).toEqual([{ id: 'a', values: { id: 'a', name: 'A' } }])
     expect(Object.keys(calls[0]!.columns)).toEqual(['id', 'name'])
   })
 
-  it('does no work for empty ids or an all-relation selection', async () => {
+  it('selects the primary key even when it is not a requested field', async () => {
+    const calls: SourceQuery[] = []
+    const read = source(UserBinding, query => {
+      calls.push(query)
+      return Effect.succeed([{ id: 'a', name: 'A' }])
+    })
+
+    const records = await Effect.runPromise(read({ ids: ['a'], fields: ['name'], principal: null }))
+    expect(records[0]!.id).toBe('a')
+    expect(Object.keys(calls[0]!.columns)).toEqual(['id', 'name'])
+  })
+
+  it('does no work for empty ids or a selection with nothing to project', async () => {
     let called = false
     const read = source(UserBinding, () => {
       called = true
@@ -122,16 +162,31 @@ describe('RemoteDrizzle', () => {
     expect(plan.columns.map(column => column.name)).toEqual(['id'])
   })
 
-  it('cursorCondition is > ascending and < descending', () => {
-    const dialect = new PgDialect()
-    expect(dialect.sqlToQuery(cursorCondition(users.id, 'asc', 'c')).sql).toContain('>')
-    expect(dialect.sqlToQuery(cursorCondition(users.id, 'desc', 'c')).sql).toContain('<')
-  })
-
   it('throws a clear error when the table has no id column', () => {
     const legs = pgTable('legs', { key: text('key').primaryKey() })
     const Leg = entity('Leg', legs)
 
+    expect(() => requiredColumns(Leg, ['key'])).toThrow(/no "id" column/)
     expect(() => whereIds(Leg, ['a'])).toThrow(/no "id" column/)
+  })
+
+  it('reverses the order for a backward traversal', () => {
+    const dialect = new PgDialect()
+    const order = [
+      { column: projects.createdAt, direction: 'desc' as const },
+      { column: projects.id, direction: 'asc' as const },
+    ]
+    const render = (traversal: 'forward' | 'backward') =>
+      dialect.sqlToQuery(
+        sql`select * from projects order by ${sql.join(
+          [...orderByTerms(order, traversal)],
+          sql`, `,
+        )}`,
+      ).sql
+
+    expect(render('forward')).toContain('"created_at" desc')
+    expect(render('forward')).toContain('"id" asc')
+    expect(render('backward')).toContain('"created_at" asc')
+    expect(render('backward')).toContain('"id" desc')
   })
 })
