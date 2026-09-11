@@ -116,7 +116,7 @@ pnpm bench           # sync bench + durable storage script (not a gate)
 | `Agent.resource({ schema, read })` | `packages/agent` | `Agent.resource({ projection })` |
 | `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Sync.project` |
 | `pick(Model, [keys])` | `packages/sync` (added recently) | Superseded by Surface `pick`/`ModelRef` |
-| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.define` compiles to it |
+| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.make` compiles to it |
 | `examples/sync/src/runtime.ts` mount wrapper | example | Generalized under a `Sync.mount`/`Sync.browser` adapter (needs a decision, §10.6) |
 
 ---
@@ -376,7 +376,7 @@ is scoped to it:
 ```ts
 const ProjectPage = Surface.define(App, "ProjectPage", { ... })
 const TodoAgent   = Agent.define(App, "TodoAgent", { ... })
-const TodoSync    = Sync.define(App, "TodoSync", { ... })
+const TodoSync    = Sync.make(App, "TodoSync", { ... })
 const Data        = Remote.make({ entities: [...], queries: [...], mutations: [...] })
 ```
 
@@ -1509,7 +1509,7 @@ Sync keeps the offline replica, replay, reconciliation, and presence. It stops
 hand-rolling a projection.
 
 ```ts
-const TodoSync = Sync.define(App, "Todos", {
+const TodoSync = Sync.make(App, "Todos", {
   documentId: documentId("todos"),
   model: Sync.project({ todos: App.model.todos }),  // writable projection from ModelRefs
   messages: [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo],
@@ -1525,7 +1525,7 @@ const TodoSync = Sync.define(App, "Todos", {
   publicly; only Sync regains write authority.
 - `replay` is inferred against the declared Message subset, not the whole union.
 - The low-level `defineSync({ message, shared, empty, durable, replay })` remains the
-  protocol primitive and escape hatch; `Sync.define` compiles down to it.
+  protocol primitive and escape hatch; `Sync.make` compiles down to it.
 - `foldkit-durable` stays independent; Sync produces the replay contract via
   `Sync.journalContract(TodoSync)` → `{ operation:{encode,decode},
   snapshot:{encode,decode}, empty, reduce }`.
@@ -1590,7 +1590,7 @@ const TodoAgent = Agent.define(App, "TodoAgent", {
   capabilities: [Agent.capability(Message.CreatedTodo, { description: "Create a todo" })],
 })
 
-const TodoSync = Sync.define(App, "TodoSync", {
+const TodoSync = Sync.make(App, "TodoSync", {
   documentId: documentId("todos"),
   model: Sync.project({ todos: App.model.todos }),
   messages: [Message.CreatedTodo, Message.RenamedTodo],
@@ -2171,8 +2171,10 @@ installable; CI is green.
 (`foldkit-remote-drizzle`) is implemented but its Postgres acceptance is not run
 (no database in CI). Remaining work: run the Phase 14 batched-relation and
 pagination acceptance against a real Postgres and decide whether the package
-ships or is dropped (open question 7); build the Surface-based `Sync.define` on
-top of `Sync.project`; work through the review findings and open questions below.
+ships or is dropped (open question 7); the Surface-based `Sync.make` on top of
+`Sync.project` landed as `5d5a2d3` (it adds an explicit `initial` Model, which the
+§10 sketch omitted); `Sync.journalContract` remains; work through the review
+findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
