@@ -25,6 +25,7 @@ import {
   InvalidOperationError,
   JournalError,
   OperationRejectedError,
+  UnsupportedJournalVersionError,
 } from './errors.js'
 
 const SCHEMA_VERSION = 2
@@ -191,7 +192,11 @@ const isAppendError = (error: unknown): error is AppendError =>
  */
 export const makeJournal = <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
-): Effect.Effect<Journal<Operation, Snapshot, Principal>, JournalError, Scope.Scope> =>
+): Effect.Effect<
+  Journal<Operation, Snapshot, Principal>,
+  JournalError | UnsupportedJournalVersionError,
+  Scope.Scope
+> =>
   Effect.gen(function* () {
     const file = yield* resolveFile(options.file)
     // Build the driver into the journal's own scope, not the transient scope of
@@ -213,14 +218,16 @@ export const JournalService = <Operation, Snapshot, Principal>() =>
 /** Provides the journal as a scoped layer, releasing the database when the layer closes. */
 export const makeJournalLayer = <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
-): Layer.Layer<Journal<Operation, Snapshot, Principal>, JournalError> =>
-  Layer.effect(JournalService<Operation, Snapshot, Principal>(), makeJournal(options))
+): Layer.Layer<
+  Journal<Operation, Snapshot, Principal>,
+  JournalError | UnsupportedJournalVersionError
+> => Layer.effect(JournalService<Operation, Snapshot, Principal>(), makeJournal(options))
 
 const makeShapeEffect = <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
 ): Effect.Effect<
   Journal<Operation, Snapshot, Principal>,
-  JournalError,
+  JournalError | UnsupportedJournalVersionError,
   SqlClient.SqlClient | Scope.Scope
 > =>
   Effect.gen(function* () {
@@ -237,11 +244,23 @@ const makeShapeEffect = <Operation, Snapshot, Principal>(
   })
 
 /** Creates or upgrades the tables in one transaction, keyed by `user_version`. */
-const migrate = (sql: SqlClient.SqlClient): Effect.Effect<void, JournalError> =>
+const migrate = (
+  sql: SqlClient.SqlClient,
+): Effect.Effect<void, JournalError | UnsupportedJournalVersionError> =>
   Effect.gen(function* () {
     const version = yield* sql<{ readonly user_version: number }>`PRAGMA user_version`
     const current = version[0]?.user_version ?? 0
-    if (current >= SCHEMA_VERSION) return
+    // A newer schema was written by a build that may rely on invariants this one
+    // does not know; refuse it rather than operating against the wrong layout.
+    if (current > SCHEMA_VERSION)
+      return yield* Effect.fail(
+        new UnsupportedJournalVersionError({
+          found: current,
+          supported: SCHEMA_VERSION,
+          message: `Journal schema ${current} is newer than this build supports (${SCHEMA_VERSION})`,
+        }),
+      )
+    if (current === SCHEMA_VERSION) return
     yield* sql.withTransaction(
       Effect.gen(function* () {
         if (current < 1) {
@@ -280,7 +299,13 @@ const migrate = (sql: SqlClient.SqlClient): Effect.Effect<void, JournalError> =>
         yield* sql`PRAGMA user_version = 2`
       }),
     )
-  }).pipe(Effect.mapError(error => journalError('Could not migrate the journal', error)))
+  }).pipe(
+    Effect.mapError(error =>
+      error instanceof UnsupportedJournalVersionError
+        ? error
+        : journalError('Could not migrate the journal', error),
+    ),
+  )
 
 interface DocumentRow {
   readonly cursor: number

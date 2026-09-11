@@ -445,6 +445,49 @@ describe('a durable journal', () => {
     }
   })
 
+  it('refuses a database written by a newer schema version without touching it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'foldkit-newer-'))
+    const path = join(directory, 'journal.sqlite')
+    try {
+      const newer = new DatabaseSync(path)
+      newer.exec(`
+        CREATE TABLE documents (
+          key TEXT PRIMARY KEY, cursor INTEGER NOT NULL, snapshot TEXT NOT NULL,
+          compact_before INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE operations (
+          key TEXT NOT NULL, op_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+          actor_id TEXT NOT NULL, input TEXT, payload_hash TEXT,
+          PRIMARY KEY (key, op_id), UNIQUE (key, sequence)
+        );
+        CREATE TABLE effects (
+          key TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, error TEXT
+        );
+        PRAGMA user_version = 3;
+      `)
+      newer.close()
+
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.result(makeJournal<Operation, Snapshot, Principal>({ file: path, ...base })),
+        ),
+      )
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'UnsupportedJournalVersionError', found: 3, supported: 2 },
+      })
+
+      const after = new DatabaseSync(path)
+      try {
+        expect(after.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 3 })
+      } finally {
+        after.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('notifies subscribers after a commit and stops after unsubscribe', () =>
     withJournal(function* (journal) {
       const seen: string[] = []

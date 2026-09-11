@@ -6,6 +6,16 @@ export class JournalError extends Schema.TaggedError<JournalError>()('JournalErr
   cause: Schema.optional(Schema.Unknown),
 }) {}
 
+/** The database was written by a newer schema version than this build supports. */
+export class UnsupportedJournalVersionError extends Schema.TaggedError<UnsupportedJournalVersionError>()(
+  'UnsupportedJournalVersionError',
+  {
+    found: Schema.Number,
+    supported: Schema.Number,
+    message: Schema.String,
+  },
+) {}
+
 /** The supplied operation did not satisfy the application's codec or checks. */
 export class InvalidOperationError extends Schema.TaggedError<InvalidOperationError>()(
   'InvalidOperationError',

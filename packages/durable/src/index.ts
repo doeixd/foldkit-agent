@@ -16,6 +16,7 @@ export {
   InvalidOperationError,
   JournalError,
   OperationRejectedError,
+  UnsupportedJournalVersionError,
 } from './errors.js'
 export {
   JournalService,
