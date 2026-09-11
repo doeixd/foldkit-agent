@@ -71,7 +71,7 @@ export const empty = <Message = never>(): StaticMixin<Message> => make('Empty', 
 export const compose = <Message>(
   ...mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>
 ): Mixin<Message> => {
-  const merged: Record<string, SlotContribution<Message>> = {}
+  const merged: Record<string, SlotContribution<Message>> = Object.create(null)
   for (const mixin of mixins) {
     for (const [slot, contribution] of Object.entries(mixin.contributions)) {
       if (contribution === undefined) continue

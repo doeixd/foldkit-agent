@@ -29,7 +29,7 @@ export const resolveFor =
     base: Base,
   ): Omit<Base, keyof Slots> & ResolvedSlots<Slots, Message> => {
     const builders = SlotView.buildersFor(slots, mixins, context)
-    const out: Record<string, unknown> = { ...base }
+    const out: Record<string, unknown> = Object.assign(Object.create(null), base)
     for (const name of Object.getOwnPropertyNames(slots as object)) {
       out[name] = builders[name as keyof Slots].attrs(base[name as keyof Slots])
     }

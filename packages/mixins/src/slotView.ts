@@ -40,7 +40,7 @@ export const buildersFor = <Slots, Message, Input>(
   context: { readonly input: Input; readonly h: HtmlBuilder<Message> },
 ): SlotBuilders<Slots, Message> => {
   const source = slots as unknown as Record<string, AnySlot>
-  const builders: Record<string, SlotBuilder<Message>> = {}
+  const builders: Record<string, SlotBuilder<Message>> = Object.create(null)
   for (const name of Object.getOwnPropertyNames(source)) {
     const slot = source[name]
     if (slot === undefined) continue

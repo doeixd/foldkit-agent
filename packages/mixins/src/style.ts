@@ -56,7 +56,7 @@ export const forSlots =
   <Slots>(slots: Slots) =>
   (pieces: StylePieces<Slots>, options?: { readonly name?: string }): NamedStyle<Slots> => {
     const known = slots as unknown as Record<string, unknown>
-    const contributions: Record<string, StaticContribution<never>> = {}
+    const contributions: Record<string, StaticContribution<never>> = Object.create(null)
     for (const [key, piece] of Object.entries(pieces as Record<string, StyleValue | undefined>)) {
       if (!Object.hasOwn(known, key)) {
         throw new DiagnosticError({

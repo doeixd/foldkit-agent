@@ -108,7 +108,7 @@ export const forSlots =
     options?: { readonly name?: string },
   ): NamedBehavior<Slots, Input, Message> => {
     const source = slots as unknown as Record<string, AnySlot>
-    const contributions: Record<string, SlotContribution<Message>> = {}
+    const contributions: Record<string, SlotContribution<Message>> = Object.create(null)
     for (const [name, slotOptions] of Object.entries(
       spec as Record<string, BehaviorSlotOptions<Input, Message> | undefined>,
     )) {
