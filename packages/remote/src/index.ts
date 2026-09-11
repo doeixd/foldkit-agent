@@ -22,7 +22,6 @@ import {
   RemoteReadError,
 } from './wire.js'
 import type { LiveCursor, LiveEvent } from './live.js'
-import type { LivePolicy } from './query.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -424,6 +423,7 @@ export const Remote = {
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
     toMessage: (result: Schema.Schema.Type<typeof ReadBatchResult>) => Message,
+    onError: (error: RemoteReadError) => Message,
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
@@ -450,7 +450,13 @@ export const Remote = {
               const client = yield* RemoteClient
               return yield* client.read({ requests: requirements })
             })(),
-          ).pipe(Stream.map(toMessage), Stream.orDie),
+          ).pipe(
+            Stream.map(toMessage),
+            Stream.catchIf(
+              (_error): _error is RemoteReadError => true,
+              error => Stream.succeed(onError(error)),
+            ),
+          ),
   }),
 
   /**
@@ -465,7 +471,6 @@ export const Remote = {
     params: Params,
     options: {
       readonly cursor: (model: AppModel) => LiveCursor
-      readonly policy?: LivePolicy
     },
     toMessage: (event: LiveEvent) => Message,
     onResumeUnavailable: (error: RemoteLiveError) => Message,

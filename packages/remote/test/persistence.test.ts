@@ -76,6 +76,19 @@ describe('RemotePersistence', () => {
     expect(result.after).toBeUndefined()
   })
 
+  it('clears a valid-JSON snapshot of the wrong shape', async () => {
+    for (const bad of ['null', '[]', '{"version":1}', '{"version":1,"entities":null}']) {
+      const result = await run(
+        Effect.gen(function* () {
+          const kv = yield* KeyValueStore.KeyValueStore
+          yield* kv.set('cache', bad)
+          return yield* RemotePersistence.restore({ key: 'cache' })
+        }),
+      )
+      expect(result).toEqual(emptyStore)
+    }
+  })
+
   it('restores an empty store for a missing key', async () => {
     const restored = await run(RemotePersistence.restore({ key: 'absent' }))
     expect(restored).toEqual(emptyStore)

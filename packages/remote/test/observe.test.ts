@@ -4,8 +4,10 @@ import { Projection, Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
+  ReadBatchResult,
   Remote,
   RemoteClient,
+  RemoteReadError,
   Selection,
   emptyStore,
   entityKey,
@@ -60,6 +62,31 @@ const root = (store = emptyStore) => ({
   route: '/users/u1',
 })
 
+const ObserveMessage = defineMessageUnion({
+  Batch: {
+    entities: Schema.Array(
+      Schema.Struct({
+        entity: Schema.String,
+        id: Schema.String,
+        values: Schema.Record(Schema.String, Schema.Unknown),
+      }),
+    ),
+  },
+  ReadError: { message: Schema.String },
+})
+type ObserveMessageType = Schema.Schema.Type<typeof ObserveMessage>
+
+const toMessage = (result: Schema.Schema.Type<typeof ReadBatchResult>): ObserveMessageType =>
+  ObserveMessage.Batch({
+    entities: result.entities as ReadonlyArray<{
+      readonly entity: string
+      readonly id: string
+      readonly values: Record<string, unknown>
+    }>,
+  })
+const onError = (error: RemoteReadError): ObserveMessageType =>
+  ObserveMessage.ReadError({ message: error.message })
+
 describe('Remote observation', () => {
   it('plans missing fields purely; render does no I/O', () => {
     calls.length = 0
@@ -112,7 +139,7 @@ describe('Remote observation', () => {
 
   it('exposes a Foldkit Subscription entry that fetches the plan', async () => {
     calls.length = 0
-    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, result => result)
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage, onError)
     const dependencies = entry.modelToDependencies(root())
     expect(dependencies.requirements).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
@@ -122,7 +149,10 @@ describe('Remote observation', () => {
       Stream.runCollect(entry.dependenciesToStream(dependencies)).pipe(Effect.provide(FakeClient)),
     )
     expect([...messages]).toEqual([
-      { entities: [{ entity: 'User', id: 'u1', values: { id: 'u1', name: 'ada' } }] },
+      {
+        _tag: 'Batch',
+        entities: [{ entity: 'User', id: 'u1', values: { id: 'u1', name: 'ada' } }],
+      },
     ])
     expect(calls).toHaveLength(1)
   })
@@ -130,7 +160,7 @@ describe('Remote observation', () => {
   it('emits no stream when the Surface is fully known', async () => {
     calls.length = 0
     const store = writeEntity(emptyStore, entityKey('User', 'u1'), { id: 'u1', name: 'ada' })
-    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, result => result)
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage, onError)
     const dependencies = entry.modelToDependencies(root(store))
     expect(dependencies.requirements).toEqual([])
 
@@ -139,5 +169,22 @@ describe('Remote observation', () => {
     )
     expect([...messages]).toEqual([])
     expect(calls).toHaveLength(0)
+  })
+
+  it('emits onError instead of failing the stream', async () => {
+    const failing = Layer.succeed(RemoteClient, {
+      read: () => Effect.fail(new RemoteReadError({ message: 'boom' })),
+      query: () => Effect.die('unused'),
+      mutate: () => Effect.die('unused'),
+      live: () => Stream.empty,
+    })
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage, onError)
+
+    const messages = await Effect.runPromise(
+      Stream.runCollect(entry.dependenciesToStream(entry.modelToDependencies(root()))).pipe(
+        Effect.provide(failing),
+      ),
+    )
+    expect([...messages]).toEqual([{ _tag: 'ReadError', message: 'boom' }])
   })
 })

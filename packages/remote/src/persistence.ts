@@ -64,8 +64,9 @@ export const RemotePersistence = {
     }),
 
   /**
-   * Reads the cache. A missing key, a corrupt snapshot, or a version mismatch
-   * yields `emptyStore`; the bad key is removed so the next `restore` is clean.
+   * Reads the cache. A missing key, invalid JSON, a non-object, a version
+   * mismatch, or a malformed snapshot yields `emptyStore` and removes the bad
+   * key, so the next `restore` is clean and the planner refetches.
    */
   restore: (options: { readonly key: string }) =>
     Effect.gen(function* () {
@@ -73,17 +74,28 @@ export const RemotePersistence = {
       const raw = yield* store.get(options.key)
       if (raw === undefined) return emptyStore
 
-      const parsed = yield* Effect.sync(() => {
+      const restored = yield* Effect.sync((): EntityStore | undefined => {
+        let parsed: unknown
         try {
-          return JSON.parse(raw) as SerializedStore
+          parsed = JSON.parse(raw)
+        } catch {
+          return undefined
+        }
+        if (parsed === null || typeof parsed !== 'object') return undefined
+        const candidate = parsed as { readonly version?: unknown; readonly entities?: unknown }
+        if (candidate.version !== REMOTE_CACHE_VERSION) return undefined
+        if (candidate.entities === null || typeof candidate.entities !== 'object') return undefined
+        try {
+          return deserializeStore(candidate as SerializedStore)
         } catch {
           return undefined
         }
       })
-      if (parsed === undefined || parsed.version !== REMOTE_CACHE_VERSION) {
+
+      if (restored === undefined) {
         yield* store.remove(options.key)
         return emptyStore
       }
-      return deserializeStore(parsed)
+      return restored
     }),
 }

@@ -62,9 +62,18 @@ export const emptyLiveState: LiveState = { cursor: 0, stale: new Set(), boundary
 
 export type LiveOutcome = 'applied' | 'duplicate' | 'gap'
 
-/** Ordering per stream: at most the next cursor; ahead is a gap. */
+/**
+ * Ordering per stream: at most the next cursor; ahead is a gap. Cursor `0` means
+ * "no baseline yet" (cursors are 1-based), so the first event of a stream is
+ * accepted whatever its cursor — otherwise a stream not starting at 1 would be a
+ * spurious gap.
+ */
 export const classifyLive = (state: LiveState, cursor: LiveCursor): LiveOutcome =>
-  cursor <= state.cursor ? 'duplicate' : cursor === state.cursor + 1 ? 'applied' : 'gap'
+  cursor <= state.cursor
+    ? 'duplicate'
+    : state.cursor === 0 || cursor === state.cursor + 1
+      ? 'applied'
+      : 'gap'
 
 const advance = (state: LiveState, cursor: LiveCursor): LiveState => ({ ...state, cursor })
 

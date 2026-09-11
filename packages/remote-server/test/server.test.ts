@@ -137,6 +137,48 @@ describe('RemoteServer', () => {
     expect(result.entities).toEqual([])
   })
 
+  it('never returns a field the client did not request, even if authorize is permissive', async () => {
+    const permissive = RemoteServer.make(
+      {},
+      {
+        entities: [
+          RemoteServer.entity<string>(User, {
+            authorize: () => ['id', 'name', 'admin'],
+            read: ({ ids, fields }) =>
+              Effect.succeed(
+                ids.map(id => ({
+                  id,
+                  values: Object.fromEntries(
+                    fields.map(field => [field, field === 'admin' ? true : `${field}:${id}`]),
+                  ),
+                })),
+              ),
+          }),
+        ],
+      },
+    )
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteRead({
+            requests: [{ entity: 'User', id: 'u1', fields: ['id'] }],
+          })
+        }),
+      ).pipe(
+        Effect.provide(
+          RemoteRpc.toLayer({
+            ...RemoteServer.handlers(permissive, 'admin'),
+            FoldkitRemoteLive: () => Stream.empty,
+          }),
+        ),
+      ),
+    )
+
+    expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { id: 'id:u1' } }])
+  })
+
   it('runs a mutation and returns typed Output plus normalized patches', async () => {
     const result = await mutate('RenameUser', { id: 'u1', name: 'ada' })
     expect(result.output).toEqual({ id: 'u1' })

@@ -199,8 +199,11 @@ export const RemoteServer = {
         const source = server.entities.get(name)
         if (source === undefined) continue
         const requested = [...group.fields]
-        const allowed =
+        const permitted =
           source.authorize === undefined ? requested : source.authorize(principal, requested)
+        // Never read or return a field the client did not request, even if a
+        // permissive `authorize` allows more.
+        const allowed = requested.filter(field => permitted.includes(field))
         if (allowed.length === 0) continue
 
         const records = yield* source
