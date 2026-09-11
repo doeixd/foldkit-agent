@@ -10,6 +10,7 @@
     { "path": "./packages/sync" },
     { "path": "./packages/surface" },
     { "path": "./packages/remote" },
+    { "path": "./packages/remote-server" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" }
   ]
