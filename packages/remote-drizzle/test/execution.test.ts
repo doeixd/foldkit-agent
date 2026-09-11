@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DrizzleDatabase,
   entity,
+  many,
   source,
   type DrizzleDatabaseService,
   type DrizzleStatement,
@@ -39,11 +40,47 @@ const ProjectBinding = entity('Project', projects, {
   relations: { owner: { entity: UserBinding, field: projects.ownerId } },
 })
 
+const posts = pgTable('posts', {
+  id: uuid('id').primaryKey(),
+  title: text('title').notNull(),
+})
+
+const comments = pgTable('comments', {
+  id: uuid('id').primaryKey(),
+  body: text('body').notNull(),
+  postId: uuid('post_id').notNull(),
+})
+
+const CommentEntity = Entity.make(
+  'Comment',
+  Schema.Struct({ id: Schema.String, body: Schema.String }),
+)
+
+const CommentBinding = entity('Comment', comments)
+
+const PostEntity = Entity.make(
+  'Post',
+  Schema.Struct({
+    id: Schema.String,
+    title: Schema.String,
+    comments: Schema.Array(Entity.ref(CommentEntity)),
+  }),
+)
+
+const PostBinding = entity('Post', posts, {
+  relations: {
+    comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+  },
+})
+
 /** Projects each row to the selected columns, as Drizzle's typed select would. */
-const fakeDatabase = (rows: ReadonlyArray<Record<string, unknown>>) => {
+const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<string, unknown>>) => {
   const calls: Array<{ selection: Record<string, unknown>; where: unknown }> = []
+  let index = 0
   const database: DrizzleDatabaseService = {
     select: selection => {
+      const rows = rowsAt(index)
+      index += 1
       const call = { selection, where: undefined as unknown }
       calls.push(call)
       const promise = Promise.resolve(
@@ -63,6 +100,11 @@ const fakeDatabase = (rows: ReadonlyArray<Record<string, unknown>>) => {
   }
   return { database, calls }
 }
+
+const fakeDatabase = (rows: ReadonlyArray<Record<string, unknown>>) => makeDatabase(() => rows)
+
+const fakeDatabaseQueue = (batches: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>) =>
+  makeDatabase(index => batches[index] ?? [])
 
 describe('RemoteDrizzle execution', () => {
   it('reads through the DrizzleDatabase service with a pruned projection', async () => {
@@ -172,5 +214,53 @@ describe('RemoteDrizzle execution', () => {
     )
 
     expect(records[0]!.values.owner).toBeNull()
+  })
+
+  it('loads a many relation as an array of ref keys', async () => {
+    const { database, calls } = fakeDatabaseQueue([
+      [{ id: 'p1', comments: 'p1' }],
+      [
+        { id: 'c1', post_id: 'p1' },
+        { id: 'c2', post_id: 'p1' },
+      ],
+    ])
+    const read = source(PostBinding)
+    const selection = Selection.make(PostEntity, { id: true, comments: true })
+
+    const records = await Effect.runPromise(
+      read
+        .read({ ids: ['p1'], fields: selection.fields, principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records).toEqual([
+      { id: 'p1', values: { id: 'p1', comments: ['Comment:c1', 'Comment:c2'] } },
+    ])
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)(
+        records[0]!.values,
+      ),
+    ).toEqual({
+      id: 'p1',
+      comments: [
+        { entity: 'Comment', id: 'c1' },
+        { entity: 'Comment', id: 'c2' },
+      ],
+    })
+    expect(calls).toHaveLength(2)
+    expect(Object.keys(calls[1]!.selection)).toEqual(['id', 'post_id'])
+  })
+
+  it('emits an empty array when a many relation has no children', async () => {
+    const { database } = fakeDatabaseQueue([[{ id: 'p1', comments: 'p1' }], []])
+    const read = source(PostBinding)
+
+    const records = await Effect.runPromise(
+      read
+        .read({ ids: ['p1'], fields: ['id', 'comments'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records[0]!.values.comments).toEqual([])
   })
 })

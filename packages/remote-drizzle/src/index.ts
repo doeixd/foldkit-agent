@@ -10,7 +10,7 @@
  * Keyset pagination and required-column projection are adapted from fate's
  * Drizzle integration (MIT); see `THIRD_PARTY_NOTICES.md`.
  */
-import { and, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
+import { and, asc, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { Effect } from 'effect'
 import type { QueryDescriptor, Selection } from 'foldkit-remote'
@@ -82,7 +82,9 @@ export const selectColumns = (
       continue
     }
     const relation = binding.relations[field]
-    if (relation !== undefined) columns[field] = relation.field
+    if (relation !== undefined) {
+      columns[field] = relation.kind === 'one' ? relation.field : relation.localKey
+    }
   }
   return columns
 }
@@ -97,6 +99,12 @@ const relationRefs = (
   for (const field of fields) {
     const relation = binding.relations[field]
     if (relation === undefined) continue
+    if (relation.kind === 'many') {
+      // The injected-executor path cannot load children. Leave the raw key: the
+      // client's array schema rejects it instead of reporting a false absence,
+      // which would refetch forever. Use `source` for relations.
+      continue
+    }
     const id = row[field]
     values[field] =
       id === null || id === undefined
@@ -156,23 +164,72 @@ const selectRows = (
   )
 }
 
-const runDrizzle =
-  (binding: EntityBinding<any, any>) =>
-  (
-    query: SourceQuery,
-  ): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RemoteServerError, DrizzleDatabase> =>
-    Effect.gen(function* () {
-      const database = yield* DrizzleDatabase
-      return yield* selectRows(database, binding.table, query.columns, { where: query.where })
-    })
-
-/** A `RemoteServer.entity` source backed by the `DrizzleDatabase` service. */
+/**
+ * A `RemoteServer.entity` source backed by the `DrizzleDatabase` service. It
+ * selects the requested columns in one batch, then resolves each selected
+ * relation: a `one` relation becomes a ref key, and a `many` relation loads the
+ * target ids in one `IN (...)` and emits an array of ref keys.
+ */
 export const source = <P = unknown>(
   binding: EntityBinding<any, any>,
   options?: { readonly authorize?: EntitySource<P, DrizzleDatabase>['authorize'] | undefined },
 ): EntitySource<P, DrizzleDatabase> => ({
   entity: binding.name,
-  read: reader(binding, runDrizzle(binding)),
+  read: context =>
+    Effect.gen(function* () {
+      if (context.ids.length === 0) return []
+      if (!projectsAny(binding, context.fields)) return []
+      const database = yield* DrizzleDatabase
+      const rows = yield* selectRows(
+        database,
+        binding.table,
+        selectColumns(binding, context.fields),
+        { where: whereIds(binding, context.ids) },
+      )
+
+      for (const field of context.fields) {
+        const relation = binding.relations[field]
+        if (relation === undefined) continue
+
+        if (relation.kind === 'one') {
+          for (const row of rows) {
+            const id = row[field]
+            row[field] =
+              id === null || id === undefined
+                ? null
+                : Entity.refKey({ entity: relation.entity.name, id: String(id) })
+          }
+          continue
+        }
+
+        const parentKeys = [
+          ...new Set(rows.map(row => row[field]).filter(key => key !== null && key !== undefined)),
+        ]
+        const byParent = new Map<string, string[]>()
+        if (parentKeys.length > 0) {
+          const childColumns: Record<string, AnyColumn> = {
+            id: idColumn(relation.entity),
+            [relation.foreignKey.name]: relation.foreignKey,
+          }
+          const childRows = yield* selectRows(database, relation.entity.table, childColumns, {
+            where: inArray(relation.foreignKey, parentKeys),
+            orderBy: [asc(idColumn(relation.entity))],
+          })
+          for (const child of childRows) {
+            const key = String(child[relation.foreignKey.name])
+            const refs = byParent.get(key) ?? []
+            refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.id) }))
+            byParent.set(key, refs)
+          }
+        }
+        for (const row of rows) {
+          const key = row[field]
+          row[field] = key === null || key === undefined ? [] : (byParent.get(String(key)) ?? [])
+        }
+      }
+
+      return rows.map(row => ({ id: String(row.id), values: row }))
+    }),
   ...(options?.authorize === undefined ? {} : { authorize: options.authorize }),
 })
 

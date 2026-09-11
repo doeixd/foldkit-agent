@@ -138,6 +138,21 @@ key the ref codec decodes. A null foreign key emits `null`, so the client holds 
 present null rather than refetching forever. Select the target's fields
 separately and let the normalized store share it.
 
+A to-many relation is an array of refs. The foreign key lives on the target:
+
+```ts
+const Comment = entity('Comment', comments)
+const Post = entity('Post', posts, {
+  relations: {
+    comments: many(Comment, { foreignKey: comments.postId, localKey: posts.id }),
+  },
+})
+```
+
+The read loads every child row in one `IN (...)`, ordered by child id, and emits
+`values.comments = ["Comment:c1", "Comment:c2"]`. The Entity declares the field as
+`Schema.Array(Entity.ref(CommentEntity))` and the Selection selects it as `true`.
+
 ## Compose a server
 
 ```ts
@@ -159,9 +174,10 @@ silently dropped requirement.
 
 ## Limits
 
-- A singular relation selected as a ref works (above). A nested relation
-  Selection (an embedded target object) and `to-many` collections are not
-  resolved yet; that needs collection selections in `foldkit-remote` first.
+- Singular relations and to-many relations selected as arrays of refs work (above).
+  A to-many relation loads all children in one `IN (...)` ordered by child id;
+  per-relation ordering/pagination and an embedded target object are not
+  supported yet. `reader`, the injected-executor path, does not load children.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - No computed/aggregate selections yet.
 
