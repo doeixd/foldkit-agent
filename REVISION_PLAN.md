@@ -656,17 +656,20 @@ User.schema.fields.id`; `User.ref(userId)` requires the right branded ID.
 
 ### 7.2 Relations
 
-**Decision:** a relation is an `Entity.ref` Schema with distinct decoded and encoded
-forms:
+**Decision:** a relation is an `Entity.ref` (or `Entity.refTo`) Schema whose
+decoded form is a **reference** and encoded form is a string:
 
 ```text
-decoded (application): owner: User
-encoded (normalized):  owner: EntityRef<User>   // "User:u7"
+decoded:  owner: EntityRef<"User">   // { entity: "User", id: "u7" }
+encoded:  owner: "User:u7"
 ```
 
-This reuses Effect Schema's encoded/decoded distinction instead of a parallel
-relation codec. Option B from the brainstorm (`owner: User` for selections/Sources);
-the store keeps the reference form internally.
+`Entity.ref(Entity)` targets a known entity; `Entity.refTo("Name")` targets by
+name for recursive or forward references. A ref cannot reconstruct a full entity
+(its other fields are absent) and dereferencing is a store concern, so the
+decoded side is the reference, not `User`. **Because relations never inline the
+target schema, recursive relations cannot arise through the schema graph** — no
+`Schema.suspend`, no cycle. (This supersedes the earlier "decoded: `User`" note.)
 
 **Edge cases**
 
@@ -675,7 +678,8 @@ the store keeps the reference form internally.
 - Round-tripping a relation through `Schema.encode`/`decode`.
 - A relation that is `null` (explicitly no owner) vs absent.
 - Partial selections that include the relation but not its fields.
-- A recursive relation's Schema construction (same as above).
+- Recursive relations: express with `Entity.refTo("Name")`; there is no schema
+  cycle to terminate.
 
 ### 7.3 Selection
 
@@ -1563,6 +1567,7 @@ const journal = yield* makeJournal({
 | Entity field namespace | `User.fields === User.schema.fields` | No second namespace. |
 | Entity root constraint | `Schema.Struct` with an `id` field | Buys field lookup, partial selection, patch schema, ID extraction, inference. |
 | Relations | `Entity.ref` as a Schema with distinct decoded/encoded forms | Reuses Schema's codec boundary; no parallel relation codec. |
+| Relation decoded form | A reference (`EntityRef`), not the inline target | A ref cannot reconstruct a full entity; dereferencing is a store concern, and not inlining makes recursive relations a non-issue. |
 | `ModelRef` read/write | Internal `get`/`set`; public Projection read-only | Sync needs writing without granting UI mutation authority. |
 | Dependencies | Declared by typed access; never Proxy-executed selectors | Invariant 7. |
 | Optic type | Base on `Optic.Optional<Root,Value>` | `.at` is optional; Lens/Prism extend Optional. |

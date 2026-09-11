@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Surface } from 'foldkit-surface'
-import { Entity, Remote, RemoteData, Selection } from '../src/index.js'
+import { Entity, Remote, RemoteData, Selection, type EntityRef } from '../src/index.js'
 
 const User = Entity.make(
   'User',
@@ -13,9 +13,22 @@ const Project = Entity.make(
     id: Schema.String,
     name: Schema.String,
     status: Schema.String,
-    owner: User.schema,
+    owner: Entity.ref(User),
   }),
 )
+
+// A relation is a reference codec, so a recursive relation needs no target
+// schema inlining and the entity type does not become circular.
+const Node = Entity.make(
+  'Node',
+  Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    parent: Schema.optional(Entity.refTo('Node')),
+  }),
+)
+const _nodeName: 'Node' = Node.name
+const _ref: EntityRef<'User'> = User.ref('u1')
 
 // --- Selection derives the picked Struct -----------------------------------
 

@@ -4,7 +4,7 @@
  * Phase 3 is the **pure core**: entity identity, selections, and `RemoteData`.
  * The store, planner, and wire land in later phases. Nothing here performs I/O.
  */
-import { Option, Schema } from 'effect'
+import { Option, Schema, SchemaGetter } from 'effect'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -15,17 +15,54 @@ export * from './plan.js'
 // Entity
 // ===========================================================================
 
-export interface EntityRef<E> {
-  readonly entity: E
+declare const entityRefFields: unique symbol
+
+/**
+ * A normalized reference to an entity. `F` is a phantom carrying the entity's
+ * fields so `Entity.patch` can type its patch; it is absent at runtime.
+ */
+export interface EntityRef<
+  Name extends string,
+  F extends Schema.Struct.Fields = Schema.Struct.Fields,
+> {
+  readonly entity: Name
   readonly id: string
+  readonly [entityRefFields]?: F
 }
 
 export interface EntityDescriptor<Name extends string, F extends Schema.Struct.Fields> {
   readonly name: Name
   readonly schema: Schema.Struct<F>
   readonly fields: F
-  readonly ref: (id: Schema.Schema.Type<F['id']>) => EntityRef<EntityDescriptor<Name, F>>
+  readonly ref: (id: Schema.Schema.Type<F['id']>) => EntityRef<Name, F>
 }
+
+const encodeRef = (ref: { readonly entity: string; readonly id: string }): string =>
+  `${ref.entity}:${ref.id}`
+
+const decodeRef = (encoded: string): { readonly entity: string; readonly id: string } => {
+  const separator = encoded.indexOf(':')
+  return separator === -1
+    ? { entity: encoded, id: '' }
+    : { entity: encoded.slice(0, separator), id: encoded.slice(separator + 1) }
+}
+
+/**
+ * Relations are **references**, never inline target schemas: a ref cannot
+ * reconstruct a full entity, and dereferencing is a store concern. Because the
+ * target schema is not inlined, recursive relations cannot arise through the
+ * schema graph.
+ */
+const refCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema.Codec<
+  EntityRef<Name, F>,
+  string
+> =>
+  Schema.Struct({ entity: Schema.String, id: Schema.String }).pipe(
+    Schema.encodeTo(Schema.String, {
+      decode: SchemaGetter.transform(decodeRef),
+      encode: SchemaGetter.transform(encodeRef),
+    }),
+  ) as unknown as Schema.Codec<EntityRef<Name, F>, string>
 
 export const Entity = {
   make: <
@@ -38,15 +75,20 @@ export const Entity = {
     name,
     schema,
     fields: schema.fields,
-    ref: id => ({ entity: undefined as unknown as EntityDescriptor<Name, F>, id: String(id) }),
+    ref: id => ({ entity: name, id: String(id) }) as EntityRef<Name, F>,
   }),
 
+  /** A relation to a known entity, decoded as a reference. */
   ref: <Name extends string, F extends Schema.Struct.Fields>(
-    entity: EntityDescriptor<Name, F>,
-  ): Schema.Schema<Schema.Struct.Type<F>> => entity.schema as Schema.Schema<Schema.Struct.Type<F>>,
+    _entity: EntityDescriptor<Name, F>,
+  ): Schema.Codec<EntityRef<Name, F>, string> => refCodec<Name, F>(),
+
+  /** A relation by name, for recursive or forward references. */
+  refTo: <Name extends string>(_name: Name): Schema.Codec<EntityRef<Name>, string> =>
+    refCodec<Name, Schema.Struct.Fields>(),
 
   patch: <Name extends string, F extends Schema.Struct.Fields>(
-    _ref: EntityRef<EntityDescriptor<Name, F>>,
+    _ref: EntityRef<Name, F>,
     patch: Partial<Schema.Struct.Type<F>>,
   ): Partial<Schema.Struct.Type<F>> => patch,
 }
