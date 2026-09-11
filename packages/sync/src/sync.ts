@@ -261,11 +261,9 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       state.committed,
     )
 
-  const openReplica = (
-    replicaId: ReplicaId,
-    storage: Storage,
-  ): Effect.Effect<Replica<Message, Shared>, ReplicaError> =>
-    Effect.gen(function* () {
+  const openReplica = Effect.fn('Sync.openReplica')(
+    function* (replicaId: ReplicaId, storage: Storage) {
+      yield* Effect.annotateCurrentSpan({ documentId, replicaId })
       const saved = yield* storage.load()
       const initial: ReplicaState<Shared> = {
         protocolVersion: PROTOCOL_VERSION,
@@ -318,18 +316,20 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       // Storage holds the schema's encoded side, so a transforming `shared`
       // codec round-trips: decode on load, encode before every save. Encoding
       // also rejects an invalid `empty` on first creation rather than at reload.
-      const store = (next: ReplicaState<Shared>, expectedRevision: number | null) =>
-        Effect.gen(function* () {
-          const encoded = yield* Effect.try({
-            try: () => encodeState(next),
-            catch: cause =>
-              new InvalidReplicaHistoryError({
-                message: 'Could not encode the replica state',
-                cause,
-              }),
-          })
-          yield* storage.save(encoded, expectedRevision)
+      const store = Effect.fn('Sync.store')(function* (
+        next: ReplicaState<Shared>,
+        expectedRevision: number | null,
+      ) {
+        const encoded = yield* Effect.try({
+          try: () => encodeState(next),
+          catch: cause =>
+            new InvalidReplicaHistoryError({
+              message: 'Could not encode the replica state',
+              cause,
+            }),
         })
+        yield* storage.save(encoded, expectedRevision)
+      })
       if (saved === undefined) yield* store(state, null)
 
       const stateRef = yield* SynchronizedRef.make(state)
@@ -343,24 +343,25 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       const projection = yield* Ref.make<
         { readonly state: ReplicaState<Shared>; readonly shared: Shared } | undefined
       >(undefined)
-      const shared = Effect.gen(function* () {
+      const shared = Effect.fn('Sync.shared')(function* () {
         const current = yield* SynchronizedRef.get(stateRef)
         const cached = yield* Ref.get(projection)
         if (cached !== undefined && cached.state === current) return cached.shared
         const projected = optimistic(current)
         yield* Ref.set(projection, { state: current, shared: projected })
         return projected
-      })
+      })()
 
       // `SynchronizedRef.modifyEffect` installs the returned state itself, so
       // persisting must not also set the ref (that would re-enter the lock).
       const persist = (next: ReplicaState<Shared>, current: ReplicaState<Shared>) =>
         store(next, current.revision)
 
-      const submit = (message: Message): Effect.Effect<void, ReplicaError> =>
+      const submit = Effect.fn('Sync.submit')(function* (message: Message) {
+        yield* Effect.annotateCurrentSpan({ documentId, replicaId })
         // The closed check belongs inside the lock: a `close` between an outer
         // check and acquiring the lock would otherwise still persist.
-        SynchronizedRef.modifyEffect(stateRef, current =>
+        return yield* SynchronizedRef.modifyEffect(stateRef, current =>
           Effect.gen(function* () {
             if (yield* Ref.get(closed))
               return yield* new ReplicaClosedError({ message: 'Replica is closed' })
@@ -392,9 +393,11 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             yield* persist(next, current)
             return [undefined, next] as const
           }),
-        ).pipe(Effect.withSpan('Sync.submit', { attributes: { documentId, replicaId } }))
+        )
+      })
 
-      const synchronize: Replica<Message, Shared>['synchronize'] = Effect.gen(function* () {
+      const synchronize = Effect.fn('Sync.synchronize')(function* () {
+        yield* Effect.annotateCurrentSpan({ documentId })
         const transport = yield* Transport
         if (yield* Ref.get(closed))
           return yield* new ReplicaClosedError({ message: 'Replica is closed' })
@@ -511,13 +514,13 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           yield* Ref.update(rejectedOps, previous =>
             [...response.rejected, ...previous].slice(0, 32),
           )
-      }).pipe(Effect.withSpan('Sync.synchronize', { attributes: { documentId } }))
+      })()
 
       return {
         shared,
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
         cursor: Effect.map(SynchronizedRef.get(stateRef), state => state.cursor),
-        status: Effect.gen(function* () {
+        status: Effect.fn('Sync.status')(function* () {
           const state = yield* SynchronizedRef.get(stateRef)
           return {
             pending: state.pending.length,
@@ -525,22 +528,24 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             lastError: yield* Ref.get(lastError),
             rejected: yield* Ref.get(rejectedOps),
           }
-        }),
+        })(),
         submit,
         synchronize,
-        close: Effect.gen(function* () {
+        close: Effect.fn('Sync.close')(function* () {
           yield* Ref.set(closed, true)
           yield* storage.close
-        }),
+        })(),
       }
-    }).pipe(
-      Effect.withSpan('Sync.openReplica', { attributes: { documentId, replicaId } }),
+    },
+    (effect, _replicaId, storage) =>
       // Close a partially initialized storage on any failure, including a
       // defect, so a failed open cannot leak the connection.
-      Effect.onExit(exit =>
-        Exit.isSuccess(exit) ? Effect.void : storage.close.pipe(Effect.ignore),
+      effect.pipe(
+        Effect.onExit(exit =>
+          Exit.isSuccess(exit) ? Effect.void : storage.close.pipe(Effect.ignore),
+        ),
       ),
-    )
+  )
 
   return {
     documentId,

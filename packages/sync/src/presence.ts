@@ -62,130 +62,129 @@ export interface Presence<Update> {
  * a peer that stops refreshing is dropped, not replayed. Time comes from the
  * `Clock`, so a `TestClock` drives the TTL deterministically.
  */
-export const createPresence = <Update>(
+export const createPresence = Effect.fn('Presence.create')(function* <Update>(
   options: PresenceOptions<Update>,
-): Effect.Effect<Presence<Update>, never, Scope.Scope | Clock.Clock> =>
-  Effect.gen(function* () {
-    const ttl = Duration.toMillis(options.ttl)
-    const peers = yield* Ref.make(new Map<string, PresencePeer<Update>>())
-    const closed = yield* Ref.make(false)
-    const listeners = new Set<() => void>()
-    /** A subscriber must never fail an update. */
-    const notify = (): void => {
-      for (const listener of [...listeners]) {
-        try {
-          listener()
-        } catch {
-          // Deliberately swallowed.
-        }
+) {
+  const ttl = Duration.toMillis(options.ttl)
+  const peers = yield* Ref.make(new Map<string, PresencePeer<Update>>())
+  const closed = yield* Ref.make(false)
+  const listeners = new Set<() => void>()
+  /** A subscriber must never fail an update. */
+  const notify = (): void => {
+    for (const listener of [...listeners]) {
+      try {
+        listener()
+      } catch {
+        // Deliberately swallowed.
       }
     }
-    const expired = (peer: PresencePeer<Update>, at: number): boolean => at - peer.updatedAt > ttl
+  }
+  const expired = (peer: PresencePeer<Update>, at: number): boolean => at - peer.updatedAt > ttl
 
-    const put = (id: string, value: Update, at: number): Effect.Effect<void> =>
-      Ref.update(peers, map => {
-        const next = new Map(map)
-        next.set(id, { id, value, updatedAt: at })
-        return next
-      })
-    const remove = (id: string): Effect.Effect<boolean> =>
-      Ref.modify(peers, map => {
-        if (!map.has(id)) return [false, map] as const
-        const next = new Map(map)
-        next.delete(id)
-        return [true, next] as const
-      })
-
-    const receive = (update: PresenceUpdate<Update>): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        if (update.id === options.id) return
-        if (update.value === null) {
-          if (yield* remove(update.id)) notify()
-          return
-        }
-        let value: Update
-        try {
-          value = options.decodeValue(update.value)
-        } catch {
-          // A peer's value that fails the contract is dropped, never stored.
-          return
-        }
-        yield* put(update.id, value, yield* Clock.currentTimeMillis)
-        notify()
-      })
-
-    const channel = options.channel
-    const consuming =
-      channel === undefined
-        ? undefined
-        : yield* Stream.runForEach(Stream.fromPubSub(channel.updates), receive).pipe(
-            Effect.forkScoped,
-          )
-
-    const set = (value: Update): Effect.Effect<void> =>
-      Effect.gen(function* () {
-        if (yield* Ref.get(closed)) return
-        yield* put(options.id, value, yield* Clock.currentTimeMillis)
-        if (channel !== undefined) yield* channel.publish({ id: options.id, value })
-        notify()
-      }).pipe(Effect.withSpan('Presence.set'))
-
-    const leave: Effect.Effect<void> = Effect.gen(function* () {
-      if (yield* Ref.get(closed)) return
-      yield* remove(options.id)
-      if (channel !== undefined) yield* channel.publish({ id: options.id, value: null })
-      notify()
-    }).pipe(Effect.withSpan('Presence.leave'))
-
-    const peerList: Effect.Effect<ReadonlyArray<PresencePeer<Update>>> = Effect.gen(function* () {
-      const at = yield* Clock.currentTimeMillis
-      const map = yield* Ref.get(peers)
-      return [...map.values()].filter(peer => !expired(peer, at)).map(peer => ({ ...peer }))
+  const put = (id: string, value: Update, at: number): Effect.Effect<void> =>
+    Ref.update(peers, map => {
+      const next = new Map(map)
+      next.set(id, { id, value, updatedAt: at })
+      return next
+    })
+  const remove = (id: string): Effect.Effect<boolean> =>
+    Ref.modify(peers, map => {
+      if (!map.has(id)) return [false, map] as const
+      const next = new Map(map)
+      next.delete(id)
+      return [true, next] as const
     })
 
-    const prune: Effect.Effect<void> = Effect.gen(function* () {
-      if (yield* Ref.get(closed)) return
-      const at = yield* Clock.currentTimeMillis
-      const changed = yield* Ref.modify(peers, map => {
-        let removed = false
-        const next = new Map(map)
-        for (const [id, peer] of map) {
-          if (expired(peer, at)) {
-            next.delete(id)
-            removed = true
-          }
-        }
-        return [removed, next] as const
-      })
-      if (changed) notify()
-    }).pipe(Effect.withSpan('Presence.prune'))
-
-    const close: Effect.Effect<void> = Effect.gen(function* () {
-      if (yield* Ref.get(closed)) return
-      yield* Ref.set(closed, true)
-      if (consuming !== undefined) yield* Fiber.interrupt(consuming)
-      yield* Effect.sync(() => listeners.clear())
-    }).pipe(Effect.withSpan('Presence.close'))
-
-    return {
-      set,
-      leave,
-      peers: peerList,
-      prune,
-      subscribe: (listener: () => void) => {
-        listeners.add(listener)
-        return () => listeners.delete(listener)
-      },
-      close,
+  const receive = Effect.fn('Presence.receive')(function* (update: PresenceUpdate<Update>) {
+    if (update.id === options.id) return
+    if (update.value === null) {
+      if (yield* remove(update.id)) notify()
+      return
     }
-  }).pipe(Effect.withSpan('Presence.create'))
+    let value: Update
+    try {
+      value = options.decodeValue(update.value)
+    } catch {
+      // A peer's value that fails the contract is dropped, never stored.
+      return
+    }
+    yield* put(update.id, value, yield* Clock.currentTimeMillis)
+    notify()
+  })
+
+  const channel = options.channel
+  const consuming =
+    channel === undefined
+      ? undefined
+      : yield* Stream.runForEach(Stream.fromPubSub(channel.updates), receive).pipe(
+          Effect.forkScoped,
+        )
+
+  const set = Effect.fn('Presence.set')(function* (value: Update) {
+    if (yield* Ref.get(closed)) return
+    yield* put(options.id, value, yield* Clock.currentTimeMillis)
+    if (channel !== undefined) yield* channel.publish({ id: options.id, value })
+    notify()
+  })
+
+  const leave = Effect.fn('Presence.leave')(function* () {
+    if (yield* Ref.get(closed)) return
+    yield* remove(options.id)
+    if (channel !== undefined) yield* channel.publish({ id: options.id, value: null })
+    notify()
+  })()
+
+  const peerList = Effect.fn('Presence.peers')(function* () {
+    const at = yield* Clock.currentTimeMillis
+    const map = yield* Ref.get(peers)
+    return [...map.values()].filter(peer => !expired(peer, at)).map(peer => ({ ...peer }))
+  })()
+
+  const prune = Effect.fn('Presence.prune')(function* () {
+    if (yield* Ref.get(closed)) return
+    const at = yield* Clock.currentTimeMillis
+    const changed = yield* Ref.modify(peers, map => {
+      let removed = false
+      const next = new Map(map)
+      for (const [id, peer] of map) {
+        if (expired(peer, at)) {
+          next.delete(id)
+          removed = true
+        }
+      }
+      return [removed, next] as const
+    })
+    if (changed) notify()
+  })()
+
+  const close = Effect.fn('Presence.close')(function* () {
+    if (yield* Ref.get(closed)) return
+    yield* Ref.set(closed, true)
+    if (consuming !== undefined) yield* Fiber.interrupt(consuming)
+    yield* Effect.sync(() => listeners.clear())
+  })()
+
+  return {
+    set,
+    leave,
+    peers: peerList,
+    prune,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    close,
+  }
+})
 
 /** An in-process channel, for tests and single-process demos. */
-export const loopbackPresenceChannel = <Update>(): Effect.Effect<PresenceChannel<Update>> =>
-  Effect.gen(function* () {
-    const updates = yield* PubSub.unbounded<PresenceUpdate<Update>>()
-    return { updates, publish: update => PubSub.publish(updates, update) }
-  })
+export const loopbackPresenceChannel = Effect.fn('Presence.loopbackChannel')(function* <Update>() {
+  const updates = yield* PubSub.unbounded<PresenceUpdate<Update>>()
+  return {
+    updates,
+    publish: (update: PresenceUpdate<Update>) => PubSub.publish(updates, update),
+  }
+})
 
 /** Broadcasts presence updates among connected peers. */
 export interface PresenceHub<Update> {

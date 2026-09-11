@@ -68,12 +68,12 @@ const unsupportedVersion = (input: unknown): UnsupportedClockVersionError | unde
  * reuse one. Storage is owned by the caller; a failed open closes it so a partial
  * initialization does not leak the connection.
  */
-export const openLwwClock = (options: {
-  readonly documentId: DocumentId
-  readonly replicaId: ReplicaId
-  readonly storage: Storage
-}): Effect.Effect<LwwClock, StorageError | UnsupportedClockVersionError> =>
-  Effect.gen(function* () {
+export const openLwwClock = Effect.fn('Lww.openClock')(
+  function* (options: {
+    readonly documentId: DocumentId
+    readonly replicaId: ReplicaId
+    readonly storage: Storage
+  }) {
     const { documentId, replicaId, storage } = options
     yield* Effect.annotateCurrentSpan({ documentId, replicaId })
     const initial = decodeClock({
@@ -95,30 +95,28 @@ export const openLwwClock = (options: {
     const stateRef = yield* SynchronizedRef.make(state)
     const closed = yield* Ref.make(false)
 
-    const next = (observedCounter = 0): Effect.Effect<typeof Stamp.Type, StorageError> =>
-      Effect.gen(function* () {
-        if (yield* Ref.get(closed)) return yield* new StorageError({ message: 'Clock is closed' })
-        return yield* SynchronizedRef.modifyEffect(stateRef, current =>
-          Effect.gen(function* () {
-            // Re-check under the lock: a `close` that set the flag while this
-            // allocation was queued must not save to a closed connection.
-            if (yield* Ref.get(closed))
-              return yield* new StorageError({ message: 'Clock is closed' })
-            const allocated = yield* Effect.try({
-              try: () =>
-                decodeClock({
-                  ...current,
-                  revision: Math.max(current.revision, decodeCounter(observedCounter)) + 1,
-                }),
-              catch: cause => clockError('Invalid clock allocation', cause),
-            })
-            yield* storage.save(allocated, current.revision)
-            return [{ counter: allocated.revision, replicaId }, allocated] as const
-          }),
-        )
-      }).pipe(Effect.withSpan('Lww.next'))
+    const next = Effect.fn('Lww.next')(function* (observedCounter = 0) {
+      if (yield* Ref.get(closed)) return yield* new StorageError({ message: 'Clock is closed' })
+      return yield* SynchronizedRef.modifyEffect(stateRef, current =>
+        Effect.gen(function* () {
+          // Re-check under the lock: a `close` that set the flag while this
+          // allocation was queued must not save to a closed connection.
+          if (yield* Ref.get(closed)) return yield* new StorageError({ message: 'Clock is closed' })
+          const allocated = yield* Effect.try({
+            try: () =>
+              decodeClock({
+                ...current,
+                revision: Math.max(current.revision, decodeCounter(observedCounter)) + 1,
+              }),
+            catch: cause => clockError('Invalid clock allocation', cause),
+          })
+          yield* storage.save(allocated, current.revision)
+          return [{ counter: allocated.revision, replicaId }, allocated] as const
+        }),
+      )
+    })
 
-    const close: Effect.Effect<void> = Effect.gen(function* () {
+    const close = Effect.fn('Lww.close')(function* () {
       const alreadyClosed = yield* Ref.modify(closed, current => [current, true] as const)
       if (alreadyClosed) return
       // Drains any accepted allocation before releasing the connection.
@@ -126,17 +124,19 @@ export const openLwwClock = (options: {
         Effect.succeed([undefined, current] as const),
       )
       yield* storage.close
-    }).pipe(Effect.withSpan('Lww.close'))
+    })()
 
     return { next, close }
-  }).pipe(
-    Effect.withSpan('Lww.openClock'),
+  },
+  (effect, options) =>
     // Close a partially initialized storage on any failure, including a defect,
     // so a failed open cannot leak the connection.
-    Effect.onExit(exit =>
-      Exit.isSuccess(exit) ? Effect.void : options.storage.close.pipe(Effect.ignore),
+    effect.pipe(
+      Effect.onExit(exit =>
+        Exit.isSuccess(exit) ? Effect.void : options.storage.close.pipe(Effect.ignore),
+      ),
     ),
-  )
+)
 
 /**
  * A schema and reducer helper for a last-writer-wins register.

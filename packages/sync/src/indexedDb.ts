@@ -35,63 +35,65 @@ const openDatabase = (
   })
 
 /** One database per document/replica; CAS prevents two tabs from sharing a writer identity. */
-export const indexedDb = (
+export const indexedDb = Effect.fn('Storage.indexedDb')(function* (
   name: Config.Config<string> | string,
   factory: IDBFactory = globalThis.indexedDB,
-): Effect.Effect<Storage, StorageError, Scope.Scope> =>
-  Effect.gen(function* () {
-    const databaseName =
-      typeof name === 'string'
-        ? name
-        : yield* name.pipe(
-            Effect.mapError(cause => storageError('Could not read the storage name', cause)),
-          )
-    const database = yield* Effect.acquireRelease(openDatabase(databaseName, factory), database =>
-      Effect.sync(() => database.close()),
-    )
-    database.onversionchange = () => database.close()
-    return {
-      load: () =>
-        Effect.tryPromise({
-          try: () =>
-            new Promise((resolve, reject) => {
-              const transaction = database.transaction('replica', 'readonly')
-              const request = transaction.objectStore('replica').get('state')
-              transaction.oncomplete = () => resolve(request.result)
-              transaction.onabort = () =>
-                reject(transaction.error ?? new Error('IndexedDB read aborted'))
-            }),
-          catch: cause => storageError('Could not read the replica', cause),
-        }),
-      save: (state, expectedRevision) =>
-        Effect.tryPromise({
-          try: () =>
-            new Promise<void>((resolve, reject) => {
-              const transaction = database.transaction('replica', 'readwrite', {
-                durability: 'strict',
-              })
-              const store = transaction.objectStore('replica')
-              const request = store.get('state')
-              let conflict = false
-              request.onsuccess = () => {
-                const current = request.result as { revision: number } | undefined
-                if ((current?.revision ?? null) !== expectedRevision) {
-                  conflict = true
-                  transaction.abort()
-                  return
-                }
-                store.put(state, 'state')
+) {
+  const databaseName =
+    typeof name === 'string'
+      ? name
+      : yield* name.pipe(
+          Effect.catchTag('ConfigError', cause =>
+            Effect.fail(storageError('Could not read the storage name', cause)),
+          ),
+        )
+  const database = yield* Effect.acquireRelease(openDatabase(databaseName, factory), database =>
+    Effect.sync(() => database.close()),
+  )
+  database.onversionchange = () => database.close()
+  const storage: Storage = {
+    load: () =>
+      Effect.tryPromise({
+        try: () =>
+          new Promise((resolve, reject) => {
+            const transaction = database.transaction('replica', 'readonly')
+            const request = transaction.objectStore('replica').get('state')
+            transaction.oncomplete = () => resolve(request.result)
+            transaction.onabort = () =>
+              reject(transaction.error ?? new Error('IndexedDB read aborted'))
+          }),
+        catch: cause => storageError('Could not read the replica', cause),
+      }),
+    save: (state, expectedRevision) =>
+      Effect.tryPromise({
+        try: () =>
+          new Promise<void>((resolve, reject) => {
+            const transaction = database.transaction('replica', 'readwrite', {
+              durability: 'strict',
+            })
+            const store = transaction.objectStore('replica')
+            const request = store.get('state')
+            let conflict = false
+            request.onsuccess = () => {
+              const current = request.result as { revision: number } | undefined
+              if ((current?.revision ?? null) !== expectedRevision) {
+                conflict = true
+                transaction.abort()
+                return
               }
-              transaction.oncomplete = () => resolve()
-              transaction.onabort = () =>
-                reject(
-                  conflict
-                    ? new Error('Replica was changed by another writer')
-                    : (transaction.error ?? new Error('IndexedDB write aborted')),
-                )
-            }),
-          catch: cause => storageError('Could not save the replica', cause),
-        }),
-      close: Effect.sync(() => database.close()),
-    }
-  })
+              store.put(state, 'state')
+            }
+            transaction.oncomplete = () => resolve()
+            transaction.onabort = () =>
+              reject(
+                conflict
+                  ? new Error('Replica was changed by another writer')
+                  : (transaction.error ?? new Error('IndexedDB write aborted')),
+              )
+          }),
+        catch: cause => storageError('Could not save the replica', cause),
+      }),
+    close: Effect.sync(() => database.close()),
+  }
+  return storage
+})

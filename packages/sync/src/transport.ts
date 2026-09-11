@@ -187,7 +187,7 @@ export const nativeSocket = (url: string): SocketLike => {
 export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, TransportError> =>
   Layer.effect(
     Transport,
-    Effect.gen(function* () {
+    Effect.fn('Transport.layerSocket')(function* () {
       const makeSocket = options.makeSocket ?? nativeSocket
       const maxQueue = options.maxQueue ?? 64
       const retry = Schedule.exponential(options.retryBase ?? '50 millis').pipe(
@@ -299,7 +299,7 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
         }),
       )
 
-      return {
+      return Transport.of({
         exchange: (cursor, pending) =>
           Effect.callback<unknown, TransportError>(resume => {
             if (disposed) {
@@ -327,6 +327,6 @@ export const layerSocket = (options: SocketOptions): Layer.Layer<Transport, Tran
               if (inFlight.get(entry.id) === entry) inFlight.delete(entry.id)
             })
           }),
-      }
-    }),
+      })
+    })(),
   )
