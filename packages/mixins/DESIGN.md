@@ -253,16 +253,17 @@ override even when a later attachment would otherwise win.
   (`checkbox`/`label`/`description`/`hiddenInput`), Switch, Fieldset
   (`fieldset`/`legend`/`description`), Disclosure (`button`/`panel`), Dialog
   (`dialog`/`backdrop`/`panel`/`title`/`description`/`initialFocus`/
-  `closeButton`), and Popover (`button`/`panel`/`backdrop`/`arrow`). A slot
-  advertises the capability, events and attributes a Behavior may require; the
-  base bundle's ownership is what turns taking over a click into a
-  `mixins:event-conflict` rather than a second silent handler.
-- Dialog and Popover are Submodels: their bundles are `ChildAttribute` groups
-  carrying the child boundary's dispatcher and, for Popover, its anchor/portal
-  Mounts. `resolve` preserves them by identity and passes `isVisible` through.
-  Both are tested with `foldkit/test`'s `Scene`, which supplies a runtime frame
-  and the real `h` without a DOM, so the resolver is exercised against real
-  ChildAttributes — including the close/trigger button's owned `click`.
+  `closeButton`), Popover (`button`/`panel`/`backdrop`/`arrow`), and Tooltip
+  (`trigger`/`panel`). A slot advertises the capability, events and attributes a
+  Behavior may require; the base bundle's ownership is what turns taking over a
+  click into a `mixins:event-conflict` rather than a second silent handler.
+- Dialog, Popover and Tooltip are Submodels: their bundles are `ChildAttribute`
+  groups carrying the child boundary's dispatcher and, for Popover/Tooltip, its
+  anchor/portal Mounts. `resolve` preserves them by identity and passes
+  `isVisible` through. All three are tested with `foldkit/test`'s `Scene`, which
+  supplies a runtime frame and the real `h` without a DOM, so the resolver is
+  exercised against real ChildAttributes — including the owned
+  close/trigger `click` or `focus`.
 - The remaining Submodels (Menu, Tabs, ComboBox, ...) and the Surface adapter
   remain.
 

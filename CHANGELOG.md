@@ -60,10 +60,10 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   adapter are not in this slice.
 - **Submodel adapter.** Dialog's seven `ChildAttribute` groups are published as
   `DialogSlots`; `resolve` preserves them by identity and passes `isVisible`
-  through. Popover's four groups, including its panel/backdrop anchor and portal
-  Mounts, are published the same way as `PopoverSlots`. Both are tested
-  DOM-free with `foldkit/test`'s `Scene`, so real ChildAttributes exercise the
-  resolver, including the owned close/trigger `click`. `Event.Cancel` was added
+  through. Popover's four groups (with its anchor/portal Mounts) and Tooltip's
+  two are published the same way. All three are tested DOM-free with
+  `foldkit/test`'s `Scene`, so real ChildAttributes exercise the resolver,
+  including the owned close/trigger `click` or `focus`. `Event.Cancel` was added
   for the dialog's Escape handler.
 
 ### `foldkit-agent`
