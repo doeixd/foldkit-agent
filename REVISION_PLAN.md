@@ -2208,11 +2208,12 @@ schema and the store accessors share, so `storeOf`/`Remote.select` no longer
 cast an inline shape and a layout change is a compile error (`Remote.at` is
 constrained, with a negative type case).
 
+Fixed in `b3c86e3`: `Projection.struct` requires all entries to share one Root,
+so mixing ModelRefs/Projections from different applications is a compile error
+(negative type case, mutation-verified).
+
 Still open (all lower severity):
 
-- **`Projection.struct` mixes roots silently.** `EntryRoot<Entries[keyof Entries]>`
-  is a union; mixing ModelRefs/Projections with different `Root`s type-checks and
-  reads wrong. All entries share the Root in practice, but a guard is warranted.
 - **`live.invalidateConnection` never clears `stale`.** A later successful merge
   does not mark the connection fresh; the clearing path is unspecified.
 - **remote-drizzle does not check that the table-derived Schema agrees with the
