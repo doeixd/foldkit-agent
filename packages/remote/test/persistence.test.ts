@@ -91,6 +91,33 @@ describe('RemotePersistence', () => {
     }
   })
 
+  it('clears a snapshot with a malformed entry', async () => {
+    const cases = [
+      // `present` is a string, not a string array.
+      '{"version":1,"entities":{"User:u1":{"values":{"name":"x"},"present":"name","stale":[],"tombstone":false,"updatedAt":0}}}',
+      // An entry that is not an object.
+      '{"version":1,"entities":{"User:u1":null}}',
+      // `values` is not a record.
+      '{"version":1,"entities":{"User:u1":{"values":5,"present":[],"stale":[],"tombstone":false,"updatedAt":0}}}',
+      // `entities` is an array, not a record.
+      '{"version":1,"entities":[]}',
+    ]
+
+    for (const bad of cases) {
+      const result = await run(
+        Effect.gen(function* () {
+          const kv = yield* KeyValueStore.KeyValueStore
+          yield* kv.set('cache', bad)
+          const restored = yield* RemotePersistence.restore({ key: 'cache' })
+          const after = yield* kv.get('cache')
+          return { restored, after }
+        }),
+      )
+      expect(result.restored).toEqual(emptyStore)
+      expect(result.after).toBeUndefined()
+    }
+  })
+
   it('restores an empty store for a missing key', async () => {
     const restored = await run(RemotePersistence.restore({ key: 'absent' }))
     expect(restored).toEqual(emptyStore)

@@ -42,18 +42,32 @@ export const serializeStore = (store: EntityStore): SerializedStore => ({
   ),
 })
 
+const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
+  Array.isArray(value) && value.every(item => typeof item === 'string')
+
+/** Throws on a malformed entry so `restore` can discard the whole snapshot. */
+const parseEntry = (value: unknown): EntityEntry => {
+  if (value === null || typeof value !== 'object') throw new Error('entry is not an object')
+  const entry = value as Record<string, unknown>
+  if (entry.values === null || typeof entry.values !== 'object' || Array.isArray(entry.values)) {
+    throw new Error('entry.values is not a record')
+  }
+  if (!isStringArray(entry.present)) throw new Error('entry.present is not a string array')
+  if (!isStringArray(entry.stale)) throw new Error('entry.stale is not a string array')
+  if (typeof entry.tombstone !== 'boolean') throw new Error('entry.tombstone is not a boolean')
+  if (typeof entry.updatedAt !== 'number') throw new Error('entry.updatedAt is not a number')
+  return {
+    values: entry.values as Readonly<Record<string, unknown>>,
+    present: new Set(entry.present),
+    stale: new Set(entry.stale),
+    tombstone: entry.tombstone,
+    updatedAt: entry.updatedAt,
+  }
+}
+
 export const deserializeStore = (serialized: SerializedStore): EntityStore =>
   Object.fromEntries(
-    Object.entries(serialized.entities).map(([key, entry]) => [
-      key,
-      {
-        values: entry.values,
-        present: new Set(entry.present),
-        stale: new Set(entry.stale),
-        tombstone: entry.tombstone,
-        updatedAt: entry.updatedAt,
-      } satisfies EntityEntry,
-    ]),
+    Object.entries(serialized.entities).map(([key, entry]) => [key, parseEntry(entry)]),
   )
 
 export const RemotePersistence = {
@@ -85,6 +99,7 @@ export const RemotePersistence = {
         const candidate = parsed as { readonly version?: unknown; readonly entities?: unknown }
         if (candidate.version !== REMOTE_CACHE_VERSION) return undefined
         if (candidate.entities === null || typeof candidate.entities !== 'object') return undefined
+        if (Array.isArray(candidate.entities)) return undefined
         try {
           return deserializeStore(candidate as SerializedStore)
         } catch {
