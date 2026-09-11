@@ -34,6 +34,18 @@ const _ref: EntityRef<'User'> = User.ref('u1')
 const UserSummary = Selection.make(User, { id: true, name: true })
 const _userSummary: Selection<{ readonly id: string; readonly name: string }> = UserSummary
 const _fields: readonly string[] = UserSummary.fields
+// Selection is a pure codec, so a `Remote.select` decode needs no cast.
+const _codec: Schema.Codec<
+  { readonly id: string; readonly name: string },
+  unknown,
+  never,
+  never
+> = UserSummary.schema
+
+// --- RemoteData is Schema-backed -------------------------------------------
+
+const NumberData = RemoteData.schema(Schema.Number)
+const _dataSchema: Schema.Schema<RemoteData<number>> = NumberData
 
 // @ts-expect-error `nope` is not a field of User
 Selection.make(User, { nope: true })

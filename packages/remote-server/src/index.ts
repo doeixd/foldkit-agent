@@ -18,6 +18,7 @@ import {
   type Boundary,
   type EntityDescriptor,
   type MutationDescriptor,
+  type NormalizedPatch,
   type QueryDescriptor,
   type QueryWindow,
 } from 'foldkit-remote'
@@ -30,12 +31,6 @@ export class RemoteServerError extends Schema.TaggedError<RemoteServerError>()(
 ) {}
 
 export interface EntityRecord {
-  readonly id: string
-  readonly values: Readonly<Record<string, unknown>>
-}
-
-export interface NormalizedPatch {
-  readonly entity: string
   readonly id: string
   readonly values: Readonly<Record<string, unknown>>
 }

@@ -1,8 +1,9 @@
 /**
  * `foldkit-remote` — normalized application-facing server state.
  *
- * Phase 3 is the **pure core**: entity identity, selections, and `RemoteData`.
- * The store, planner, and wire land in later phases. Nothing here performs I/O.
+ * The pure core (entities, selections, the store, the planner, connections,
+ * live classification, optimistic layers) performs no I/O. The `Remote.*`
+ * helpers that read or mutate go through the `RemoteClient` Effect service.
  */
 import { Context, Effect, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
@@ -160,6 +161,9 @@ export const Entity = {
    */
   refKey: (ref: { readonly entity: string; readonly id: string }): string => encodeRef(ref),
 
+  /** Splits a ref key back into its entity and id. */
+  refParts: (key: string): { readonly entity: string; readonly id: string } => decodeRef(key),
+
   /** A relation value of one authoritative page of refs. */
   refPage: <Name extends string, F extends Schema.Struct.Fields>(
     _entity: EntityDescriptor<Name, F>,
@@ -182,10 +186,11 @@ export const Entity = {
 // Selection
 // ===========================================================================
 
-export interface Selection<Value> {
-  readonly entity: string
+export interface Selection<Value, Name extends string = string> {
+  readonly entity: Name
   readonly fields: readonly string[]
-  readonly schema: Schema.Schema<Value>
+  /** A pure codec: entity fields carry no decoding or encoding services. */
+  readonly schema: Schema.Codec<Value, unknown, never, never>
   /** Pagination windows for nested relation fields, keyed by field name. */
   readonly connections?: Readonly<Record<string, QueryWindow>> | undefined
   /** Present when this selection is itself a paginated relation. */
@@ -208,7 +213,7 @@ export const Selection = {
   make: <Name extends string, F extends Schema.Struct.Fields, const Sel extends SelectionOf<F>>(
     entity: EntityDescriptor<Name, F>,
     selection: Sel,
-  ): Selection<SelectionValue<F, Sel>> => {
+  ): Selection<SelectionValue<F, Sel>, Name> => {
     const picked: Record<string, AnySchema> = {}
     const connections: Record<string, QueryWindow> = {}
     for (const key of Object.keys(selection)) {
@@ -224,7 +229,12 @@ export const Selection = {
     return {
       entity: entity.name,
       fields: Object.keys(selection),
-      schema: Schema.Struct(picked) as unknown as Schema.Schema<SelectionValue<F, Sel>>,
+      schema: Schema.Struct(picked) as unknown as Schema.Codec<
+        SelectionValue<F, Sel>,
+        unknown,
+        never,
+        never
+      >,
       ...(Object.keys(connections).length === 0 ? {} : { connections }),
     }
   },
@@ -233,10 +243,15 @@ export const Selection = {
   connection: <Name extends string, F extends Schema.Struct.Fields>(
     entity: EntityDescriptor<Name, F>,
     window: QueryWindow,
-  ): Selection<RefPage<Name, F>> => ({
+  ): Selection<RefPage<Name, F>, Name> => ({
     entity: entity.name,
     fields: [],
-    schema: Entity.refPage(entity) as unknown as Schema.Schema<RefPage<Name, F>>,
+    schema: Entity.refPage(entity) as unknown as Schema.Codec<
+      RefPage<Name, F>,
+      unknown,
+      never,
+      never
+    >,
     window,
   }),
 }
@@ -293,6 +308,12 @@ const remoteDataSchema = <A>(value: Schema.Schema<A>): Schema.Schema<RemoteData<
   ]) as unknown as Schema.Schema<RemoteData<A>>
 
 export const RemoteData = {
+  /**
+   * The `RemoteData` schema for a value schema. Exposed so a `RemoteData` can
+   * be embedded in a hand-written Model schema, not only through `Remote.select`.
+   */
+  schema: <A>(value: Schema.Schema<A>): Schema.Schema<RemoteData<A>> => remoteDataSchema(value),
+
   /** Exhaustive: omitting a state is a compile error. */
   match: <A, R>(
     data: RemoteData<A>,
@@ -539,18 +560,12 @@ export const Remote = {
           if (Option.isNone(value)) return { _tag: 'Initial' }
           values[field] = value.value
         }
-        const decoded = Schema.decodeUnknownResult(
-          selection.schema as unknown as Schema.ConstraintDecoder<Value>,
-        )(values)
+        const decoded = Schema.decodeUnknownResult(selection.schema)(values)
         return Result.isFailure(decoded)
           ? { _tag: 'Failed', error: { _tag: 'DecodeError', message: decoded.failure.message } }
           : { _tag: 'Ready', value: decoded.success }
       },
     }),
-
-  /** The remote requirements a Projection contributes. */
-  requirements: <Root, Value>(projection: Projection<Root, Value>): readonly Requirement[] =>
-    projection.requirements,
 
   /** The pure plan for a projection against a store. */
   planProjection: <Root, Value>(

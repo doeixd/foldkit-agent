@@ -55,7 +55,7 @@ describe('Remote and Surface', () => {
   })
 
   it('exposes requirements the planner turns into a minimal fetch plan', () => {
-    const requirements = Remote.requirements(selectUser('u1'))
+    const requirements = selectUser('u1').requirements
     expect(requirements).toEqual([{ entity: 'User', id: 'u1', fields: ['id', 'name'] }])
     expect(plan(emptyStore, requirements)).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
@@ -77,7 +77,7 @@ describe('Remote and Surface', () => {
     })
 
     const projection = UserPage.projection({ userId: 'u1' })
-    expect(Remote.requirements(projection)).toEqual([
+    expect(projection.requirements).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
     ])
 
