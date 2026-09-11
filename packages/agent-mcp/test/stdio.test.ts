@@ -1,4 +1,5 @@
 import { Agent } from 'foldkit-agent'
+import { Projection } from 'foldkit-surface'
 import { AgentMcp } from 'foldkit-agent-mcp'
 import { PassThrough } from 'node:stream'
 import { Schema } from 'effect'
@@ -18,7 +19,7 @@ interface Model {
 const TodoAgent = Agent.forModel<Model, Record<string, never>>()
 
 const definition = TodoAgent.define({
-  context: Agent.pick(Schema.Struct({ todos: Schema.Array(Schema.String) }), ['todos']),
+  context: Projection.of(Schema.Struct({ todos: Schema.Array(Schema.String) }))({ todos: true }),
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
   }),

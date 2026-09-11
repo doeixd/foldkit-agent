@@ -5,6 +5,7 @@
 import { Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 
 const Todo = Schema.Struct({
   id: Schema.String,
@@ -37,7 +38,7 @@ const TodoAgent = Agent.forModel<Model>()
 
 // Quick start.
 const QuickStartAgent = TodoAgent.define({
-  context: Agent.pick(Model, ['selectedTodoId', 'todos']),
+  context: Projection.of(Model)({ selectedTodoId: true, todos: true }),
 
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: 'Create a new todo',
@@ -57,7 +58,7 @@ export const quickStartRuntime = TodoAgent.bind({
 
 // The v1 API, end to end.
 const AppAgent = TodoAgent.define({
-  context: Agent.pick(Model, ['selectedTodoId']),
+  context: Projection.of(Model)({ selectedTodoId: true }),
 
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: 'Create a todo',

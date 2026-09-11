@@ -42,6 +42,9 @@
     "build": "tsdown",
     "typecheck": "tsc -b"
   },
+  "dependencies": {
+    "foldkit-surface": "workspace:*"
+  },
   "peerDependencies": {
     "effect": "^4.0.0-rc.112",
     "foldkit": "^0.158.2"

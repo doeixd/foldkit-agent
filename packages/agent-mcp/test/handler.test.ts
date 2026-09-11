@@ -1,4 +1,5 @@
 import { Agent } from 'foldkit-agent'
+import { Projection } from 'foldkit-surface'
 import { AgentMcp, type Notification, type Response } from 'foldkit-agent-mcp'
 import { Effect, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
@@ -24,7 +25,7 @@ const emptyModel: Model = { todos: [], selectedTodoId: Option.none() }
 const TodoAgent = Agent.forModel<Model, { readonly canDelete: boolean }>()
 
 const definition = TodoAgent.define({
-  context: Agent.pick(Schema.Struct({ todos: Schema.Array(Todo) }), ['todos']),
+  context: Projection.of(Schema.Struct({ todos: Schema.Array(Todo) }))({ todos: true }),
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {
@@ -345,7 +346,11 @@ describe('resources', () => {
         agent: TodoAgent.bind({
           definition: TodoAgent.define({
             ...(withProjection
-              ? { context: Agent.pick(Schema.Struct({ todos: Schema.Array(Todo) }), ['todos']) }
+              ? {
+                  context: Projection.of(Schema.Struct({ todos: Schema.Array(Todo) }))({
+                    todos: true,
+                  }),
+                }
               : {}),
             messages: TodoAgent.expose(Message, { RequestedCreateTodo: 'Create a todo' }),
             resources: [declaredContext],
@@ -677,10 +682,10 @@ describe('defects at the protocol boundary', () => {
     AgentMcp.handler({
       agent: TodoAgent.bind({
         definition: TodoAgent.define({
-          context: {
-            schema: Schema.Struct({ todos: Schema.Array(Todo) }),
-            select: part === 'context' ? boom : (m: Model) => ({ todos: m.todos }),
-          },
+          context: Projection.fromReader(
+            Schema.Struct({ todos: Schema.Array(Todo) }),
+            part === 'context' ? boom : (m: Model) => ({ todos: m.todos }),
+          ),
           messages: TodoAgent.expose(Message, {
             RequestedCreateTodo: {
               name: 'create_todo',

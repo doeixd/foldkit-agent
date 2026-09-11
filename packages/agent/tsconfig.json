@@ -5,7 +5,11 @@
     "outDir": ".tsbuild",
     "emitDeclarationOnly": true,
     "composite": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "foldkit-surface": ["../surface/src/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
+  "references": [{ "path": "../surface" }]
 }

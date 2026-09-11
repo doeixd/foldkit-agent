@@ -1,4 +1,3 @@
-import { type Context, type ContextOptions, context } from './context.js'
 import { type DefineOptions, type Definition, define } from './define.js'
 import {
   type AnyCapabilitiesByName,
@@ -22,8 +21,6 @@ import type { MessageUnion } from 'foldkit/message'
  * no longer inferred.
  */
 export interface BoundAgent<Model, Principal> {
-  readonly context: <Value>(options: ContextOptions<Model, Value>) => Context<Model, Value>
-
   readonly expose: <
     const C extends Cases,
     const V extends Record<string, unknown>,
@@ -75,7 +72,6 @@ export interface BoundAgent<Model, Principal> {
  * ```
  */
 export const forModel = <Model, Principal = unknown>(): BoundAgent<Model, Principal> => ({
-  context,
   expose: expose as BoundAgent<Model, Principal>['expose'],
   resource,
   define,

@@ -1,6 +1,7 @@
 import { Effect, Option, Schema } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 import { type SnakeCase, defaultName } from '../src/naming.js'
 import {
   type Message,
@@ -129,27 +130,10 @@ describe('optional invocation', () => {
   })
 })
 
-describe('Agent.pick', () => {
-  it('derives the schema and the projection from one field list', () => {
-    const context = Agent.pick(ModelSchema, ['todos'])
-    const todo = { id: 'a', title: 'A', completed: false }
-
-    expect(context.select({ ...emptyModel, todos: [todo] })).toEqual({ todos: [todo] })
-  })
-
-  it('projects only the named fields', () => {
-    const context = Agent.pick(ModelSchema, ['selectedTodoId'])
-    const projected = context.select({
-      todos: [{ id: 'a', title: 'A', completed: false }],
-      selectedTodoId: Option.some('a'),
-    })
-
-    expect(Object.keys(projected)).toEqual(['selectedTodoId'])
-  })
-
-  it('produces a context schema covering exactly those fields', () => {
+describe('Projection context', () => {
+  it('produces a context schema covering exactly the selected fields', () => {
     const definition = TodoAgent.define({
-      context: Agent.pick(ModelSchema, ['todos']),
+      context: Projection.of(ModelSchema)({ todos: true }),
       messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
     })
 
@@ -161,32 +145,13 @@ describe('Agent.pick', () => {
     const todo = { id: 'a', title: 'A', completed: false }
     const runtime = TodoAgent.bind({
       definition: TodoAgent.define({
-        context: Agent.pick(ModelSchema, ['todos']),
+        context: Projection.of(ModelSchema)({ todos: true }),
         messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
       }),
       host: { model: () => ({ ...emptyModel, todos: [todo] }), dispatch: () => {} },
     })
 
     expect(Effect.runSync(runtime.context)).toEqual({ todos: [todo] })
-  })
-
-  it('rejects a field the Model does not have', () => {
-    // @ts-expect-error 'nope' is not a field of the Model.
-    expect(() => Agent.pick(ModelSchema, ['nope'])).toThrow(/the Model has no such field/)
-  })
-
-  it('agrees with the equivalent Agent.context', () => {
-    const picked = Agent.pick(ModelSchema, ['todos'])
-    const written = Agent.context({
-      schema: Schema.Struct({ todos: ModelSchema.fields.todos }),
-      select: (model: Model) => ({ todos: model.todos }),
-    })
-
-    const model = { ...emptyModel, todos: [{ id: 'a', title: 'A', completed: false }] }
-    expect(picked.select(model)).toEqual(written.select(model))
-    expect(Schema.toJsonSchemaDocument(picked.schema).schema).toEqual(
-      Schema.toJsonSchemaDocument(written.schema).schema,
-    )
   })
 })
 
@@ -291,29 +256,5 @@ describe('default capability names', () => {
       [Tag in keyof typeof expected]: SnakeCase<Tag>
     } = expected
     expect(checks).toEqual(expected)
-  })
-})
-
-describe('Agent.pick is fixed at definition time', () => {
-  it('ignores later mutation of the caller’s key array', () => {
-    const Sensitive = Schema.Struct({ shown: Schema.String, secret: Schema.String })
-    const keys: Array<'shown' | 'secret'> = ['shown']
-
-    const context = Agent.pick(Sensitive, keys)
-    keys.push('secret')
-
-    // Pushing a key must not widen a contract that was already declared.
-    expect(context.select({ shown: 'ok', secret: 'password' })).toEqual({ shown: 'ok' })
-  })
-
-  it('ignores keys being removed from that array', () => {
-    const Sensitive = Schema.Struct({ shown: Schema.String, secret: Schema.String })
-    const keys: Array<'shown' | 'secret'> = ['shown']
-
-    const context = Agent.pick(Sensitive, keys)
-    keys.length = 0
-
-    // The projection must keep matching the schema it was built with.
-    expect(context.select({ shown: 'ok', secret: 'password' })).toEqual({ shown: 'ok' })
   })
 })

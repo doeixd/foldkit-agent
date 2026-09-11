@@ -1,4 +1,3 @@
-export { context, type Context, type ContextOptions } from './context.js'
 export { define, type DefineOptions, type Definition } from './define.js'
 export {
   AuthorizationError,
@@ -31,7 +30,6 @@ export type { CompletionOutcome } from './completion.js'
 export { toManifest, toMarkdown, type Manifest } from './docs.js'
 export { contextSchema, messages, resources, schema } from './introspect.js'
 export { newInvocationId } from './invocation.js'
-export { pick } from './pick.js'
 export { resource, type Resource, type ResourceOptions } from './resource.js'
 export { bind, type AgentHost, type AgentRuntime, type BindOptions } from './runtime.js'
 export type {

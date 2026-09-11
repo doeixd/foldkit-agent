@@ -8,9 +8,14 @@
     "noEmit": false,
     "paths": {
       "foldkit-agent": ["../../packages/agent/src/index.ts"],
-      "foldkit-agent-webmcp": ["../../packages/agent-webmcp/src/index.ts"]
+      "foldkit-agent-webmcp": ["../../packages/agent-webmcp/src/index.ts"],
+      "foldkit-surface": ["../../packages/surface/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "references": [{ "path": "../../packages/agent" }, { "path": "../../packages/agent-webmcp" }]
+  "references": [
+    { "path": "../../packages/agent" },
+    { "path": "../../packages/agent-webmcp" },
+    { "path": "../../packages/surface" }
+  ]
 }

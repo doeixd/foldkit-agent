@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "foldkit-agent": "workspace:*",
-    "foldkit-agent-webmcp": "workspace:*"
+    "foldkit-agent-webmcp": "workspace:*",
+    "foldkit-surface": "workspace:*"
   },
   "devDependencies": {
     "effect": "4.0.0-rc.112",

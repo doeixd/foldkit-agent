@@ -10,6 +10,13 @@ version changed; `pnpm` skips versions already in the registry.
 Correctness fixes from a review of the implementation. Breaking for `foldkit-sync`
 (the storage and presence APIs) and `foldkit-durable` (`append`'s result).
 
+### `foldkit-agent`
+
+- **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The
+  `define` `context` option now takes a `foldkit-surface` `Projection`
+  (`Projection.of`/`struct`/`fromReader`), and the runtime reads it with `.read`.
+  `Agent.contextSchema` is unchanged.
+
 ### `foldkit-durable`
 
 - **Compacted operation identity.** Compaction drops the payload but now keeps a

@@ -1,4 +1,5 @@
 import { Agent } from 'foldkit-agent'
+import { Projection } from 'foldkit-surface'
 import { Option, Schema } from 'effect'
 import { Message, Model, Todo } from './app.js'
 
@@ -17,7 +18,7 @@ const TodoAgent = Agent.forModel<Model, Principal>()
  */
 export const AppAgent = TodoAgent.define({
   // What an agent may see. `lastError` is deliberately not projected.
-  context: Agent.pick(Model, ['todos', 'selectedTodoId']),
+  context: Projection.of(Model)({ todos: true, selectedTodoId: true }),
 
   messages: TodoAgent.expose(Message, {
     // Most capabilities need nothing but a description.

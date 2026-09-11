@@ -6,6 +6,7 @@
 import { Effect, Option, Schema } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 import { type Message, type Model, Message as MessageUnion, Todo, emptyModel } from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model, { readonly canWrite: boolean }>()
@@ -152,10 +153,9 @@ describe('input mapping + authorize', () => {
 
 describe('input mapping + available + introspection', () => {
   const definition = TodoAgent.define({
-    context: TodoAgent.context({
-      schema: Schema.Struct({ todos: Schema.Array(Todo) }),
-      select: model => ({ todos: model.todos }),
-    }),
+    context: Projection.fromReader(Schema.Struct({ todos: Schema.Array(Todo) }), model => ({
+      todos: model.todos,
+    })),
     messages: TodoAgent.expose(MessageUnion, {
       RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
       RequestedRenameTodo: {
@@ -261,10 +261,10 @@ describe('two runtimes over one definition', () => {
 describe('the whole contract', () => {
   it('describes messages, resources, and context in one value', () => {
     const definition = TodoAgent.define({
-      context: TodoAgent.context({
-        schema: Schema.Struct({ selectedTodoId: Schema.Option(Schema.String) }),
-        select: model => ({ selectedTodoId: model.selectedTodoId }),
-      }),
+      context: Projection.fromReader(
+        Schema.Struct({ selectedTodoId: Schema.Option(Schema.String) }),
+        model => ({ selectedTodoId: model.selectedTodoId }),
+      ),
       messages: TodoAgent.expose(MessageUnion, {
         RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
         ClearedSelection: { name: 'clear_selection', description: 'Clear the selection' },

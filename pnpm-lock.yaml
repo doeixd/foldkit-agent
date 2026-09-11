@@ -90,6 +90,9 @@ importers:
       foldkit-agent-webmcp:
         specifier: workspace:*
         version: link:../../packages/agent-webmcp
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../../packages/surface
     devDependencies:
       effect:
         specifier: 4.0.0-rc.112
@@ -102,6 +105,10 @@ importers:
         version: 5.9.3
 
   packages/agent:
+    dependencies:
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../surface
     devDependencies:
       effect:
         specifier: 4.0.0-rc.112
@@ -145,6 +152,9 @@ importers:
       foldkit-agent:
         specifier: workspace:*
         version: link:../agent
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../surface
       tsdown:
         specifier: ^0.23.0
         version: 0.23.0(tsx@4.23.13)(typescript@5.9.3)(unrun@0.3.1)

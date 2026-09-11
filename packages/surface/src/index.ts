@@ -389,6 +389,25 @@ export const Projection = {
 
   read: <Root, Value>(projection: Projection<Root, Value>, root: Root): Value =>
     projection.read(root),
+
+  /**
+   * Low-level escape hatch: a Projection from a Schema and a reader, for
+   * projections not derived from ModelRefs (agent context, adapters). Prefer
+   * `of`/`struct`/`select`; dependencies default to empty.
+   */
+  fromReader: <Root, Value>(
+    Model: Schema.Schema<Value>,
+    read: (root: Root) => Value,
+    options?: {
+      readonly dependencies?: DependencyTree
+      readonly requirements?: readonly Requirement[]
+    },
+  ): Projection<Root, Value> => ({
+    Model,
+    dependencies: options?.dependencies ?? [],
+    requirements: options?.requirements ?? [],
+    read,
+  }),
 }
 
 // ===========================================================================

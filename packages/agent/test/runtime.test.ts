@@ -1,6 +1,7 @@
 import { Cause, Effect, Option, Schema } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 import {
   type Message,
   type Model,
@@ -42,10 +43,9 @@ const invocation = (transport = 'webmcp') => ({
 })
 
 const AppAgent = Agent.define({
-  context: Agent.context({
-    schema: Schema.Struct({ todos: Schema.Array(Todo) }),
-    select: (model: Model) => ({ todos: model.todos }),
-  }),
+  context: Projection.fromReader(Schema.Struct({ todos: Schema.Array(Todo) }), (model: Model) => ({
+    todos: model.todos,
+  })),
 
   messages: Agent.expose(MessageUnion, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
@@ -110,10 +110,10 @@ const defectOf = (effect: Effect.Effect<unknown, unknown>): Error => {
 /** A contract whose projections return values their declared schemas reject. */
 const lyingRuntime = Agent.bind({
   definition: Agent.define({
-    context: Agent.context({
-      schema: Schema.Struct({ userId: Schema.String }),
-      select: (): { userId: string } => ({ userId: 4242 }) as unknown as { userId: string },
-    }),
+    context: Projection.fromReader(
+      Schema.Struct({ userId: Schema.String }),
+      (): { userId: string } => ({ userId: 4242 }) as unknown as { userId: string },
+    ),
     messages: Agent.expose(MessageUnion, {}),
     resources: [
       Agent.resource('profile', {
@@ -132,10 +132,10 @@ const lyingRuntime = Agent.bind({
  */
 const encodedRuntime = Agent.bind({
   definition: Agent.define({
-    context: Agent.context({
-      schema: Schema.Struct({ count: Schema.FiniteFromString }),
-      select: () => ({ count: 2, secret: 'do not serve me' }),
-    }),
+    context: Projection.fromReader(Schema.Struct({ count: Schema.FiniteFromString }), () => ({
+      count: 2,
+      secret: 'do not serve me',
+    })),
     messages: Agent.expose(MessageUnion, {}),
     resources: [
       Agent.resource('count', {

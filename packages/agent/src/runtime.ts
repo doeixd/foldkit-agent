@@ -452,7 +452,11 @@ export const bind = <
     context: Effect.suspend(() => {
       const declared = definition.context
       if (declared === undefined) return Effect.succeed(undefined)
-      return project(declared.schema, declared.select(host.model()), 'context')
+      return project(
+        declared.Model as unknown as Schema.Codec<unknown>,
+        declared.read(host.model()),
+        'context',
+      )
     }),
 
     resources: {

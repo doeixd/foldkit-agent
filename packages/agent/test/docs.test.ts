@@ -1,12 +1,13 @@
 import { Option, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 import { type Model, Message as MessageUnion, Model as ModelSchema, Todo } from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model>()
 
 const AppAgent = TodoAgent.define({
-  context: Agent.pick(ModelSchema, ['todos']),
+  context: Projection.of(ModelSchema)({ todos: true }),
   messages: TodoAgent.expose(MessageUnion, {
     RequestedCreateTodo: 'Create a new todo',
     ClearedSelection: 'Clear the selection',

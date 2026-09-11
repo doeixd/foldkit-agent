@@ -1,6 +1,7 @@
 import { Option, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 import { type Model, Message, Todo } from './todoApp.js'
 
 const AgentContext = Schema.Struct({
@@ -9,13 +10,10 @@ const AgentContext = Schema.Struct({
 })
 
 const AppAgent = Agent.define({
-  context: Agent.context({
-    schema: AgentContext,
-    select: (model: Model) => ({
-      selectedTodoId: model.selectedTodoId,
-      todos: model.todos,
-    }),
-  }),
+  context: Projection.fromReader(AgentContext, (model: Model) => ({
+    selectedTodoId: model.selectedTodoId,
+    todos: model.todos,
+  })),
 
   messages: Agent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a new todo' },

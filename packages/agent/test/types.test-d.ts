@@ -5,6 +5,7 @@
 import { Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Agent } from '../src/index.js'
+import { Projection } from 'foldkit-surface'
 import { type Model, Message, Model as ModelSchema } from './todoApp.js'
 
 const TodoAgent = Agent.forModel<Model>()
@@ -56,10 +57,9 @@ TodoAgent.expose(Message, {
   },
 })
 
-TodoAgent.context({
-  schema: Schema.Struct({ todos: Schema.Array(Schema.Unknown) }),
-  select: model => ({ todos: model.todos }),
-})
+Projection.fromReader(Schema.Struct({ todos: Schema.Array(Schema.Unknown) }), (model: Model) => ({
+  todos: model.todos,
+}))
 
 // The description shorthand is accepted wherever a variant config is.
 Agent.expose(Message, {
@@ -180,20 +180,20 @@ Agent.expose(Counted, {
   },
 })
 
-// Agent.pick rejects a field the Model does not declare.
+// Projection.of rejects a field the Model does not declare.
 // @ts-expect-error 'missing' is not a field of the Model.
-Agent.pick(ModelSchema, ['missing'])
+Projection.of(ModelSchema)({ missing: true })
 
-// Agent.pick types the projection from the picked keys.
-const picked = Agent.pick(ModelSchema, ['todos'])
-const projection: { readonly todos: ReadonlyArray<{ readonly id: string }> } = picked.select({
+// Projection.of types the projection from the selected keys.
+const picked = Projection.of(ModelSchema)({ todos: true })
+const projection: { readonly todos: ReadonlyArray<{ readonly id: string }> } = picked.read({
   todos: [],
   selectedTodoId: Option.none(),
 })
 void projection
 
 // @ts-expect-error selectedTodoId was not picked.
-void picked.select({ todos: [], selectedTodoId: Option.none() }).selectedTodoId
+void picked.read({ todos: [], selectedTodoId: Option.none() }).selectedTodoId
 
 // Dispatching by Message reference and by name are both checked.
 declare const model: Model

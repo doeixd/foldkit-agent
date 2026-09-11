@@ -1,3 +1,4 @@
+import type { Schema } from 'effect'
 import type { Definition } from './define.js'
 import { toJsonSchema } from './jsonSchema.js'
 import type { AgentSchema, MessageDescriptor, ResourceDescriptor } from './types.js'
@@ -35,7 +36,9 @@ export const resources = (
 export const contextSchema = (
   definition: Definition<any, any, any, any, any>,
 ): Record<string, unknown> | undefined =>
-  definition.context === undefined ? undefined : toJsonSchema(definition.context.schema)
+  definition.context === undefined
+    ? undefined
+    : toJsonSchema(definition.context.Model as unknown as Schema.Codec<unknown>)
 
 /**
  * The full, data-only description of an agent contract.

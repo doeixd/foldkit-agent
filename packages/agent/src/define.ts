@@ -1,4 +1,4 @@
-import type { Context } from './context.js'
+import type { Projection } from 'foldkit-surface'
 import type { AnyCapabilitiesByName, AnyCapabilitiesByTag, ExposedMessages } from './expose.js'
 import type { Resource } from './resource.js'
 
@@ -16,7 +16,7 @@ export interface Definition<
   ByName = AnyCapabilitiesByName,
   ByTag = AnyCapabilitiesByTag,
 > {
-  readonly context?: Context<Model, Context_> | undefined
+  readonly context?: Projection<Model, Context_> | undefined
   readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
   readonly resources: ReadonlyArray<Resource<Model, unknown>>
 }
@@ -37,7 +37,7 @@ export interface DefineOptions<
   ByName = AnyCapabilitiesByName,
   ByTag = AnyCapabilitiesByTag,
 > {
-  readonly context?: Context<Model, Context_> | undefined
+  readonly context?: Projection<Model, Context_> | undefined
   readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
   readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
 }
