@@ -182,6 +182,25 @@ const Post = entity('Post', posts, {
 The read joins the target table (`innerJoin` on the foreign key) so dangling
 through rows are dropped, then emits refs ordered by target id.
 
+## Mutation results
+
+Reads are where the adapter compiles query shape. A mutation uses Drizzle
+directly and returns patches; `selectColumns` picks the columns and `normalize`
+maps the returned rows, rewriting a `one` relation to its ref key.
+
+```ts
+import { normalize, selectColumns } from 'foldkit-remote-drizzle'
+
+const fields = ['id', 'name', 'owner']
+const rows = yield* db
+  .update(projects)
+  .set({ name })
+  .where(eq(projects.id, id))
+  .returning(selectColumns(Project, fields))
+
+return { output: { id }, entities: normalize(Project, rows, fields) }
+```
+
 ## Compose a server
 
 ```ts

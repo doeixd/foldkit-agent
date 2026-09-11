@@ -9,6 +9,7 @@ import {
   entity,
   many,
   manyToMany,
+  normalize,
   source,
   type DrizzleDatabaseService,
   type DrizzleStatement,
@@ -293,5 +294,17 @@ describe('RemoteDrizzle execution', () => {
     expect(calls).toHaveLength(2)
     expect(Object.keys(calls[1]!.selection)).toEqual(['parent', 'child'])
     expect(calls[1]!.innerJoin).toBeDefined()
+  })
+
+  it('normalizes mutation returning rows into patches with ref keys', () => {
+    const patches = normalize(
+      ProjectBinding,
+      [{ id: 'p1', name: 'P', owner: 'u1' }],
+      ['id', 'name', 'owner'],
+    )
+
+    expect(patches).toEqual([
+      { entity: 'Project', id: 'p1', values: { id: 'p1', name: 'P', owner: 'User:u1' } },
+    ])
   })
 })

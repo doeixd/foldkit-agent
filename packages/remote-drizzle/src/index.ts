@@ -120,6 +120,27 @@ const relationRefs = (
 }
 
 /**
+ * Maps rows a mutation returned (e.g. Drizzle `returning`) to entity patches,
+ * rewriting a `one` relation's foreign key to its ref key. `fields` is the set
+ * of columns the query selected (see `selectColumns`). A collection relation is
+ * left as its raw key; load it with `source`.
+ */
+export const normalize = (
+  binding: EntityBinding<any, any>,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  fields: readonly string[],
+): ReadonlyArray<{
+  readonly entity: string
+  readonly id: string
+  readonly values: Record<string, unknown>
+}> =>
+  rows.map(row => ({
+    entity: binding.name,
+    id: String(row.id),
+    values: relationRefs(binding, fields, row),
+  }))
+
+/**
  * A pruned reader backed by an injected executor. Use it when the database is
  * not an Effect service, or to test the projection without one.
  *
