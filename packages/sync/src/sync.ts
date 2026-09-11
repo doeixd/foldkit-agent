@@ -81,8 +81,8 @@ export interface Exchange<Shared> {
 }
 
 export interface ReplicaState<Shared> {
-  readonly protocolVersion: 1
-  readonly schemaVersion: 1
+  readonly protocolVersion: typeof PROTOCOL_VERSION
+  readonly schemaVersion: typeof SCHEMA_VERSION
   readonly documentId: string
   readonly replicaId: string
   readonly revision: number
@@ -265,8 +265,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     Effect.gen(function* () {
       const saved = yield* storage.load()
       const initial: ReplicaState<Shared> = {
-        protocolVersion: 1,
-        schemaVersion: 1,
+        protocolVersion: PROTOCOL_VERSION,
+        schemaVersion: SCHEMA_VERSION,
         documentId,
         replicaId,
         revision: 0,
@@ -350,8 +350,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
               try: () =>
                 operationFrom(
                   {
-                    protocolVersion: 1,
-                    schemaVersion: 1,
+                    protocolVersion: PROTOCOL_VERSION,
+                    schemaVersion: SCHEMA_VERSION,
                     documentId,
                     replicaId,
                     localSequence: current.nextLocalSequence,
