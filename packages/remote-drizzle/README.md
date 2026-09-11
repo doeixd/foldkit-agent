@@ -106,6 +106,38 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 - A cursor that no longer resolves fails the query rather than silently
   returning page one.
 
+## Relations
+
+A singular relation is normalized: the Entity declares it as a ref, and a
+Selection asks for the ref.
+
+```ts
+import { Entity, Selection } from 'foldkit-remote'
+
+const User = entity('User', users)
+const UserEntity = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
+const Project = entity('Project', projects, {
+  relations: { owner: { entity: User, field: projects.ownerId } },
+})
+
+// The Remote Entity, paired with the binding above.
+const ProjectEntity = Entity.make(
+  'Project',
+  Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    owner: Schema.NullOr(Entity.ref(UserEntity)),
+  }),
+)
+
+const selection = Selection.make(ProjectEntity, { id: true, name: true, owner: true })
+```
+
+The read selects `projects.owner_id` and emits `values.owner = "User:u1"` — the
+key the ref codec decodes. A null foreign key emits `null`, so the client holds a
+present null rather than refetching forever. Select the target's fields
+separately and let the normalized store share it.
+
 ## Compose a server
 
 ```ts
@@ -127,9 +159,9 @@ silently dropped requirement.
 
 ## Limits
 
-- Relations are not loaded yet: a selected relation contributes its foreign key
-  to the projection but does not yet resolve to a reference. That needs
-  collection selections in `foldkit-remote` first.
+- A singular relation selected as a ref works (above). A nested relation
+  Selection (an embedded target object) and `to-many` collections are not
+  resolved yet; that needs collection selections in `foldkit-remote` first.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - No computed/aggregate selections yet.
 

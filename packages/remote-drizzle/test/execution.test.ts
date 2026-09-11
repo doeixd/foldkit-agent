@@ -1,5 +1,6 @@
 import { pgTable, text, uuid } from 'drizzle-orm/pg-core'
-import { Effect } from 'effect'
+import { Effect, Schema } from 'effect'
+import { Entity, Selection } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
 import {
@@ -16,7 +17,27 @@ const users = pgTable('users', {
   email: text('email').notNull(),
 })
 
+const User = Entity.make(
+  'User',
+  Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String }),
+)
+
 const UserBinding = entity('User', users)
+
+const projects = pgTable('projects', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+  ownerId: uuid('owner_id'),
+})
+
+const Project = Entity.make(
+  'Project',
+  Schema.Struct({ id: Schema.String, name: Schema.String, owner: Schema.NullOr(Entity.ref(User)) }),
+)
+
+const ProjectBinding = entity('Project', projects, {
+  relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+})
 
 /** Projects each row to the selected columns, as Drizzle's typed select would. */
 const fakeDatabase = (rows: ReadonlyArray<Record<string, unknown>>) => {
@@ -119,5 +140,37 @@ describe('RemoteDrizzle execution', () => {
     if (result._tag !== 'Failure') return
     expect(result.failure._tag).toBe('RemoteReadError')
     expect(result.failure.message).toBe('Database query failed')
+  })
+
+  it('rewrites a selected relation to the ref key the client decodes', async () => {
+    const { database } = fakeDatabase([{ id: 'p1', name: 'P', owner: 'u1' }])
+    const read = source(ProjectBinding)
+    const selection = Selection.make(Project, { id: true, name: true, owner: true })
+
+    const records = await Effect.runPromise(
+      read
+        .read({ ids: ['p1'], fields: selection.fields, principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records).toEqual([{ id: 'p1', values: { id: 'p1', name: 'P', owner: 'User:u1' } }])
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)(
+        records[0]!.values,
+      ),
+    ).toEqual({ id: 'p1', name: 'P', owner: { entity: 'User', id: 'u1' } })
+  })
+
+  it('emits null for an absent relation instead of a dangling ref', async () => {
+    const { database } = fakeDatabase([{ id: 'p1', name: 'P', owner: null }])
+    const read = source(ProjectBinding)
+
+    const records = await Effect.runPromise(
+      read
+        .read({ ids: ['p1'], fields: ['id', 'owner'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records[0]!.values.owner).toBeNull()
   })
 })

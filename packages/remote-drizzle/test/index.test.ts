@@ -31,7 +31,7 @@ const User = Entity.make(
 )
 const Project = Entity.make(
   'Project',
-  Schema.Struct({ id: Schema.String, name: Schema.String, owner: User.schema }),
+  Schema.Struct({ id: Schema.String, name: Schema.String, owner: Entity.ref(User) }),
 )
 
 const UserBinding = entity('User', users)
@@ -48,17 +48,18 @@ describe('RemoteDrizzle', () => {
 
   it('always projects the primary key, selected fields, and relation keys', () => {
     expect(Object.keys(selectColumns(UserBinding, ['name']))).toEqual(['id', 'name'])
-    expect(Object.keys(selectColumns(ProjectBinding, ['id', 'owner']))).toEqual(['id', 'owner_id'])
+    expect(Object.keys(selectColumns(ProjectBinding, ['id', 'owner']))).toEqual(['id', 'owner'])
     expect(Object.keys(selectColumns(UserBinding, ['id', 'name']))).toEqual(['id', 'name'])
   })
 
   it('separates relation fields from scalar columns', () => {
-    const selection = Selection.make(Project, {
-      id: true,
-      owner: Selection.make(User, { id: true, name: true }),
-    })
+    const selection = Selection.make(Project, { id: true, name: true, owner: true })
 
-    expect(Object.keys(selectColumns(ProjectBinding, selection.fields))).toEqual(['id', 'owner_id'])
+    expect(Object.keys(selectColumns(ProjectBinding, selection.fields))).toEqual([
+      'id',
+      'name',
+      'owner',
+    ])
     expect(relationsFor(ProjectBinding, selection).map(relation => relation.entity.name)).toEqual([
       'User',
     ])

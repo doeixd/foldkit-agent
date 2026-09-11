@@ -14,6 +14,7 @@ import { and, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { Effect } from 'effect'
 import type { QueryDescriptor, Selection } from 'foldkit-remote'
+import { Entity } from 'foldkit-remote'
 import { RemoteServerError, type EntitySource, type QuerySource } from 'foldkit-remote-server'
 import type { EntityBinding, RelationBinding } from './binding.js'
 import { idColumn, projectsAny } from './columns.js'
@@ -66,7 +67,8 @@ export interface SourceQuery {
 /**
  * The column map for the requested scalar and relation fields. The primary key
  * is always selected: normalization needs it even when the client did not ask
- * for an `id` field.
+ * for an `id` field. A relation field selects its foreign key under the
+ * relation's own name, which `reader` rewrites to a ref.
  */
 export const selectColumns = (
   binding: EntityBinding<any, any>,
@@ -80,9 +82,28 @@ export const selectColumns = (
       continue
     }
     const relation = binding.relations[field]
-    if (relation !== undefined) columns[relation.field.name] = relation.field
+    if (relation !== undefined) columns[field] = relation.field
   }
   return columns
+}
+
+/** Replaces each selected relation's foreign key with the ref wire key it encodes. */
+const relationRefs = (
+  binding: EntityBinding<any, any>,
+  fields: readonly string[],
+  row: Record<string, unknown>,
+): Record<string, unknown> => {
+  const values = { ...row }
+  for (const field of fields) {
+    const relation = binding.relations[field]
+    if (relation === undefined) continue
+    const id = row[field]
+    values[field] =
+      id === null || id === undefined
+        ? null
+        : Entity.refKey({ entity: relation.entity.name, id: String(id) })
+  }
+  return values
 }
 
 /**
@@ -103,7 +124,10 @@ export const reader =
       if (!projectsAny(binding, context.fields)) return []
       const columns = selectColumns(binding, context.fields)
       const rows = yield* run({ columns, where: whereIds(binding, context.ids) })
-      return rows.map(row => ({ id: String(row.id), values: row }))
+      return rows.map(row => ({
+        id: String(row.id),
+        values: relationRefs(binding, context.fields, row),
+      }))
     })
 
 const selectRows = (

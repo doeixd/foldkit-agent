@@ -22,6 +22,26 @@ describe('Remote core', () => {
     expect(Schema.encodeSync(codec)({ entity: 'User', id: 'u7' })).toBe('User:u7')
   })
 
+  it('encodes a ref key for adapters', () => {
+    expect(Entity.refKey({ entity: 'User', id: 'u7' })).toBe('User:u7')
+  })
+
+  it('decodes a relation selected as a ref', () => {
+    const Owner = Entity.make('Owner', Schema.Struct({ id: Schema.String, name: Schema.String }))
+    const Project = Entity.make(
+      'Project',
+      Schema.Struct({ id: Schema.String, owner: Entity.ref(Owner) }),
+    )
+    const selection = Selection.make(Project, { id: true, owner: true })
+
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)({
+        id: 'p1',
+        owner: 'Owner:o1',
+      }),
+    ).toEqual({ id: 'p1', owner: { entity: 'Owner', id: 'o1' } })
+  })
+
   it('supports a recursive relation by name without inlining the target', () => {
     const codec = Entity.refTo('Node')
     expect(Schema.decodeSync(codec)('Node:n1')).toEqual({ entity: 'Node', id: 'n1' })

@@ -117,6 +117,12 @@ export const Entity = {
   refTo: <Name extends string>(_name: Name): Schema.Codec<EntityRef<Name>, string> =>
     refCodec<Name, Schema.Struct.Fields>(),
 
+  /**
+   * The wire key a relation field carries (`"Entity:id"`). Adapters that read a
+   * foreign key emit this so the ref codec can decode it on the client.
+   */
+  refKey: (ref: { readonly entity: string; readonly id: string }): string => encodeRef(ref),
+
   patch: <Name extends string, F extends Schema.Struct.Fields>(
     ref: EntityRef<Name, F>,
     patch: Partial<Schema.Struct.Type<F>>,
