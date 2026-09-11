@@ -269,20 +269,27 @@ persistence in the browser is an open dependency (§8.9, §17).
 - **Consequence:** the revision needs no unreleased Effect feature. Risk is
   inference and `unstable/*` churn, not missing primitives.
 
-### 3.5 Drizzle (external — **not installed**)
+### 3.5 Drizzle (pinned and probed)
 
 `packages/surface/DRIZZLE.md` builds on two Drizzle features: an Effect-native
 PostgreSQL driver (`drizzle-orm/effect-postgres`, over `@effect/sql-pg`) and
-Effect Schema derivation from tables (`drizzle-orm/effect-schema`:
-`createSelectSchema` / `createInsertSchema` / `createUpdateSchema`, with per-column
-overrides).
+Effect Schema derivation from tables (`drizzle-orm/effect-schema`).
 
-**Verified: none of `drizzle-orm`, `@effect/sql-pg`, or `@effect/sql-drizzle` is
-installed.** The workspace has only `@effect/sql-sqlite-node@4.0.0-rc.112` (for
-`foldkit-durable`). The Drizzle adapter is therefore entirely prospective; verify
-its external API surfaces and versions against a pinned Drizzle release before
-Phase 14 begins. Do not design persistence around Drizzle until it is installed and
-probed.
+**Installed at the workspace root and verified against the installed `.d.ts`:**
+`drizzle-orm@1.0.0-rc.4` and `@effect/sql-pg@4.0.0-rc.112` (matching the pinned
+`effect`). Their surfaces:
+
+- `drizzle-orm/effect-postgres`: `make` / `makeWithDefaults`, `EffectPgDatabase`,
+  `EffectPgSession`, `EffectPgSessionOptions`, `DefaultServices`, `EffectLogger`,
+  `effectPgCodecs`, `EffectPgQueryEffectHKT` / `EffectPgQueryResultHKT`.
+- `drizzle-orm/effect-schema`: `createSelectSchema` / `createInsertSchema` /
+  `createUpdateSchema` plus the `BuildSchema` / `BuildRefine` types.
+
+**`@effect/sql-drizzle` is not used.** It has no `4.0.0-rc` line and its latest
+peers `effect@^3.22.0`, so it is incompatible with the pinned rc; Drizzle's own
+`effect-postgres` integration supersedes it. `foldkit-remote-drizzle` stays
+provisional and value-bar gated — nothing imports Drizzle yet.
+
 
 ---
 

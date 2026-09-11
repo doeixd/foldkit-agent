@@ -31,7 +31,9 @@
   },
   "devDependencies": {
     "@effect/language-service": "^0.87.2",
+    "@effect/sql-pg": "4.0.0-rc.112",
     "@types/node": "^22.10.2",
+    "drizzle-orm": "1.0.0-rc.4",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
     "prettier": "^3.9.6",
