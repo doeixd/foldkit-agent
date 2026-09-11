@@ -1571,7 +1571,7 @@ const journal = yield* makeJournal({
 | `ModelRef.select` on an optional focus | Maps inside `Option`, preserving absence (`Projection<Root, Option<P>>`) | No silent collapse of `Option<Option<A>>`. |
 | `Projection.array`/`option` | Wrap the whole value (`ReadonlyArray<Root>→ReadonlyArray<Value>`, `Option<Root>→Option<Value>`) | Avoids accidental double-wrap; nesting stays explicit. |
 | `Surface.registry` | Explicit descriptor; throws on a duplicate `name` | No hidden global registry; fail fast. |
-| Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; resolution is Phase 1 slice 5 | A field must not silently shadow a method. |
+| Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; a Struct field with one of these names throws when the tree is built | A field must not silently shadow a method. |
 
 ---
 

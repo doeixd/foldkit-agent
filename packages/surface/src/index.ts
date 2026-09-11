@@ -56,6 +56,22 @@ type RefNode<Root, S> =
 
 type AnySchema = Schema.Schema<unknown>
 
+/**
+ * Names that belong to the ModelRef surface. A Struct field with one of these
+ * names would silently shadow a method, so building the tree rejects it.
+ */
+const RESERVED_REF_NAMES = new Set([
+  'Schema',
+  'optic',
+  'dependency',
+  'read',
+  'get',
+  'set',
+  'at',
+  'index',
+  'select',
+])
+
 function propertyReader(root: unknown, key: string): unknown {
   return root === null || root === undefined ? undefined : (root as Record<string, unknown>)[key]
 }
@@ -80,6 +96,9 @@ function makeTree(
   const fields = (schema as { readonly fields?: Schema.Struct.Fields }).fields
   if (fields !== undefined) {
     for (const key of Object.keys(fields)) {
+      if (RESERVED_REF_NAMES.has(key)) {
+        throw new Error(`Model field "${key}" is reserved by ModelRef`)
+      }
       node[key] = makeTree(fields[key] as AnySchema, [...path, key], erasedOptic.key(key), root =>
         propertyReader(read(root), key),
       )

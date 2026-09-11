@@ -119,6 +119,11 @@ describe('Surface runtime', () => {
     expect(() => decode(empty.Model, { id: 'u1' })).toThrow()
   })
 
+  it('rejects a Model field whose name collides with a ModelRef member', () => {
+    const Bad = Schema.Struct({ at: Schema.String })
+    expect(() => Surface.make({ Model: Bad, Message })).toThrow('reserved by ModelRef')
+  })
+
   it('starts a Remote selection as Initial', () => {
     const Data = Remote.make({ entities: [User] })
     const selection = Selection.make(User, { id: true, name: true })
