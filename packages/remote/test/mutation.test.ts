@@ -4,17 +4,19 @@ import {
   Entity,
   Mutation,
   RemoteClient,
-  beginMutation,
-  emptyMutationState,
   emptyStore,
   entityKey,
-  failMutation,
   readField,
-  reconcileMutation,
   writeEntity,
-  type NormalizedPatch,
 } from '../src/index.js'
-import { mutate } from '../src/mutation.js'
+import {
+  beginMutation,
+  emptyMutationState,
+  failMutation,
+  mutate,
+  reconcileMutation,
+  type NormalizedPatch,
+} from '../src/mutation.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 const RenameUser = Mutation.make('RenameUser', {
