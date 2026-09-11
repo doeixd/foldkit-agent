@@ -176,8 +176,12 @@ const cardView = Surface.view(ProjectCard, (model, h) => {
   return h.empty
 })
 
-// A builder for the superset App Message must satisfy the narrowed view.
-const _appView: (model: ModelValue, h: HtmlBuilder<AppMessage>) => Html = cardView
+// The application boundary consumes the superset App builder.
+const _appView: (model: ModelValue, h: HtmlBuilder<AppMessage>) => Html = Surface.rootView(
+  ProjectCard,
+  undefined,
+  cardView,
+)
 
 // --- case 4: Remote.make embeds without `any`; Remote.select is RemoteData --
 

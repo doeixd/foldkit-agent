@@ -388,6 +388,12 @@ type MessageConstructor<Cases extends Record<string, Schema.Struct.Fields>> = (
  */
 type ViewBuilder<Message> = Omit<HtmlBuilder<Message>, keyof HtmlBuilder<never> & symbol>
 
+/** A renderer for a Surface's projected Model, with its Message set narrowed. */
+export type Renderer<Model, Message> = (model: Model, h: ViewBuilder<Message>) => Html
+
+/** `unknown` when `Sub` is a subtype of `Super`, `never` otherwise. */
+type Subset<Sub, Super> = [Sub] extends [Super] ? unknown : never
+
 export const Surface = {
   make: <
     F extends Schema.Struct.Fields,
@@ -443,18 +449,50 @@ export const Surface = {
     params?: Params,
   ): Model => surface.projection(params as Params).read(root),
 
+  /**
+   * Binds a renderer to a Surface's projected Model and Message set. A
+   * type-level binder: the renderer already has this shape, but `Model` and
+   * `Message` are derived from the Surface instead of written by hand.
+   */
   view: <Root, Model, Message, Params>(
+    _surface: Surface<Root, Model, Message, Params>,
+    render: Renderer<Model, Message>,
+  ): Renderer<Model, Message> => render,
+
+  /**
+   * The application boundary: consume the Root Model, project it, and hand the
+   * projected Model to the renderer. `Subset` rejects a Surface whose Messages
+   * the application builder cannot route.
+   */
+  rootView: <Root, Model, Message, Params>(
     surface: Surface<Root, Model, Message, Params>,
-    render: (model: Model, h: ViewBuilder<Message>) => Html,
-  ): (<AppMessage>(model: Root, h: HtmlBuilder<AppMessage>) => Html) => {
-    const projection = surface.projection(undefined as unknown as Params)
-    // Sound narrowing, not an unsafe cast: the renderer can only construct
-    // Messages from the Surface subset, and the real builder accepts the
-    // superset. `HtmlBuilder`'s OnClick returns `{ message: Message }`, so the
-    // superset builder is invariant and cannot be *structurally* narrowed.
-    return <AppMessage>(root: Root, h: HtmlBuilder<AppMessage>): Html =>
-      render(projection.read(root), h as unknown as ViewBuilder<Message>)
+    params: Params,
+    render: Renderer<Model, Message>,
+  ): (<AppMessage>(
+    root: Root,
+    h: HtmlBuilder<AppMessage> & Subset<Message, AppMessage>,
+  ) => Html) => {
+    const projection = surface.projection(params)
+    // Sound narrowing: the renderer can only construct this Surface's Messages,
+    // and `Subset` guarantees the application builder accepts them.
+    return <AppMessage>(
+      root: Root,
+      h: HtmlBuilder<AppMessage> & Subset<Message, AppMessage>,
+    ): Html => render(projection.read(root), h as unknown as ViewBuilder<Message>)
   },
+
+  /**
+   * Embeds a child renderer in a parent view. `ParentModel extends ChildModel`
+   * enforces "child Model requirement ⊆ parent projected Model"; `Subset`
+   * enforces "child Message set ⊆ parent Message set".
+   */
+  embed:
+    <ChildModel, ChildMessage>(child: Renderer<ChildModel, ChildMessage>) =>
+    <ParentModel extends ChildModel, ParentMessage>(
+      model: ParentModel,
+      h: ViewBuilder<ParentMessage> & Subset<ChildMessage, ParentMessage>,
+    ): Html =>
+      child(model, h as unknown as ViewBuilder<ChildMessage>),
 
   /**
    * An explicit collection of Surfaces for one App; there is no hidden global
