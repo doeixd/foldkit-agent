@@ -2175,6 +2175,10 @@ canonicalisation drops `undefined`-valued keys so an explicit `undefined`
 optional matches an absent one; the read handler de-dups ids and intersects
 authorization in sets rather than `Array.includes`.
 
+Fixed in `1cbf55f`: the mutation idempotency ledger retains only the most recent
+1024 settled request ids, so `MutationState.applied`/`failed` no longer grow
+without bound. A retry older than the window would re-apply its entities.
+
 Still open (all lower severity):
 
 - **`Projection.struct` mixes roots silently.** `EntryRoot<Entries[keyof Entries]>`
@@ -2185,8 +2189,6 @@ Still open (all lower severity):
   validated against the Selection schema. Phase 4 spike shortcut.
 - **`storeOf`/`Remote.select` cast the store shape.** A change to the Remote Model
   layout would fail silently.
-- **Unbounded mutation state.** `MutationState.applied`/`failed` grow without GC;
-  define a retention policy.
 - **`live.invalidateConnection` never clears `stale`.** A later successful merge
   does not mark the connection fresh; the clearing path is unspecified.
 - **remote-drizzle does not check that the table-derived Schema agrees with the
