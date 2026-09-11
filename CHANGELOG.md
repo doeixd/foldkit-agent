@@ -106,8 +106,9 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   and exposes two of the application's Messages; a SlotView styles and decorates
   it (`Style.whenInput`, `Style.pseudo`, a Behavior reading the projected input).
   The demo prints the observation set, slot contracts, mixin names, projected
-  model, resolved attributes and the compiled stylesheet; `pnpm demo` runs it and
-  a test asserts every line. Remote is not part of this example.
+  model, resolved attributes, the compiled stylesheet, and the serializable
+  `SurfaceView.describe` value plus its `toMarkdown`; `pnpm demo` runs it and a
+  test asserts every line. Remote is not part of this example.
 
 ### `foldkit-agent`
 

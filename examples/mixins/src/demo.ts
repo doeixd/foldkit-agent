@@ -161,5 +161,10 @@ export const runDemo = (): ReadonlyArray<string> => {
   lines.push(`status classes: ${classTokens(resolved.status).join(' ')}`)
   lines.push(`archive aria-disabled: ${String(attributeValue(resolved.archive, 'AriaDisabled'))}`)
   lines.push(`stylesheet: ${Style.stylesheet(ProjectCardStyle)}`)
+
+  const description = SurfaceView.describe(ProjectCard, undefined, ProjectCardView)
+  lines.push(`description: ${JSON.stringify(description)}`)
+  lines.push('')
+  lines.push(...SurfaceView.toMarkdown(description).split('\n'))
   return lines
 }

@@ -35,4 +35,31 @@ cannot emit it.
 `<style>` block the application would inject. The class is a hash of the rule, so
 it is identical on the server and the client.
 
+The demo then prints the serializable `SurfaceView.describe(...)` value and its
+`toMarkdown` rendering — the same data DevTools or agent tooling would consume:
+
+```md
+# ProjectCard
+
+## Observes
+
+- `project`
+- `selection`
+
+## May emit
+
+- `ArchiveProject`
+- `SelectProject`
+
+## Slots
+
+- `root` — Container
+- `archive` — Interactive (events: click)
+
+## Mixins
+
+- `ProjectCardStyle`
+- `ArchiveBehavior`
+```
+
 `test/demo.test.ts` asserts every line, so the trace cannot silently drift.
