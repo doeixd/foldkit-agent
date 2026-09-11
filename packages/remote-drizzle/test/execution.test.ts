@@ -215,8 +215,8 @@ describe('RemoteDrizzle execution', () => {
     const { database, calls } = fakeDatabaseQueue([
       [{ id: 'p1', comments: 'p1' }],
       [
-        { id: 'c1', parent: 'p1' },
-        { id: 'c2', parent: 'p1' },
+        { child: 'c1', parent: 'p1' },
+        { child: 'c2', parent: 'p1' },
       ],
     ])
     const read = source(PostBinding)
@@ -243,7 +243,7 @@ describe('RemoteDrizzle execution', () => {
       ],
     })
     expect(calls).toHaveLength(2)
-    expect(Object.keys(calls[1]!.selection)).toEqual(['id', 'parent'])
+    expect(Object.keys(calls[1]!.selection)).toEqual(['child', 'parent'])
 
     const dialect = new PgDialect()
     expect(dialect.sqlToQuery(calls[1]!.orderBy![0] as SQL).sql).toContain('"comments"."body" desc')
@@ -260,6 +260,71 @@ describe('RemoteDrizzle execution', () => {
     )
 
     expect(records[0]!.values.comments).toEqual([])
+  })
+
+  it('loads a bounded page per parent when a first window is given', async () => {
+    const { database, calls } = fakeDatabaseQueue([
+      [
+        { id: 'p1', comments: 'p1' },
+        { id: 'p2', comments: 'p2' },
+      ],
+      [
+        { child: 'c1', parent: 'p1' },
+        { child: 'c2', parent: 'p1' },
+      ],
+      [{ child: 'c3', parent: 'p2' }],
+    ])
+
+    const records = await Effect.runPromise(
+      source(PostBinding)
+        .read({
+          ids: ['p1', 'p2'],
+          fields: ['id', 'comments'],
+          principal: null,
+          windows: { comments: { first: 1 } },
+        })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records).toEqual([
+      {
+        id: 'p1',
+        values: {
+          id: 'p1',
+          comments: { refs: ['Comment:c1'], hasNext: true, hasPrevious: false },
+        },
+      },
+      {
+        id: 'p2',
+        values: {
+          id: 'p2',
+          comments: { refs: ['Comment:c3'], hasNext: false, hasPrevious: false },
+        },
+      },
+    ])
+    expect(calls).toHaveLength(3)
+    expect(Object.keys(calls[1]!.selection)).toEqual(['child', 'parent'])
+    expect(calls[1]!.limit).toBe(2)
+  })
+
+  it('rejects a relation window that is not first-only', async () => {
+    const { database } = fakeDatabaseQueue([[{ id: 'p1', comments: 'p1' }], []])
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        source(PostBinding)
+          .read({
+            ids: ['p1'],
+            fields: ['id', 'comments'],
+            principal: null,
+            windows: { comments: { last: 1 } },
+          })
+          .pipe(Effect.provideService(DrizzleDatabase, database)),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag === 'Failure') expect(result.failure.message).toMatch(/only a first window/)
   })
 
   it('loads a many-to-many relation through the join table', async () => {
@@ -292,7 +357,7 @@ describe('RemoteDrizzle execution', () => {
       ],
     })
     expect(calls).toHaveLength(2)
-    expect(Object.keys(calls[1]!.selection)).toEqual(['parent', 'child'])
+    expect(Object.keys(calls[1]!.selection)).toEqual(['child', 'parent'])
     expect(calls[1]!.innerJoin).toBeDefined()
   })
 
@@ -320,7 +385,7 @@ describe('RemoteDrizzle execution', () => {
     })
     const { database, calls } = fakeDatabaseQueue([
       [{ id: 'p1', comments: 'p1' }],
-      [{ id: 'c1', parent: 'p1' }],
+      [{ child: 'c1', parent: 'p1' }],
     ])
 
     await Effect.runPromise(

@@ -232,21 +232,92 @@ export const source = <P = unknown>(
           continue
         }
 
+        const targetId = idColumn(relation.entity)
+        const naturalOrder =
+          relation.orderBy === undefined || relation.orderBy.length === 0
+            ? [asc(targetId)]
+            : orderByTerms(relation.orderBy, 'forward')
         const parentKeys = [
           ...new Set(rows.map(row => row[field]).filter(key => key !== null && key !== undefined)),
         ]
+
+        const window = context.windows?.[field]
+        if (window !== undefined) {
+          if (
+            window.last !== undefined ||
+            window.before !== undefined ||
+            window.after !== undefined
+          ) {
+            return yield* new RemoteServerError({
+              message: `Relation "${field}" supports only a first window`,
+            })
+          }
+          const pageSize = shapeWindow(window, { defaultSize: 20 }).pageSize
+          const empty = { refs: [] as ReadonlyArray<string>, hasNext: false, hasPrevious: false }
+          const pages = yield* Effect.forEach(
+            parentKeys,
+            parentKey =>
+              Effect.gen(function* () {
+                const childRows =
+                  relation.kind === 'many'
+                    ? yield* selectRows(
+                        database,
+                        relation.entity.table,
+                        { child: targetId, parent: relation.foreignKey },
+                        {
+                          where:
+                            relation.where === undefined
+                              ? eq(relation.foreignKey, parentKey)
+                              : and(eq(relation.foreignKey, parentKey), relation.where),
+                          orderBy: naturalOrder,
+                          limit: pageSize + 1,
+                        },
+                      )
+                    : yield* selectRows(
+                        database,
+                        relation.through,
+                        { child: targetId, parent: relation.localColumn },
+                        {
+                          where:
+                            relation.where === undefined
+                              ? eq(relation.localColumn, parentKey)
+                              : and(eq(relation.localColumn, parentKey), relation.where),
+                          innerJoin: {
+                            table: relation.entity.table,
+                            on: eq(relation.foreignColumn, targetId),
+                          },
+                          orderBy: naturalOrder,
+                          limit: pageSize + 1,
+                        },
+                      )
+                const refs = childRows
+                  .slice(0, pageSize)
+                  .map(child =>
+                    Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
+                  )
+                return [
+                  String(parentKey),
+                  { refs, hasNext: childRows.length > pageSize, hasPrevious: false },
+                ] as const
+              }),
+            { concurrency: 10 },
+          )
+          const byParent = new Map(pages)
+          for (const row of rows) {
+            const key = row[field]
+            row[field] =
+              key === null || key === undefined ? empty : (byParent.get(String(key)) ?? empty)
+          }
+          continue
+        }
+
         const byParent = new Map<string, string[]>()
         if (parentKeys.length > 0) {
-          const targetId = idColumn(relation.entity)
-          const naturalOrder =
-            relation.orderBy === undefined || relation.orderBy.length === 0
-              ? [asc(targetId)]
-              : orderByTerms(relation.orderBy, 'forward')
           if (relation.kind === 'many') {
             const childRows = yield* selectRows(
               database,
               relation.entity.table,
-              { id: targetId, parent: relation.foreignKey },
+              { child: targetId, parent: relation.foreignKey },
               {
                 where:
                   relation.where === undefined
@@ -257,14 +328,14 @@ export const source = <P = unknown>(
             )
             for (const child of childRows) {
               const refs = byParent.get(String(child.parent)) ?? []
-              refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.id) }))
+              refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.child) }))
               byParent.set(String(child.parent), refs)
             }
           } else {
             const throughRows = yield* selectRows(
               database,
               relation.through,
-              { parent: relation.localColumn, child: targetId },
+              { child: targetId, parent: relation.localColumn },
               {
                 where:
                   relation.where === undefined

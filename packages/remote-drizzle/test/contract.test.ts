@@ -67,7 +67,7 @@ describe('RemoteDrizzle end to end', () => {
   it('serves a normalized read that Remote.select decodes into refs', async () => {
     const { database } = fakeDatabaseQueue([
       [{ id: 'p1', name: 'P', owner: 'u1', comments: 'p1' }],
-      [{ id: 'c1', parent: 'p1' }],
+      [{ child: 'c1', parent: 'p1' }],
     ])
     const server = RemoteServer.make({}, { entities: [source(ProjectBinding)] })
 

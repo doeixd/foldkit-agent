@@ -184,6 +184,26 @@ const Post = entity('Post', posts, {
 The read joins the target table (`innerJoin` on the foreign key) so dangling
 through rows are dropped, then emits refs ordered by target id.
 
+A relation can be paginated. Declare the field as a page of refs and select it
+with a window:
+
+```ts
+const ProjectEntity = Entity.make('Project', Schema.Struct({
+  id: Schema.String,
+  comments: Entity.refPage(CommentEntity),
+}))
+
+const selection = Selection.make(ProjectEntity, {
+  id: true,
+  comments: Selection.connection(CommentEntity, { first: 10 }),
+})
+```
+
+The read runs one bounded query per parent (concurrency 10) and emits
+`{ refs, hasNext, hasPrevious }`. Only a `first` window is supported; `last`,
+`after`, and `before` fail the read until cursoring lands. The window applies
+when the relation is fetched; changing it later needs the field invalidated.
+
 ## Mutation results
 
 Reads are where the adapter compiles query shape. A mutation uses Drizzle
@@ -226,9 +246,10 @@ silently dropped requirement.
 
 - Singular, to-many, and many-to-many relations selected as refs work (above).
   A to-many relation loads its children in one `IN (...)`; a many-to-many joins
-  the through table to the target. Both order by the target id. Per-relation
-  ordering/pagination and an embedded target object are not supported yet, and
-  `reader`, the injected-executor path, does not load children.
+  the through table to the target. Both order by the target id. A `Selection.connection`
+  window loads one bounded page per parent (`first` only for now). Per-relation
+  cursoring and an embedded target object are not supported yet, and `reader`,
+  the injected-executor path, does not load children.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - No computed/aggregate selections yet.
 

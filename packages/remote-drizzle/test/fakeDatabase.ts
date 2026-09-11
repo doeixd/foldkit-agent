@@ -5,6 +5,7 @@ export interface FakeCall {
   where: unknown
   innerJoin: unknown
   orderBy: ReadonlyArray<unknown> | undefined
+  limit: number | undefined
 }
 
 /**
@@ -24,6 +25,7 @@ export const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<str
         where: undefined,
         innerJoin: undefined,
         orderBy: undefined,
+        limit: undefined,
       }
       calls.push(call)
       const promise = Promise.resolve(
@@ -42,7 +44,10 @@ export const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<str
           call.orderBy = order
           return statement
         },
-        limit: () => statement,
+        limit: (count: number) => {
+          call.limit = count
+          return statement
+        },
         then: promise.then.bind(promise),
       } as unknown as DrizzleStatement
       return { from: () => statement }
