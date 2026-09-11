@@ -87,16 +87,17 @@ const compile = <
 > => {
   type AppMessage = Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>
   type Shared = Schema.Struct.Type<Fields>
+  type SharedEncoded = Schema.Struct.Encoded<Fields>
 
   const durableTags = new Set(
     config.messages.map(messageTag).filter((tag): tag is string => tag !== undefined),
   )
   // `AppScope` does not constrain its schemas' services; a Foldkit Message union
   // and a Struct are pure, so the low-level contract's `never` is satisfied.
-  const sync = defineSync<AppMessage, Shared, unknown, unknown>({
+  const sync = defineSync<AppMessage, Shared, unknown, SharedEncoded>({
     documentId: config.documentId,
     message: app.Message as unknown as Schema.Codec<AppMessage, unknown>,
-    shared: config.model.schema as unknown as Schema.Codec<Shared, unknown>,
+    shared: config.model.schema as unknown as Schema.Codec<Shared, SharedEncoded>,
     empty: config.model.get(config.initial),
     durable: message => {
       const tag = (message as { readonly _tag?: string })._tag

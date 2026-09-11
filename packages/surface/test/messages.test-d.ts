@@ -39,3 +39,15 @@ const describeAll = (message: Schema.Schema.Type<typeof All.schema>): string => 
   }
 }
 void describeAll
+
+// The encoded side is preserved through a subset and its union.
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
+
+const Transforming = defineMessageUnion({ Set: { value: Schema.NumberFromString } })
+const TransformingApp = Surface.make({ Model: App.Model, Message: Transforming })
+const SetOnly = Surface.messages(TransformingApp, [Transforming.Set])
+const _encoded: Equal<
+  (typeof SetOnly.schema)['Encoded'],
+  { readonly _tag: 'Set'; readonly value: string }
+> = true

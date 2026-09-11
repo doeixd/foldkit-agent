@@ -33,3 +33,18 @@ const Indexed = Schema.Struct({ items: Schema.Array(Schema.Struct({ name: Schema
 const IndexedApp = Surface.make({ Model: Indexed, Message: App.Message })
 // @ts-expect-error `.index` is a dynamic selection, not a static field reference
 Surface.pick(IndexedApp.model.items.index(0))
+
+// The encoded side is preserved through the reference tree.
+const Transforming = Schema.Struct({ count: Schema.NumberFromString })
+const TransformingApp = Surface.application({
+  Model: Transforming,
+  Message: App.Message,
+  initial: { count: 0 },
+  update: (model: { readonly count: number }) => ({ model }),
+})
+const Count = Surface.pick(TransformingApp.fields.count)
+// The encoded side is exactly the field's encoded type, not `unknown` or `any`.
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
+const _encoded: Equal<(typeof Count.schema)['Encoded'], { readonly count: string }> = true
+const _notUnknown: Equal<(typeof Count.schema)['Encoded'], { readonly count: unknown }> = false

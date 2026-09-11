@@ -18,9 +18,9 @@ import type * as Update from 'foldkit/update'
 // ModelRef and the typed Model tree (Phase 0 cases 1)
 // ===========================================================================
 
-export interface ModelRef<Root, Value> {
+export interface ModelRef<Root, Value, Encoded = unknown> {
   /** A pure codec: Foldkit Model fields carry no decoding or encoding services. */
-  readonly Schema: Schema.Codec<Value, unknown, never, never>
+  readonly Schema: Schema.Codec<Value, Encoded, never, never>
   readonly optic: Optic.Optional<Root, Value>
   readonly dependency: readonly string[]
   readonly get: (root: Root) => Value
@@ -32,7 +32,12 @@ export interface ModelRef<Root, Value> {
  * name, so a reference-based selection can infer its output keys without a
  * parallel field registry or string paths.
  */
-export interface FieldRef<Root, Value, Key extends string = string> extends ModelRef<Root, Value> {
+export interface FieldRef<
+  Root,
+  Value,
+  Key extends string = string,
+  Encoded = unknown,
+> extends ModelRef<Root, Value, Encoded> {
   readonly key: Key
   /** The application definition this field was generated from. */
   readonly owner: object
@@ -63,11 +68,13 @@ export type RefTree<Root, F extends Schema.Struct.Fields> = {
 // Tuple-wrapped so the conditional is *non-distributive*: without it,
 // `Value = Option<V>` distributes over `None | Some<V>` and `.at()` would return
 // a union of two unrelated `ModelRef`s.
-type Selectable<Root, Value, Key extends string> = [Value] extends [Option.Option<infer Inner>]
-  ? FieldRef<Root, Value, Key> & {
+type Selectable<Root, Value, Key extends string, Encoded = unknown> = [Value] extends [
+  Option.Option<infer Inner>,
+]
+  ? FieldRef<Root, Value, Key, Encoded> & {
       readonly select: <P>(projection: Projection<Inner, P>) => Projection<Root, Option.Option<P>>
     }
-  : FieldRef<Root, Value, Key> & {
+  : FieldRef<Root, Value, Key, Encoded> & {
       readonly select: <P>(projection: Projection<Value, P>) => Projection<Root, P>
     }
 
@@ -85,19 +92,19 @@ type OptionalRef<Root, Value> = [Value] extends [Option.Option<infer Inner>]
     }
 
 type RefNode<Root, S, Key extends string> =
-  S extends Schema.Struct<infer F>
-    ? Selectable<Root, Schema.Struct.Type<F>, Key> & RefTree<Root, F>
-    : S extends Schema.Schema<infer A>
-      ? A extends ReadonlyArray<infer E>
-        ? Selectable<Root, ReadonlyArray<E>, Key> & {
+  S extends Schema.Codec<infer A, infer Encoded, any, any>
+    ? S extends Schema.Struct<infer F>
+      ? Selectable<Root, A, Key, Encoded> & RefTree<Root, F>
+      : A extends ReadonlyArray<infer E>
+        ? Selectable<Root, A, Key, Encoded> & {
             readonly index: (index: number) => OptionalRef<Root, Option.Option<E>>
           }
         : A extends Readonly<Record<infer K extends string, infer V>>
-          ? Selectable<Root, A, Key> & {
+          ? Selectable<Root, A, Key, Encoded> & {
               readonly at: (key: K) => OptionalRef<Root, Option.Option<V>>
             }
-          : Selectable<Root, A, Key>
-      : never
+          : Selectable<Root, A, Key, Encoded>
+    : never
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -640,12 +647,17 @@ declare const messageSubsetRoot: unique symbol
  * not label a subset agent-visible, durable, or presence; `Agent` and `Sync`
  * attach their own policy to the same value.
  */
+/** The union of encoded types a tuple of constructor schemas produces. */
+type SubsetEncoded<Ms extends readonly unknown[]> =
+  Ms[number] extends Schema.Codec<any, infer Encoded, any, any> ? Encoded : never
+
 export interface MessageSubset<
   Root,
   Message,
   Subset extends Message,
   Ms extends readonly ((...args: never[]) => Message)[],
   Cases extends Record<string, Schema.Struct.Fields> = Record<string, Schema.Struct.Fields>,
+  Encoded = unknown,
 > {
   /** Phantom owner, so a subset cannot be crossed between applications. */
   readonly [messageSubsetRoot]?: Root
@@ -653,7 +665,7 @@ export interface MessageSubset<
   readonly owner: object
   readonly constructors: Ms
   /** A pure codec for exactly the selected variants. */
-  readonly schema: Schema.Codec<Subset, unknown, never, never>
+  readonly schema: Schema.Codec<Subset, Encoded, never, never>
   readonly tags: ReadonlySet<string>
   readonly includes: (message: Message) => message is Subset
 }
@@ -767,7 +779,8 @@ export const Surface = {
     Schema.Schema.Type<MessageUnion<Cases>>,
     SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
     Ms,
-    Cases
+    Cases,
+    SubsetEncoded<Ms>
   > => {
     const tags = new Set<string>()
     for (const constructor of messages) {
@@ -790,7 +803,7 @@ export const Surface = {
         Schema.Schema<unknown>
       >) as unknown as Schema.Codec<
         SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
-        unknown,
+        SubsetEncoded<Ms>,
         never,
         never
       >,
@@ -812,7 +825,8 @@ export const Surface = {
     MessageOfSubset<Subs[number]>,
     ValueOfSubset<Subs[number]>,
     MergeConstructors<Subs>,
-    CasesOfSubset<Subs[number]>
+    CasesOfSubset<Subs[number]>,
+    SubsetEncoded<MergeConstructors<Subs>>
   > => {
     const parts = [...subsets]
     const owner = parts[0]?.owner
@@ -835,7 +849,7 @@ export const Surface = {
       constructors: constructors as never,
       schema: Schema.Union(constructors) as unknown as Schema.Codec<
         ValueOfSubset<Subs[number]>,
-        unknown,
+        SubsetEncoded<MergeConstructors<Subs>>,
         never,
         never
       >,
