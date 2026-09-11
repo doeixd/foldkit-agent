@@ -20,14 +20,14 @@ const scopes: Array<Scope.Closeable> = []
  * Opens IndexedDB storage in a scope that `closeStorages` releases, so the
  * connection lives past this call. It mirrors `indexedDb`, minus the scope.
  */
-export const openStorage = <State = unknown>(
+export const openStorage = (
   name: string,
   factory?: IDBFactory,
-): Effect.Effect<Storage<State>, StorageError> =>
+): Effect.Effect<Storage, StorageError> =>
   Effect.gen(function* () {
     const scope = yield* Scope.make()
     scopes.push(scope)
-    return yield* Effect.provideService(indexedDb<State>(name, factory), Scope.Scope, scope)
+    return yield* Effect.provideService(indexedDb(name, factory), Scope.Scope, scope)
   })
 
 /** Releases every storage opened by `openStorage` in this test file. */

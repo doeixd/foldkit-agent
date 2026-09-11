@@ -84,8 +84,8 @@ export interface Exchange<Shared> {
 export interface ReplicaState<Shared> {
   readonly protocolVersion: typeof PROTOCOL_VERSION
   readonly schemaVersion: typeof SCHEMA_VERSION
-  readonly documentId: string
-  readonly replicaId: string
+  readonly documentId: DocumentId
+  readonly replicaId: ReplicaId
   readonly revision: number
   readonly nextLocalSequence: number
   readonly cursor: number
@@ -142,7 +142,7 @@ export interface Sync<Message, Shared> {
   readonly decodeExchange: (input: unknown) => Exchange<Shared>
   readonly openReplica: (
     replicaId: ReplicaId,
-    storage: Storage<ReplicaState<Shared>>,
+    storage: Storage,
   ) => Effect.Effect<Replica<Message, Shared>, ReplicaError>
 }
 
@@ -180,6 +180,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     checkpoint: Schema.optional(CheckpointSchema),
   })
   const decodeState = Schema.decodeUnknownSync(ReplicaStateSchema, { onExcessProperty: 'error' })
+  const encodeState = Schema.encodeSync(ReplicaStateSchema)
   const VersionProbe = Schema.Struct({
     protocolVersion: Schema.optional(Schema.Number),
     schemaVersion: Schema.optional(Schema.Number),
@@ -261,7 +262,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
 
   const openReplica = (
     replicaId: ReplicaId,
-    storage: Storage<ReplicaState<Shared>>,
+    storage: Storage,
   ): Effect.Effect<Replica<Message, Shared>, ReplicaError> =>
     Effect.gen(function* () {
       const saved = yield* storage.load()
@@ -313,7 +314,22 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           return yield* new InvalidOutboxError({ message: 'Invalid outbox' })
         pendingIds.add(operation.opId)
       }
-      if (saved === undefined) yield* storage.save(state, null)
+      // Storage holds the schema's encoded side, so a transforming `shared`
+      // codec round-trips: decode on load, encode before every save. Encoding
+      // also rejects an invalid `empty` on first creation rather than at reload.
+      const store = (next: ReplicaState<Shared>, expectedRevision: number | null) =>
+        Effect.gen(function* () {
+          const encoded = yield* Effect.try({
+            try: () => encodeState(next),
+            catch: cause =>
+              new InvalidReplicaHistoryError({
+                message: 'Could not encode the replica state',
+                cause,
+              }),
+          })
+          yield* storage.save(encoded, expectedRevision)
+        })
+      if (saved === undefined) yield* store(state, null)
 
       const stateRef = yield* SynchronizedRef.make(state)
       const closed = yield* Ref.make(false)
@@ -338,7 +354,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       // `SynchronizedRef.modifyEffect` installs the returned state itself, so
       // persisting must not also set the ref (that would re-enter the lock).
       const persist = (next: ReplicaState<Shared>, current: ReplicaState<Shared>) =>
-        storage.save(next, current.revision)
+        store(next, current.revision)
 
       const submit = (message: Message): Effect.Effect<void, ReplicaError> =>
         // The closed check belongs inside the lock: a `close` between an outer
@@ -364,17 +380,14 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                 ),
               catch: () => new InvalidOutboxError({ message: 'Invalid outbox' }),
             })
-            const next = yield* Effect.try({
-              try: () =>
-                decodeState({
-                  ...current,
-                  revision: current.revision + 1,
-                  nextLocalSequence: current.nextLocalSequence + 1,
-                  pending: [...current.pending, operation],
-                }),
-              catch: cause =>
-                new InvalidReplicaHistoryError({ message: 'Invalid replica state', cause }),
-            })
+            // Validated and encoded by `persist`; decoding here would demand the
+            // encoded side and break a transforming `shared` codec.
+            const next: ReplicaState<Shared> = {
+              ...current,
+              revision: current.revision + 1,
+              nextLocalSequence: current.nextLocalSequence + 1,
+              pending: [...current.pending, operation],
+            }
             yield* persist(next, current)
             return [undefined, next] as const
           }),
@@ -467,24 +480,20 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
               applied += 1
             }
             if (applied > 0) yield* Metric.update(syncMetrics.applied, applied)
-            const next = yield* Effect.try({
-              try: () =>
-                decodeState({
-                  ...current,
-                  revision: current.revision + 1,
-                  committed,
-                  cursor,
-                  committedIds: [...ids].slice(-COMMITTED_ID_WINDOW),
-                  pending: current.pending.filter(
-                    operation =>
-                      !ids.has(operation.opId) &&
-                      !acknowledged.has(operation.opId) &&
-                      !rejected.has(operation.opId),
-                  ),
-                }),
-              catch: cause =>
-                new InvalidReplicaHistoryError({ message: 'Invalid replica state', cause }),
-            })
+            // Validated and encoded by `persist`, for the same reason as submit.
+            const next: ReplicaState<Shared> = {
+              ...current,
+              revision: current.revision + 1,
+              committed,
+              cursor,
+              committedIds: [...ids].slice(-COMMITTED_ID_WINDOW),
+              pending: current.pending.filter(
+                operation =>
+                  !ids.has(operation.opId) &&
+                  !acknowledged.has(operation.opId) &&
+                  !rejected.has(operation.opId),
+              ),
+            }
             yield* persist(next, current)
             return [undefined, next] as const
           }),

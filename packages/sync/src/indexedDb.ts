@@ -2,9 +2,9 @@ import { Config, Effect, type Scope } from 'effect'
 import { StorageError } from './errors.js'
 
 /** Persists a replica's state with compare-and-swap on its revision. */
-export interface Storage<State = unknown> {
+export interface Storage {
   load: () => Effect.Effect<unknown, StorageError>
-  save: (state: State, expectedRevision: number | null) => Effect.Effect<void, StorageError>
+  save: (state: unknown, expectedRevision: number | null) => Effect.Effect<void, StorageError>
   /** Idempotent; the caller closes the connection explicitly. */
   close: Effect.Effect<void>
 }
@@ -35,10 +35,10 @@ const openDatabase = (
   })
 
 /** One database per document/replica; CAS prevents two tabs from sharing a writer identity. */
-export const indexedDb = <State = unknown>(
+export const indexedDb = (
   name: Config.Config<string> | string,
   factory: IDBFactory = globalThis.indexedDB,
-): Effect.Effect<Storage<State>, StorageError, Scope.Scope> =>
+): Effect.Effect<Storage, StorageError, Scope.Scope> =>
   Effect.gen(function* () {
     const databaseName =
       typeof name === 'string'

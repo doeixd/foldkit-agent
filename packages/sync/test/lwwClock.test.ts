@@ -19,7 +19,7 @@ const initial: LwwClockState = {
 const memory = (saved: unknown = undefined) => {
   let state = saved
   let closes = 0
-  const storage: Storage<LwwClockState> = {
+  const storage: Storage = {
     load: () => Effect.sync(() => structuredClone(state)),
     save: (next, expectedRevision) =>
       Effect.gen(function* () {
@@ -34,7 +34,7 @@ const memory = (saved: unknown = undefined) => {
   }
   return { storage, closes: () => closes }
 }
-const open = (storage: Storage<LwwClockState>) =>
+const open = (storage: Storage) =>
   openLwwClock({ documentId: documentId('todos'), replicaId: replicaId('a'), storage })
 
 describe('a durable LWW clock', () => {
@@ -49,7 +49,7 @@ describe('a durable LWW clock', () => {
             ...saved.storage,
             save: (next, revision) =>
               Effect.gen(function* () {
-                if (next.revision === 1) {
+                if ((next as LwwClockState).revision === 1) {
                   yield* Deferred.succeed(entered, undefined)
                   yield* Deferred.await(blocked)
                 }

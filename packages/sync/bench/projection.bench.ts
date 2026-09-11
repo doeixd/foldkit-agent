@@ -48,8 +48,8 @@ const operation = (localSequence: number, id: string): Operation => ({
 const stateWith = (pending: number, committed: number): ReplicaState<Shared> => ({
   protocolVersion: 1,
   schemaVersion: 1,
-  documentId: 'todos',
-  replicaId: 'a',
+  documentId: documentId('todos'),
+  replicaId: replicaId('a'),
   revision: pending,
   nextLocalSequence: pending + 1,
   cursor: 0,
@@ -63,7 +63,7 @@ const stateWith = (pending: number, committed: number): ReplicaState<Shared> => 
   pending: Array.from({ length: pending }, (_, index) => operation(index + 1, `p${index}`)),
 })
 
-const storageWith = (state: ReplicaState<Shared>): Storage<ReplicaState<Shared>> => ({
+const storageWith = (state: ReplicaState<Shared>): Storage => ({
   load: () => Effect.succeed(state),
   save: () => Effect.void,
   close: Effect.void,

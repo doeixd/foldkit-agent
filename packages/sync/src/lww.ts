@@ -71,7 +71,7 @@ const unsupportedVersion = (input: unknown): UnsupportedClockVersionError | unde
 export const openLwwClock = (options: {
   readonly documentId: DocumentId
   readonly replicaId: ReplicaId
-  readonly storage: Storage<LwwClockState>
+  readonly storage: Storage
 }): Effect.Effect<LwwClock, StorageError | UnsupportedClockVersionError> =>
   Effect.gen(function* () {
     const { documentId, replicaId, storage } = options

@@ -90,7 +90,7 @@ const committed = (
   actorId: 'owner',
 })
 
-const memoryStorage = (initial?: unknown): Storage<ReplicaState<Shared>> => {
+const memoryStorage = (initial?: unknown): Storage => {
   let state = initial
   return {
     load: () => Effect.sync(() => state),
@@ -522,5 +522,58 @@ describe('the replica', () => {
       }),
     ).rejects.toThrow('both acknowledged and rejected')
     expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
+  })
+})
+
+describe('a transforming shared codec', () => {
+  const Counter = defineSync({
+    documentId: documentId('counter'),
+    message: Schema.Struct({ _tag: Schema.Literal('Incremented') }),
+    // Decoded `count` is a number; encoded it is a string, so a save that skips
+    // encoding cannot be read back.
+    shared: Schema.Struct({ count: Schema.NumberFromString }),
+    empty: { count: 0 },
+    durable: () => true,
+    replay: shared => ({ count: shared.count + 1 }),
+  })
+
+  it('round-trips through storage and reload', async () => {
+    const storage = memoryStorage()
+    const first = await Effect.runPromise(Counter.openReplica(replicaId('a'), storage))
+    await Effect.runPromise(
+      Effect.provide(
+        first.synchronize,
+        layerFromPromise({
+          exchange: async () => ({
+            operations: [
+              {
+                protocolVersion: 1,
+                schemaVersion: 1,
+                documentId: documentId('counter'),
+                replicaId: replicaId('a'),
+                localSequence: 1,
+                opId: opId('a:1'),
+                baseCursor: 0,
+                message: { _tag: 'Incremented' },
+                serverSequence: 1,
+                actorId: 'owner',
+              },
+            ],
+            rejected: [],
+          }),
+        }),
+      ),
+    )
+    expect(Effect.runSync(first.shared)).toEqual({ count: 1 })
+    await Effect.runPromise(first.close)
+
+    // Reopening decodes the stored encoded form; a save that wrote the decoded
+    // `count` would fail here with InvalidReplicaHistoryError.
+    const stored = await Effect.runPromise(storage.load())
+    expect(stored).toMatchObject({ committed: { count: '1' } })
+
+    const second = await Effect.runPromise(Counter.openReplica(replicaId('a'), storage))
+    expect(Effect.runSync(second.shared)).toEqual({ count: 1 })
+    await Effect.runPromise(second.close)
   })
 })
