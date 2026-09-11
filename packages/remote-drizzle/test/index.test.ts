@@ -141,4 +141,12 @@ describe('RemoteDrizzle', () => {
     expect(render('backward')).toContain('"created_at" asc')
     expect(render('backward')).toContain('"id" desc')
   })
+
+  it('rejects a relation whose name collides with a column', () => {
+    expect(() =>
+      entity('Project', projects, {
+        relations: { name: { entity: UserBinding, field: projects.ownerId } },
+      }),
+    ).toThrow(/collides with a column/)
+  })
 })

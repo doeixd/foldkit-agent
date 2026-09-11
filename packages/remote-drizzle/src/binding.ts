@@ -153,15 +153,28 @@ export const entity = <const Name extends string, Table extends PgTable>(
     readonly schema?: Schema.Codec<unknown> | undefined
     readonly relations?: Readonly<Record<string, RelationConfig>> | undefined
   },
-): EntityBinding<Name, Table> => ({
-  name,
-  table,
-  columns: getTableColumns(table),
-  Schema: (options?.schema ?? createSelectSchema(table)) as SelectSchema<Table>,
-  relations: Object.fromEntries(
+): EntityBinding<Name, Table> => {
+  const columns = getTableColumns(table)
+  const relations = Object.fromEntries(
     Object.entries(options?.relations ?? {}).map(([field, config]) => [
       field,
       normalizeRelation(config),
     ]),
-  ),
-})
+  )
+  for (const field of Object.keys(relations)) {
+    // `selectColumns` gives a column priority and `source` treats the name as a
+    // relation, so a collision is silently wrong. Refuse it up front.
+    if (columns[field] !== undefined) {
+      throw new Error(
+        `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" collides with a column of the same name`,
+      )
+    }
+  }
+  return {
+    name,
+    table,
+    columns,
+    Schema: (options?.schema ?? createSelectSchema(table)) as SelectSchema<Table>,
+    relations,
+  }
+}
