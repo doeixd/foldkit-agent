@@ -41,12 +41,13 @@ export interface QueryDescriptor<Name extends string, Input, Result> {
   readonly ref: (input: Input) => QueryRef<Name, Input>
 }
 
-/** Stable stringify: object keys sorted, so equal inputs encode equally. */
+/** Stable stringify: object keys sorted, undefined-valued keys dropped, so equal inputs encode equally. */
 const stable = (value: unknown): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`
   const record = value as Record<string, unknown>
   return `{${Object.keys(record)
+    .filter(key => record[key] !== undefined)
     .sort()
     .map(key => `${JSON.stringify(key)}:${stable(record[key])}`)
     .join(',')}}`

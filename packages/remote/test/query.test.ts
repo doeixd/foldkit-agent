@@ -97,4 +97,28 @@ describe('Query and QueryRef', () => {
     const twice = Query.after('c2')(Query.after('c1')(base))
     expect(twice.window.after).toBe('c2')
   })
+
+  it('keeps the base ref window unchanged when deriving', () => {
+    const base = ProjectsByOwner.ref({ ownerId: 'u1', sort: 'newest' })
+    const derived = Query.after('c1')(Query.first(25)(base))
+
+    expect(base.window).toEqual({})
+    expect(derived.window).toEqual({ first: 25, after: 'c1' })
+  })
+
+  it('is stable across repeated refs of the same input', () => {
+    const input = { ownerId: 'u1', sort: 'newest' }
+    expect(ProjectsByOwner.ref(input).identity).toBe(ProjectsByOwner.ref(input).identity)
+  })
+
+  it('treats an absent optional field and an explicit undefined the same', () => {
+    const Optional = Query.make('OptionalInput', {
+      Input: Schema.Struct({ ownerId: Schema.String, tag: Schema.optional(Schema.String) }),
+      Result: Query.connection({ name: 'X' }),
+    })
+
+    expect(Optional.ref({ ownerId: 'u1' }).identity).toBe(
+      Optional.ref({ ownerId: 'u1', tag: undefined }).identity,
+    )
+  })
 })
