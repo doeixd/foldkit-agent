@@ -8,7 +8,7 @@
  * `drizzle-orm/effect-schema`.
  */
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
-import { getTableColumns, type Column } from 'drizzle-orm'
+import { and, gt, inArray, lt, type Column, getTableColumns, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { Schema } from 'effect'
 import type { Selection } from 'foldkit-remote'
@@ -67,3 +67,37 @@ export const relationsFor = (
   }
   return relations
 }
+
+/** A whole id batch as one `IN (...)` — the normalized-store advantage. */
+export const whereIds = (binding: EntityBinding<any, any>, ids: ReadonlyArray<string>): SQL =>
+  inArray(binding.columns.id as Column, ids as ReadonlyArray<string>)
+
+/** Cursor pagination follows a stable total order (`orderBy` + tie-breaker). */
+export const cursorCondition = (column: Column, direction: 'asc' | 'desc', cursor: unknown): SQL =>
+  direction === 'asc' ? gt(column, cursor) : lt(column, cursor)
+
+export interface QueryPlan {
+  readonly columns: ReadonlyArray<Column>
+  readonly where: SQL | undefined
+  readonly limit: number | undefined
+}
+
+/** Compiles a Query's Selection + window into pruned columns and a `where`. */
+export const queryPlan = (
+  binding: EntityBinding<any, any>,
+  selection: Selection<unknown>,
+  options: {
+    readonly where?: SQL | undefined
+    readonly cursor?: SQL | undefined
+    readonly limit?: number | undefined
+  } = {},
+): QueryPlan => ({
+  columns: columnsFor(binding, selection),
+  where:
+    options.where === undefined
+      ? options.cursor
+      : options.cursor === undefined
+        ? options.where
+        : and(options.where, options.cursor),
+  limit: options.limit,
+})

@@ -1,8 +1,16 @@
-import { text, uuid, pgTable } from 'drizzle-orm/pg-core'
+import { eq } from 'drizzle-orm'
+import { text, uuid, pgTable, PgDialect } from 'drizzle-orm/pg-core'
 import { Schema } from 'effect'
 import { Entity, Selection } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
-import { columnsFor, entity, relationsFor } from '../src/index.js'
+import {
+  columnsFor,
+  cursorCondition,
+  entity,
+  queryPlan,
+  relationsFor,
+  whereIds,
+} from '../src/index.js'
 
 const users = pgTable('users', {
   id: uuid('id').primaryKey(),
@@ -49,5 +57,31 @@ describe('RemoteDrizzle', () => {
     expect(relationsFor(ProjectBinding, selection).map(relation => relation.entity.name)).toEqual([
       'User',
     ])
+  })
+
+  it('batches ids into one IN and prunes the column list', () => {
+    const dialect = new PgDialect()
+    const sql = dialect.sqlToQuery(whereIds(UserBinding, ['a', 'b']))
+
+    expect(sql.sql).toContain('"users"."id" in')
+    expect(sql.params).toEqual(['a', 'b'])
+    expect(
+      queryPlan(UserBinding, Selection.make(User, { id: true, name: true })).columns.map(
+        column => column.name,
+      ),
+    ).toEqual(['id', 'name'])
+  })
+
+  it('renders a cursor condition and combines it with the filter', () => {
+    const dialect = new PgDialect()
+    expect(dialect.sqlToQuery(cursorCondition(projects.id, 'desc', 'c1')).sql).toContain('<')
+
+    const plan = queryPlan(ProjectBinding, Selection.make(Project, { id: true }), {
+      where: eq(projects.name, 'x'),
+      cursor: cursorCondition(projects.id, 'desc', 'c1'),
+      limit: 25,
+    })
+    expect(plan.limit).toBe(25)
+    expect(dialect.sqlToQuery(plan.where as NonNullable<typeof plan.where>).sql).toContain('and')
   })
 })
