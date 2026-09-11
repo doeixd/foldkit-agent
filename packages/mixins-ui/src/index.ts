@@ -4,6 +4,7 @@
  * `resolve` merges attached Mixins into the component's attribute bundles.
  */
 export * as Button from './button.js'
+export * as Calendar from './calendar.js'
 export * as Checkbox from './checkbox.js'
 export * as Dialog from './dialog.js'
 export * as Disclosure from './disclosure.js'
@@ -19,6 +20,7 @@ export * as Textarea from './textarea.js'
 export * as Tooltip from './tooltip.js'
 
 export { ButtonSlots } from './button.js'
+export { CalendarSlots } from './calendar.js'
 export { CheckboxSlots } from './checkbox.js'
 export { DialogSlots } from './dialog.js'
 export { DisclosureSlots } from './disclosure.js'
@@ -36,3 +38,14 @@ export { TooltipSlots } from './tooltip.js'
 export { resolveFor as resolve } from './resolve.js'
 export type { MixinList, ResolveContext, ResolvedSlots } from './resolve.js'
 export type { ResolvedTab, ResolvedTabs } from './tabs.js'
+export type {
+  ResolvedCalendar,
+  ResolvedColumnHeader,
+  ResolvedDayCell,
+  ResolvedDays,
+  ResolvedMonthCell,
+  ResolvedMonths,
+  ResolvedWeek,
+  ResolvedYearCell,
+  ResolvedYears,
+} from './calendar.js'

@@ -255,26 +255,25 @@ override even when a later attachment would otherwise win.
   (`button`/`panel`), Dialog (`dialog`/`backdrop`/`panel`/`title`/`description`/
   `initialFocus`/`closeButton`), Popover (`button`/`panel`/`backdrop`/`arrow`),
   Tooltip (`trigger`/`panel`), Slider (`root`/`track`/`filledTrack`/`thumb`/
-  `label`/`hiddenInput`), Tabs (`tablist`/`tab`/`panel`), and RadioGroup
-  (`group`/`option`/`label`/`description`/`hiddenInput`). A slot advertises the
+  `label`/`hiddenInput`), Tabs (`tablist`/`tab`/`panel`), RadioGroup
+  (`group`/`option`/`label`/`description`/`hiddenInput`), and Calendar (top-level
+  groups plus the nested `columnHeader`/`weekRow`/`dayCell`/`dayButton`/
+  `monthCell`/`monthButton`/`yearCell`/`yearButton`). A slot advertises the
   capability, events and attributes a Behavior may require; the base bundle's
   ownership is what turns taking over a click into a `mixins:event-conflict`
   rather than a second silent handler.
-- Dialog, Popover, Tooltip, Slider, Tabs and RadioGroup are Submodels: their
-  bundles are `ChildAttribute` groups carrying the child boundary's dispatcher
-  and, for Popover/Tooltip, its anchor/portal Mounts. `resolve` preserves them by
-  identity and passes `isVisible`/`activeIndex`/`selectedValue` through. All are
-  tested with `foldkit/test`'s `Scene`, which supplies a runtime frame and the
-  real `h` without a DOM, so the resolver is exercised against real
+- Dialog, Popover, Tooltip, Slider, Tabs, RadioGroup and Calendar are Submodels:
+  their bundles are `ChildAttribute` groups carrying the child boundary's
+  dispatcher and, for Popover/Tooltip, its anchor/portal Mounts. `resolve`
+  preserves them by identity and passes `isVisible`/`activeIndex`/`selectedValue`
+  through. All are tested with `foldkit/test`'s `Scene`, which supplies a runtime
+  frame and the real `h` without a DOM, so the resolver is exercised against real
   ChildAttributes — including the owned close/trigger `click`, `focus` or
   `pointerdown`.
 - **Not every component is adaptable.** `Menu`, `Listbox`, `ComboBox` and
   `DatePicker` own their markup outright: their views build the whole element
   tree internally, expose no `toView`/`RenderInfo`, and never hand the consumer
-  attribute bundles, so there is no seam for `resolve` to attach to. `Tabs`,
-  `RadioGroup` and `Calendar` publish per-item **nested** bundles
-  (`tabs[i].tab`, `options[i].option`, `weeks[].cells[].cellAttributes`) that the
-  flat `resolveFor` cannot address; those need a nested/keyed resolver first.
+  attribute bundles, so there is no seam for `resolve` to attach to.
 - **Nested bundles use `SlotView.buildersFor` directly.** `Tabs`, `RadioGroup`
   and `Calendar` publish per-item groups (`tabs[i].tab`, `options[i].option`,
   `weeks[].cells[].cellAttributes`). `resolveFor` only handles a flat record, so
@@ -297,9 +296,8 @@ override even when a later attachment would otherwise win.
 7. Mount composition. Done.
 8. A11y patterns + diagnostics. Done.
 9. `@foldkit/ui` adapter (separate package). Stateless set plus Submodels
-   Dialog/Popover/Tooltip/Slider/Tabs/RadioGroup done.
-   Menu/Listbox/ComboBox/DatePicker expose no consumer seam; Calendar needs the
-   nested resolver for its week/cell groups.
+   Dialog/Popover/Tooltip/Slider/Tabs/RadioGroup/Calendar done.
+   Menu/Listbox/ComboBox/DatePicker expose no consumer seam.
 10. Surface adapter (separate package).
 
 Style CSS compiler, DevTools, and agent metadata wait until the core
