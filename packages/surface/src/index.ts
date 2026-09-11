@@ -292,6 +292,15 @@ type MsgOf<Ms extends readonly unknown[]> = {
   readonly [K in keyof Ms]: Ms[K] extends (...args: never[]) => infer M ? M : never
 }[number]
 
+type AppMessage<Cases extends Record<string, Schema.Struct.Fields>> = Schema.Schema.Type<
+  MessageUnion<Cases>
+>
+
+/** A Message constructor whose produced Message belongs to the App's universe. */
+type MessageConstructor<Cases extends Record<string, Schema.Struct.Fields>> = (
+  ...args: never[]
+) => AppMessage<Cases>
+
 /**
  * The renderer's builder: the real `HtmlBuilder` with its private
  * `MessageUniverse` phantom removed, so the renderer's `OnClick` accepts only
@@ -325,7 +334,7 @@ export const Surface = {
     Cases extends Record<string, Schema.Struct.Fields>,
     Params = void,
     Model = unknown,
-    const Ms extends readonly unknown[] = readonly [],
+    const Ms extends readonly MessageConstructor<Cases>[] = readonly [],
   >(
     app: AppScope<Root, F, Cases>,
     name: string,

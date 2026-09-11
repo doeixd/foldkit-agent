@@ -201,6 +201,12 @@ const RemoteCard = Surface.define(RemoteApp, 'RemoteCard', {
 // @ts-expect-error `RemoteCard` belongs to a different App Root
 Surface.registry(App, [RemoteCard])
 
+Surface.define(App, 'BadCard', {
+  model: ({ model }) => Projection.struct({ name: model.session.user.name }),
+  // @ts-expect-error `RemoteMessage.Ping` is not part of App.Message
+  messages: [RemoteMessage.Ping],
+})
+
 // --- case 5: Entity.patch rejects unknown and mistyped fields --------------
 
 Entity.patch(Project.ref('p1'), { name: 'Renamed' })
