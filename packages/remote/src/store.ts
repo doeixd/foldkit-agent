@@ -17,6 +17,8 @@ export interface EntityEntry {
   readonly stale: ReadonlySet<string>
   /** The entity is known to be absent; a later write clears this. */
   readonly tombstone: boolean
+  /** Injected clock reading of the last write; never read from ambient state. */
+  readonly updatedAt: number
 }
 
 export type EntityStore = Readonly<Record<EntityKey, EntityEntry>>
@@ -29,6 +31,7 @@ const emptyEntry: EntityEntry = {
   present: new Set(),
   stale: new Set(),
   tombstone: false,
+  updatedAt: 0,
 }
 
 export const emptyStore: EntityStore = {}
@@ -46,6 +49,7 @@ export const writeEntity = (
   store: EntityStore,
   key: EntityKey,
   values: Readonly<Record<string, unknown>>,
+  now = 0,
 ): EntityStore => {
   const previous = store[key] ?? emptyEntry
   const present = new Set(previous.present)
@@ -59,6 +63,7 @@ export const writeEntity = (
     present,
     stale,
     tombstone: false,
+    updatedAt: now,
   })
 }
 
@@ -79,7 +84,13 @@ export const markStale = (
 
 /** Records that the entity is known to be absent, so it is not refetched. */
 export const tombstone = (store: EntityStore, key: EntityKey): EntityStore =>
-  replace(store, key, { values: {}, present: new Set(), stale: new Set(), tombstone: true })
+  replace(store, key, {
+    values: {},
+    present: new Set(),
+    stale: new Set(),
+    tombstone: true,
+    updatedAt: 0,
+  })
 
 /** Forgets everything known about the entity, including a tombstone. */
 export const remove = (store: EntityStore, key: EntityKey): EntityStore => {

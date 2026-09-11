@@ -9,6 +9,7 @@ import { Schema } from 'effect'
 type AnySchema = Schema.Schema<unknown>
 
 export * from './store.js'
+export * from './plan.js'
 
 // ===========================================================================
 // Entity
