@@ -1,7 +1,7 @@
-import { Option, Schema } from 'effect'
+import { Optic, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { describe, expect, it } from 'vitest'
-import { Entity, Projection, Remote, Selection, Surface } from '../src/index.js'
+import { Entity, ModelRef, Projection, Remote, Selection, Surface } from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 
@@ -21,15 +21,45 @@ const example = {
 
 describe('Surface runtime', () => {
   it('reads a nested ModelRef', () => {
-    expect(App.model.session.user.name.read(example)).toBe('ada')
+    expect(App.model.session.user.name.get(example)).toBe('ada')
   })
 
   it('reads an array field and an indexed focus as Option', () => {
-    expect(App.model.todos.read(example)).toEqual(example.todos)
-    const first = App.model.todos.index(0).read(example)
+    expect(App.model.todos.get(example)).toEqual(example.todos)
+    const first = App.model.todos.index(0).get(example)
     expect(Option.isSome(first)).toBe(true)
     expect(Option.getOrNull(first)).toEqual({ id: 't1', title: 'write the spike' })
-    expect(Option.isNone(App.model.todos.index(9).read(example))).toBe(true)
+    expect(Option.isNone(App.model.todos.index(9).get(example))).toBe(true)
+  })
+
+  it('sets a plain ModelRef focus without mutating the original', () => {
+    const next = App.model.session.user.name.set(example, 'grace')
+    expect(next).toEqual({ ...example, session: { user: { name: 'grace' } } })
+    expect(example.session.user.name).toBe('ada')
+  })
+
+  it('sets and clears an optional focus', () => {
+    const projectRef = App.model.projects.at('p1')
+    const withProject = projectRef.set(example, Option.some({ id: 'p1', name: 'Apollo' }))
+    expect(projectRef.get(withProject)).toEqual(Option.some({ id: 'p1', name: 'Apollo' }))
+    const clearedProject = projectRef.set(withProject, Option.none())
+    expect(projectRef.get(clearedProject)).toEqual(Option.none())
+
+    const todoRef = App.model.todos.index(0)
+    const replaced = todoRef.set(example, Option.some({ id: 't1', title: 'renamed' }))
+    expect(todoRef.get(replaced)).toEqual(Option.some({ id: 't1', title: 'renamed' }))
+    const removed = todoRef.set(example, Option.none())
+    expect(todoRef.get(removed)).toEqual(Option.none())
+    expect(removed.todos).toEqual([])
+  })
+
+  it('builds a ModelRef from a raw optic', () => {
+    const ref = ModelRef.fromOptic(Schema.String, Optic.id<{ name: string }>().key('name'), [
+      'name',
+    ])
+    expect(ref.get({ name: 'ada' })).toBe('ada')
+    expect(ref.set({ name: 'ada' }, 'grace')).toEqual({ name: 'grace' })
+    expect(ref.dependency).toEqual(['name'])
   })
 
   it('reads a Projection.of selection', () => {

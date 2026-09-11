@@ -3,17 +3,17 @@
  * (`*.test-d.ts` is type-checked but not executed). Every `@ts-expect-error`
  * must fail `tsc` when the rejected expression is made legal.
  */
-import { Schema } from 'effect'
+import { Optic, Schema } from 'effect'
 import type { Option } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import { defineMessageUnion } from 'foldkit/message'
 import {
   Entity,
+  ModelRef,
   Projection,
   Remote,
   Selection,
   Surface,
-  type ModelRef,
   type RemoteData,
 } from '../src/index.js'
 
@@ -51,6 +51,11 @@ const App = Surface.make({ Model, Message })
 // --- case 1: App.model tree is typed, optional accesses are Option ---------
 
 const _name: ModelRef<ModelValue, string> = App.model.session.user.name
+
+const fromOpticRef = ModelRef.fromOptic(Schema.String, Optic.id<{ name: string }>().key('name'))
+const _fromOpticName: string = fromOpticRef.get({ name: 'ada' })
+const _fromOpticNext: { readonly name: string } = fromOpticRef.set({ name: 'ada' }, 'grace')
+
 const _todos: ModelRef<
   ModelValue,
   ReadonlyArray<{ readonly id: string; readonly title: string }>

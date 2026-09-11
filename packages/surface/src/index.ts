@@ -9,7 +9,7 @@
  * Phase 1 replaces the Surface half with the real package. Phase 3 moves the
  * Entity/Selection/Remote half into `foldkit-remote`.
  */
-import { Optic, Option, Schema } from 'effect'
+import { Optic, Option, Result, Schema } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import type { MessageUnion } from 'foldkit/message'
 
@@ -21,7 +21,26 @@ export interface ModelRef<Root, Value> {
   readonly Schema: Schema.Schema<Value>
   readonly optic: Optic.Optional<Root, Value>
   readonly dependency: readonly string[]
-  readonly read: (root: Root) => Value
+  readonly get: (root: Root) => Value
+  readonly set: (root: Root, value: Value) => Root
+}
+
+/**
+ * Low-level escape hatch for a focus with no Model path of its own. Prefer the
+ * `App.model` tree; use this for an optic that is not part of the Model.
+ */
+export const ModelRef = {
+  fromOptic: <Root, Value>(
+    Schema: Schema.Schema<Value>,
+    optic: Optic.Optional<Root, Value>,
+    dependency: readonly string[] = [],
+  ): ModelRef<Root, Value> => ({
+    Schema,
+    optic,
+    dependency,
+    get: root => Result.getOrThrow(optic.getResult(root)),
+    set: (root, value) => optic.replace(value, root),
+  }),
 }
 
 export type RefTree<Root, F extends Schema.Struct.Fields> = {
@@ -84,14 +103,24 @@ function makeTree(
   schema: AnySchema,
   path: readonly string[],
   optic: Optic.Optional<unknown, unknown>,
-  read: (root: unknown) => unknown,
+  get: (root: unknown) => unknown,
   optional = false,
+  set?: (root: unknown, value: unknown) => unknown,
 ): Record<string, unknown> {
   const erasedOptic = optic as {
     key(key: string): Optic.Optional<unknown, unknown>
     at(key: string): Optic.Optional<unknown, unknown>
   }
-  const node: Record<string, unknown> = { Schema: schema, optic, dependency: path, read }
+  // `Optic.at` cannot *insert* or *remove* an absent key (`replace` is a no-op
+  // when the prism fails), so optional foci get container-aware setters below.
+  const setFocus = set ?? ((root: unknown, value: unknown): unknown => optic.replace(value, root))
+  const node: Record<string, unknown> = {
+    Schema: schema,
+    optic,
+    dependency: path,
+    get,
+    set: setFocus,
+  }
 
   const fields = (schema as { readonly fields?: Schema.Struct.Fields }).fields
   if (fields !== undefined) {
@@ -100,7 +129,7 @@ function makeTree(
         throw new Error(`Model field "${key}" is reserved by ModelRef`)
       }
       node[key] = makeTree(fields[key] as AnySchema, [...path, key], erasedOptic.key(key), root =>
-        propertyReader(read(root), key),
+        propertyReader(get(root), key),
       )
     }
   }
@@ -110,8 +139,17 @@ function makeTree(
       schema,
       [...path, key],
       erasedOptic.at(key),
-      root => optionalReader(propertyReader(read(root), key)),
+      root => optionalReader(propertyReader(get(root), key)),
       true,
+      (root, value) => {
+        const container = get(root) as Record<string, unknown>
+        const option = value as Option.Option<unknown>
+        if (Option.isSome(option)) {
+          return setFocus(root, { ...container, [key]: option.value })
+        }
+        const { [key]: _removed, ...rest } = container
+        return setFocus(root, rest)
+      },
     )
   node.index = (index: number) =>
     makeTree(
@@ -120,17 +158,25 @@ function makeTree(
       optic,
       root =>
         optionalReader(
-          Array.isArray(read(root)) ? (read(root) as ReadonlyArray<unknown>)[index] : undefined,
+          Array.isArray(get(root)) ? (get(root) as ReadonlyArray<unknown>)[index] : undefined,
         ),
       true,
+      (root, value) => {
+        const array = (Array.isArray(get(root)) ? get(root) : []) as ReadonlyArray<unknown>
+        const option = value as Option.Option<unknown>
+        const next = Option.isSome(option)
+          ? array.map((item, i) => (i === index ? option.value : item))
+          : array.filter((_, i) => i !== index)
+        return setFocus(root, next)
+      },
     )
   node.select = (projection: Projection<unknown, unknown>) => {
     const dependencies = mergeDependencies([path, ...projection.dependencies])
     return optional
       ? makeProjection(Schema.Option(projection.Model), dependencies, root =>
-          Option.map(read(root) as Option.Option<unknown>, value => projection.read(value)),
+          Option.map(get(root) as Option.Option<unknown>, value => projection.read(value)),
         )
-      : makeProjection(projection.Model, dependencies, root => projection.read(read(root)))
+      : makeProjection(projection.Model, dependencies, root => projection.read(get(root)))
   }
   return node
 }
@@ -252,7 +298,7 @@ export const Projection = {
       } else {
         picked[key] = entry.Schema
         dependencies.push(entry.dependency)
-        readers.push([key, entry.read])
+        readers.push([key, entry.get])
       }
     }
 
