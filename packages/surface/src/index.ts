@@ -357,10 +357,8 @@ export interface AppScope<
 export interface Surface<Root, Model, Message, Params> {
   readonly name: string
   readonly Params: Schema.Schema<Params> | undefined
-  readonly Model: Schema.Schema<Model>
   readonly Message: Schema.Schema<Message>
   readonly messages: readonly unknown[]
-  readonly dependencies: DependencyTree
   readonly projection: (params: Params) => Projection<Root, Model>
 }
 
@@ -429,16 +427,15 @@ export const Surface = {
       readonly messages?: Ms
     },
   ): Surface<Root, Model, MsgOf<Ms>, Params> => {
+    // Deliberately no eager `projection(undefined)`: a parameterized Surface's
+    // projection may read `params`.
     const projection = (params: Params): Projection<Root, Model> =>
       config.model({ model: app.model, params })
-    const first = projection(undefined as unknown as Params)
     return {
       name,
       Params: config.Params,
-      Model: first.Model,
       Message: Schema.Never as unknown as Schema.Schema<MsgOf<Ms>>,
       messages: config.messages ?? [],
-      dependencies: first.dependencies,
       projection,
     }
   },

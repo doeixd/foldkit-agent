@@ -501,14 +501,16 @@ Projection.read(projection, model)           // data-last: Projection.read(proje
 ```ts
 interface Surface<RootModel, Model, Message, Params> {
   readonly name: string
-  readonly Params: Schema.Schema<Params>
-  readonly Model: Schema.Schema<Model>
+  readonly Params: Schema.Schema<Params> | undefined
   readonly Message: Schema.Schema<Message>
   readonly messages: ReadonlyArray<MessageConstructor>
-  readonly dependencies: DependencyTree
   readonly projection: (params: Params) => Projection<RootModel, Model>
 }
 ```
+
+**Decision (Phase 2):** `Model` and `dependencies` are **not** stored on the
+descriptor. A parameterized projection may read `params`, so evaluating it eagerly
+with `undefined` is invalid; they are derived on demand via `projection(params)`.
 
 ```ts
 const ProjectCard = Surface.define(App, "ProjectCard", {
@@ -521,10 +523,24 @@ const ProjectCard = Surface.define(App, "ProjectCard", {
 })
 ```
 
-`Surface.read(surface, model, params)` / `Surface.read(surface, params)(model)` is
-pure. `Surface.view(surface, (model, h) => …)` infers the projected Model and
-narrows the `HtmlBuilder` to the declared Message set. `Surface.registry(App,
-[surfaces])` is explicit (no hidden global registry).
+`Surface.read(surface, model, params)` is pure. A **Renderer** is
+`(model: ProjectedModel, h: MessageNarrowedBuilder) => Html`:
+
+- `Surface.view(surface, render)` binds a Renderer to a Surface (type-level:
+  `Model` and `Message` come from the Surface). It is Model-consuming, not
+  Root-consuming, so a parent can hand a child the portion of its Model the child
+  needs.
+- `Surface.rootView(surface, params, render)` is the application boundary:
+  consume the Root Model, project it, and pass the projected Model to the
+  Renderer. A `Subset` check rejects a Surface whose Messages the app cannot route.
+- `Surface.embed(childRenderer)` composes a child: `ParentModel extends ChildModel`
+  enforces "child Model requirement ⊆ parent projected Model" and `Subset`
+  enforces "child Message set ⊆ parent Message set".
+- `Surface.registry(App, [surfaces])` is explicit (no hidden global registry).
+
+`HtmlBuilder` is invariant, so a superset builder cannot be *structurally*
+narrowed; `view`/`embed`/`rootView` cast soundly, and the subset checks are what
+make the cast safe.
 
 **Invariants**
 
@@ -1572,6 +1588,8 @@ const journal = yield* makeJournal({
 | `Projection.array`/`option` | Wrap the whole value (`ReadonlyArray<Root>→ReadonlyArray<Value>`, `Option<Root>→Option<Value>`) | Avoids accidental double-wrap; nesting stays explicit. |
 | `Surface.registry` | Explicit descriptor; throws on a duplicate `name` | No hidden global registry; fail fast. |
 | Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; a Struct field with one of these names throws when the tree is built | A field must not silently shadow a method. |
+| Surface rendering | Renderers are Model-consuming; `rootView` is the Root boundary; `embed` composes with Model and Message subset checks | A parent has its projected Model, not Root, so children must read from it structurally. |
+| Surface descriptor | No eager `Model`/`dependencies`; derive via `projection(params)` | A parameterized projection reads `params`, so eager evaluation with `undefined` is invalid. |
 
 ---
 
