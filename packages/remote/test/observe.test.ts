@@ -187,4 +187,25 @@ describe('Remote observation', () => {
     )
     expect([...messages]).toEqual([{ _tag: 'ReadError', message: 'boom' }])
   })
+
+  it('propagates a read failure from prefetch', async () => {
+    const failing = Layer.succeed(RemoteClient, {
+      read: () => Effect.fail(new RemoteReadError({ message: 'boom' })),
+      query: () => Effect.die('unused'),
+      mutate: () => Effect.die('unused'),
+      live: () => Stream.empty,
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        Remote.prefetch(AppRemote, root(), Remote.select(AppRemote, UserSummary)('u1')).pipe(
+          Effect.provide(failing),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag !== 'Failure') return
+    expect(result.failure._tag).toBe('RemoteReadError')
+  })
 })
