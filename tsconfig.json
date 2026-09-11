@@ -16,6 +16,7 @@
     { "path": "./packages/mixins-ui" },
     { "path": "./packages/mixins-surface" },
     { "path": "./examples/todo" },
-    { "path": "./examples/sync" }
+    { "path": "./examples/sync" },
+    { "path": "./examples/mixins" }
   ]
 }

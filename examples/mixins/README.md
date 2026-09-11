@@ -1,0 +1,32 @@
+# foldkit-mixins example
+
+A worked trace of the `foldkit-surface` → `foldkit-mixins` bridge. It defines a
+`ProjectCard` Surface that projects only the fields it needs and exposes only two
+of the application's Messages, then styles and decorates it with a `SlotView`.
+
+```
+pnpm --filter foldkit-mixins-example demo
+```
+
+The output is the point:
+
+```
+surface: ProjectCard
+observes: project, selection
+slots: root(Container), title(Container), status(Container), archive(Interactive)
+mixins: ProjectCardStyle, ArchiveBehavior
+projected: {"project":{"name":"Apollo","archived":true},"selection":"p1"}
+root classes: card
+root style: {"display":"grid","gap":"0.5rem"}
+status classes: archived
+archive aria-disabled: true
+```
+
+Read it as: the Surface decides what the card may observe (`project`,
+`selection`) and emit; the SlotView decides where appearance and behavior attach;
+`Style.whenInput` reads the projected input; and the Behavior reads the projected
+input, not the root Model. The root-only `internalNotes` field never reaches the
+renderer, and `DeleteProject` is not in the Surface's Message set, so a `toView`
+cannot emit it.
+
+`test/demo.test.ts` asserts every line, so the trace cannot silently drift.

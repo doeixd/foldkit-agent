@@ -45,6 +45,28 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(jsdom@26.1.0)
 
+  examples/mixins:
+    dependencies:
+      foldkit-mixins:
+        specifier: workspace:*
+        version: link:../../packages/mixins
+      foldkit-mixins-surface:
+        specifier: workspace:*
+        version: link:../../packages/mixins-surface
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../../packages/surface
+    devDependencies:
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+      foldkit:
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   examples/sync:
     dependencies:
       effect:

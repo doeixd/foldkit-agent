@@ -21,7 +21,7 @@
     "test": "vitest run",
     "bench": "vitest bench --run",
     "bench:storage": "tsx packages/durable/bench/storage.ts",
-    "demo": "pnpm build && pnpm --filter foldkit-agent-example-todo demo && pnpm --filter foldkit-agent-example-sync demo",
+    "demo": "pnpm build && pnpm --filter foldkit-agent-example-todo demo && pnpm --filter foldkit-agent-example-sync demo && pnpm --filter foldkit-mixins-example demo",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "format": "prettier --write \"**/*.{ts,json,yaml}\"",

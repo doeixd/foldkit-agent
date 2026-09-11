@@ -90,12 +90,24 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   Surface's Message subset flows into its config and a Mixin resolves around its
   bundle. Phase 10 started, not complete.
 
+### `foldkit-mixins-example` (example)
+
+- **Worked Surface + Mixins trace.** A `ProjectCard` Surface projects two fields
+  and exposes two of the application's Messages; a SlotView styles and decorates
+  it (`Style.whenInput`, a Behavior reading the projected input). The demo prints
+  the observation set, slot contracts, mixin names, projected model and resolved
+  attributes; `pnpm demo` runs it and a test asserts every line. Remote is not
+  part of this example.
+
 ### `foldkit-agent`
 
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The
-  `define` `context` option now takes a `foldkit-surface` `Projection`
-  (`Projection.of`/`struct`/`fromReader`), and the runtime reads it with `.read`.
-  `Agent.contextSchema` is unchanged.
+  `define` `context` option now takes a `foldkit-surface` projection — a read-only
+  `Projection` (`Projection.of`/`struct`/`fromReader`) or a writable
+  `Surface.pick`/`Surface.compose` — and the runtime reads it with `.read`.
+  `Agent.forApplication(App)` infers the Model from a `Surface.application` and
+  accepts either projection directly; `Agent.forModel<Model>()` remains when there
+  is no application. `Agent.contextSchema` is unchanged.
 
 ### `foldkit-durable`
 
@@ -118,12 +130,16 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 
 - **Surface-based contract.** The standalone `pick`/`Projection` (#59 spike) is
   gone, superseded by the shared Surface `ModelRef`/`Projection`.
-  `Sync.make(App, name, { documentId, initial, model, messages, replay })`
-  compiles a writable projection and the durable Message subset into the
-  low-level `defineSync` contract and returns a read-only `surface`;
-  `TodoSync.journalContract()` derives the durable operation/snapshot codecs,
-  empty snapshot, and reducer. Additive — `defineSync` remains the protocol
-  primitive. `Sync.project` now also carries the projection's dependency paths.
+  `Sync.forApplication(App, { documentId, shared, durable })` derives the shared
+  projection, the durable subset, the initial snapshot, and replay from a
+  `Surface.application`, a `Surface.pick`/`Surface.compose` projection, and a
+  `Surface.messages` subset; `Sync.make(App, name, { documentId, initial, model,
+  messages, replay })` takes an explicit projection, constructors, and a custom
+  `replay`. Both compile to the low-level `defineSync` and return a read-only
+  `surface`; `TodoSync.journalContract()` derives the durable operation/snapshot
+  codecs, empty snapshot, and reducer. Additive — `defineSync` remains the
+  protocol primitive. `Sync.project` now also carries the projection's dependency
+  paths.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.

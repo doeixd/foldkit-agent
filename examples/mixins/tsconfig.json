@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".tsbuild",
+    "emitDeclarationOnly": true,
+    "composite": true,
+    "noEmit": false,
+    "paths": {
+      "foldkit-mixins": ["../../packages/mixins/src/index.ts"],
+      "foldkit-mixins-surface": ["../../packages/mixins-surface/src/index.ts"],
+      "foldkit-surface": ["../../packages/surface/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "references": [
+    { "path": "../../packages/mixins" },
+    { "path": "../../packages/mixins-surface" },
+    { "path": "../../packages/surface" }
+  ]
+}
