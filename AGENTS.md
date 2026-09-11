@@ -148,6 +148,14 @@ installed `.d.ts` before reaching for a remembered API.
   validation but assigning it to `{}` loses the registry entry. Use a `Map` or
   a record with no prototype for capability lookups.
 
+- **A message-free dynamic value does not widen by `never`.** `Mixin<never>` is
+  not assignable to `Mixin<Message>`: `HtmlBuilder` is invariant in `Message`, so
+  a function taking `ContributionContext<never>` rejects one taking
+  `ContributionContext<Message>`. Name the message-free case in the accepted
+  union (`Mixin<Message> | StaticMixin<Message> | Mixin<never>`) rather than
+  expecting `never` to widen. A function that never mentions the Message universe
+  does widen.
+
 - **An `any` inside a generic silently disables checking.** `Parameters<>` of an
   intersection resolves to the last signature and widened every payload to
   `any`. A conditional inside a reverse mapped type is circular and quietly
