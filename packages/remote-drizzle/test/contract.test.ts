@@ -99,4 +99,66 @@ describe('RemoteDrizzle end to end', () => {
       },
     })
   })
+
+  it('serves a windowed relation page that Remote.select decodes', async () => {
+    const PageProject = Entity.make(
+      'Project',
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        comments: Entity.refPage(CommentEntity),
+      }),
+    )
+    const selection = Selection.make(PageProject, {
+      id: true,
+      name: true,
+      comments: Selection.connection(CommentEntity, { first: 1 }),
+    })
+    const { database } = fakeDatabaseQueue([
+      [{ id: 'p1', name: 'P', comments: 'p1' }],
+      [
+        { child: 'c1', parent: 'p1' },
+        { child: 'c2', parent: 'p1' },
+      ],
+    ])
+    const server = RemoteServer.make({}, { entities: [source(ProjectBinding)] })
+
+    const result = await Effect.runPromise(
+      RemoteServer.handlers(server, null)
+        .FoldkitRemoteRead({
+          requests: [
+            {
+              entity: 'Project',
+              id: 'p1',
+              fields: selection.fields,
+              windows: selection.connections,
+            },
+          ],
+        })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    const store = result.entities.reduce(
+      (current, entity) => writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
+      emptyStore,
+    )
+    const bound = {
+      store: {
+        get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),
+      },
+    } as unknown as BoundRemote<unknown, RemoteModel>
+
+    expect(Remote.select(bound, selection)('p1').read(undefined)).toEqual({
+      _tag: 'Ready',
+      value: {
+        id: 'p1',
+        name: 'P',
+        comments: {
+          refs: [{ entity: 'Comment', id: 'c1' }],
+          hasNext: true,
+          hasPrevious: false,
+        },
+      },
+    })
+  })
 })
