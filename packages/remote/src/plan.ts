@@ -6,13 +6,10 @@
  * fields, grouped and deterministically ordered. Time enters through
  * `PlanFreshness`, never from ambient state.
  */
+import type { Requirement } from 'foldkit-surface'
 import { entityKey, missingFields, type EntityStore } from './store.js'
 
-export interface Requirement {
-  readonly entity: string
-  readonly id: string
-  readonly fields: readonly string[]
-}
+export type { Requirement } from 'foldkit-surface'
 
 export interface PlanFreshness {
   readonly now: number

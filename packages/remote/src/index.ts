@@ -5,6 +5,8 @@
  * The store, planner, and wire land in later phases. Nothing here performs I/O.
  */
 import { Option, Schema, SchemaGetter } from 'effect'
+import type { ModelRef, Projection, Requirement } from 'foldkit-surface'
+import { entityKey, isTombstone, readField, type EntityStore } from './store.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -99,6 +101,7 @@ export const Entity = {
 
 export interface Selection<Value> {
   readonly entity: string
+  readonly fields: readonly string[]
   readonly schema: Schema.Schema<Value>
 }
 
@@ -128,6 +131,7 @@ export const Selection = {
     }
     return {
       entity: entity.name,
+      fields: Object.keys(selection),
       schema: Schema.Struct(picked) as unknown as Schema.Schema<SelectionValue<F, Sel>>,
     }
   },
@@ -216,6 +220,10 @@ export interface RemoteDescriptor<Model extends Schema.Struct<Schema.Struct.Fiel
   readonly Model: Model
 }
 
+export interface BoundRemote<AppModel, Store> {
+  readonly store: ModelRef<AppModel, Store>
+}
+
 export const Remote = {
   make: <const Entities extends readonly EntityDescriptor<any, any>[]>(config: {
     readonly entities: Entities
@@ -226,10 +234,38 @@ export const Remote = {
     Model: remoteModelSchema(),
   }),
 
-  select: <Model extends Schema.Struct<Schema.Struct.Fields>, Value>(
-    _remote: RemoteDescriptor<Model>,
-    _selection: Selection<Value>,
-  ): RemoteData<Value> => ({
-    _tag: 'Initial',
-  }),
+  /** Binds a Remote scope to its store's location in the application Model. */
+  at: <AppModel, Store>(
+    _definition: RemoteDescriptor<any>,
+    store: ModelRef<AppModel, Store>,
+  ): BoundRemote<AppModel, Store> => ({ store }),
+
+  /**
+   * A Projection node that reads a `RemoteData` value out of the store. The id
+   * is supplied by the caller, usually from a Surface's params.
+   */
+  select:
+    <AppModel, Store, Value>(bound: BoundRemote<AppModel, Store>, selection: Selection<Value>) =>
+    (id: string): Projection<AppModel, RemoteData<Value>> => ({
+      Model: Schema.Unknown as unknown as Schema.Schema<RemoteData<Value>>,
+      dependencies: [],
+      requirements: [{ entity: selection.entity, id, fields: selection.fields }],
+      read: (root: AppModel): RemoteData<Value> => {
+        const remote = bound.store.get(root) as unknown as { readonly entities?: EntityStore }
+        const store = remote.entities ?? {}
+        const key = entityKey(selection.entity, id)
+        if (isTombstone(store, key)) return { _tag: 'NotFound' }
+        const values: Record<string, unknown> = {}
+        for (const field of selection.fields) {
+          const value = readField(store, key, field)
+          if (Option.isNone(value)) return { _tag: 'Initial' }
+          values[field] = value.value
+        }
+        return { _tag: 'Ready', value: values as Value }
+      },
+    }),
+
+  /** The remote requirements a Projection contributes. */
+  requirements: <Root, Value>(projection: Projection<Root, Value>): readonly Requirement[] =>
+    projection.requirements,
 }

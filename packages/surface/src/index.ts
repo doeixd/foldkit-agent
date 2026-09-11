@@ -173,10 +173,15 @@ function makeTree(
   node.select = (projection: Projection<unknown, unknown>) => {
     const dependencies = mergeDependencies([path, ...projection.dependencies])
     return optional
-      ? makeProjection(Schema.Option(projection.Model), dependencies, root =>
-          Option.map(get(root) as Option.Option<unknown>, value => projection.read(value)),
+      ? makeProjection(
+          Schema.Option(projection.Model),
+          dependencies,
+          projection.requirements,
+          root => Option.map(get(root) as Option.Option<unknown>, value => projection.read(value)),
         )
-      : makeProjection(projection.Model, dependencies, root => projection.read(get(root)))
+      : makeProjection(projection.Model, dependencies, projection.requirements, root =>
+          projection.read(get(root)),
+        )
   }
   return node
 }
@@ -200,18 +205,56 @@ function mergeDependencies(dependencies: DependencyTree): DependencyTree {
   return merged
 }
 
+/**
+ * A required slice of a remote entity, contributed by a remote `Projection`
+ * node. This is dependency metadata, so it lives in Surface; Remote consumes it.
+ */
+export interface Requirement {
+  readonly entity: string
+  readonly id: string
+  readonly fields: readonly string[]
+}
+
+/** Unions requirements for the same entity + id, dropping duplicate fields. */
+function mergeRequirements(requirements: readonly Requirement[]): readonly Requirement[] {
+  const grouped = new Map<
+    string,
+    { entity: string; id: string; fields: string[]; seen: Set<string> }
+  >()
+  for (const requirement of requirements) {
+    const key = `${requirement.entity}\u0000${requirement.id}`
+    let group = grouped.get(key)
+    if (group === undefined) {
+      group = { entity: requirement.entity, id: requirement.id, fields: [], seen: new Set() }
+      grouped.set(key, group)
+    }
+    for (const field of requirement.fields) {
+      if (group.seen.has(field)) continue
+      group.seen.add(field)
+      group.fields.push(field)
+    }
+  }
+  return [...grouped.values()].map(group => ({
+    entity: group.entity,
+    id: group.id,
+    fields: group.fields,
+  }))
+}
+
 export interface Projection<Root, Value> {
   readonly Model: Schema.Schema<Value>
   readonly dependencies: DependencyTree
+  readonly requirements: readonly Requirement[]
   readonly read: (root: Root) => Value
 }
 
 function makeProjection<Value>(
   Model: Schema.Schema<Value>,
   dependencies: DependencyTree,
+  requirements: readonly Requirement[],
   read: (root: unknown) => Value,
 ): Projection<unknown, Value> {
-  return { Model, dependencies, read }
+  return { Model, dependencies, requirements, read }
 }
 
 /**
@@ -255,6 +298,7 @@ export const Projection = {
     ): Projection<Schema.Struct.Type<F>, OfValue<F, Sel>> => {
       const picked: Record<string, AnySchema> = {}
       const dependencies: (readonly string[])[] = []
+      const requirements: Requirement[] = []
       const readers: (readonly [string, (root: unknown) => unknown])[] = []
 
       for (const key of Object.keys(selection)) {
@@ -266,6 +310,7 @@ export const Projection = {
           const nested = choice as Projection<unknown, unknown>
           picked[key] = nested.Model
           dependencies.push(...nested.dependencies)
+          requirements.push(...nested.requirements)
           readers.push([key, root => nested.read(propertyReader(root, key))])
         }
       }
@@ -278,6 +323,7 @@ export const Projection = {
       return makeProjection(
         objectSchema(picked),
         mergeDependencies(dependencies),
+        mergeRequirements(requirements),
         read,
       ) as unknown as Projection<Schema.Struct.Type<F>, OfValue<F, Sel>>
     },
@@ -287,6 +333,7 @@ export const Projection = {
   ): Projection<EntryRoot<Entries[keyof Entries]>, StructValue<Entries>> => {
     const picked: Record<string, AnySchema> = {}
     const dependencies: (readonly string[])[] = []
+    const requirements: Requirement[] = []
     const readers: (readonly [string, (root: unknown) => unknown])[] = []
 
     for (const key of Object.keys(entries)) {
@@ -294,6 +341,7 @@ export const Projection = {
       if ('dependencies' in entry) {
         picked[key] = entry.Model
         dependencies.push(...entry.dependencies)
+        requirements.push(...entry.requirements)
         readers.push([key, entry.read])
       } else {
         picked[key] = entry.Schema
@@ -310,6 +358,7 @@ export const Projection = {
     return makeProjection(
       objectSchema(picked),
       mergeDependencies(dependencies),
+      mergeRequirements(requirements),
       read,
     ) as unknown as Projection<EntryRoot<Entries[keyof Entries]>, StructValue<Entries>>
   },
@@ -324,6 +373,7 @@ export const Projection = {
   ): Projection<ReadonlyArray<Root>, ReadonlyArray<Value>> => ({
     Model: Schema.Array(projection.Model),
     dependencies: projection.dependencies,
+    requirements: projection.requirements,
     read: root => root.map(value => projection.read(value)),
   }),
 
@@ -333,6 +383,7 @@ export const Projection = {
   ): Projection<Option.Option<Root>, Option.Option<Value>> => ({
     Model: Schema.Option(projection.Model),
     dependencies: projection.dependencies,
+    requirements: projection.requirements,
     read: root => Option.map(root, value => projection.read(value)),
   }),
 

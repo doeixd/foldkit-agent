@@ -1,16 +1,14 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Entity, Remote, Selection } from '../src/index.js'
+import { Entity, Selection } from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 
 describe('Remote core', () => {
-  it('builds a Selection and starts a Remote selection as Initial', () => {
-    const Data = Remote.make({ entities: [User] })
+  it('builds a Selection', () => {
     const selection = Selection.make(User, { id: true, name: true })
-
-    expect(Remote.select(Data, selection)).toEqual({ _tag: 'Initial' })
     expect(selection.entity).toBe('User')
+    expect(selection.fields).toEqual(['id', 'name'])
   })
 
   it('names entities and builds a typed ref', () => {

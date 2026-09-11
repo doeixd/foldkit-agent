@@ -1,7 +1,5 @@
 import { Schema } from 'effect'
-import { defineMessageUnion } from 'foldkit/message'
-import { Surface } from 'foldkit-surface'
-import { Entity, Remote, RemoteData, Selection, type EntityRef } from '../src/index.js'
+import { Entity, RemoteData, Selection, type EntityRef } from '../src/index.js'
 
 const User = Entity.make(
   'User',
@@ -34,25 +32,10 @@ const _ref: EntityRef<'User'> = User.ref('u1')
 
 const UserSummary = Selection.make(User, { id: true, name: true })
 const _userSummary: Selection<{ readonly id: string; readonly name: string }> = UserSummary
+const _fields: readonly string[] = UserSummary.fields
 
 // @ts-expect-error `nope` is not a field of User
 Selection.make(User, { nope: true })
-
-// --- Remote.make embeds without `any`; Remote.select is RemoteData ---------
-
-const Data = Remote.make({ entities: [User, Project] })
-const selectedUser: RemoteData<{ readonly id: string; readonly name: string }> = Remote.select(
-  Data,
-  UserSummary,
-)
-void selectedUser
-
-const RemoteModel = Schema.Struct({ remote: Data.Model, route: Schema.String })
-const RemoteMessage = defineMessageUnion({ Ping: {} })
-const RemoteApp = Surface.make({ Model: RemoteModel, Message: RemoteMessage })
-const _entities = RemoteApp.model.remote.entities
-// @ts-expect-error `nope` is not a field of the Remote store
-RemoteApp.model.remote.nope
 
 // --- Entity.patch rejects unknown and mistyped fields ----------------------
 
