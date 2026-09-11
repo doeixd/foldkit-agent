@@ -33,6 +33,7 @@ export * from './query.js'
 export * from './mutation.js'
 export * from './optimistic.js'
 export * from './live.js'
+export * from './persistence.js'
 export * from './wire.js'
 
 // ===========================================================================
