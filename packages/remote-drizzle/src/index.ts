@@ -437,6 +437,7 @@ export const source = <P = unknown>(
           ),
         ]
         const counts = new Map<string, number>()
+        const countPolicy = options?.relations?.[computed.relation]?.(context.principal)
         if (parentKeys.length > 0) {
           const count = sql<number>`count(*)`.mapWith(Number)
           const countRows =
@@ -446,7 +447,11 @@ export const source = <P = unknown>(
                   relation.entity.table,
                   { count, parent: relation.foreignKey },
                   {
-                    where: withFilters(inArray(relation.foreignKey, parentKeys), computed.where),
+                    where: withFilters(
+                      inArray(relation.foreignKey, parentKeys),
+                      computed.where,
+                      countPolicy,
+                    ),
                     groupBy: [relation.foreignKey],
                   },
                 )
@@ -455,7 +460,11 @@ export const source = <P = unknown>(
                   relation.through,
                   { count, parent: relation.localColumn },
                   {
-                    where: withFilters(inArray(relation.localColumn, parentKeys), computed.where),
+                    where: withFilters(
+                      inArray(relation.localColumn, parentKeys),
+                      computed.where,
+                      countPolicy,
+                    ),
                     innerJoin: {
                       table: relation.entity.table,
                       on: eq(relation.foreignColumn, idColumn(relation.entity)),

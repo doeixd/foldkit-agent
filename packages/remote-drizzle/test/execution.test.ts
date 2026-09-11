@@ -568,4 +568,27 @@ describe('RemoteDrizzle execution', () => {
 
     expect(records[0]!.values.commentCount).toBe(5)
   })
+
+  it('applies the principal-scoped filter to a computed count', async () => {
+    const counted = entity('Post', posts, {
+      relations: {
+        comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+      },
+      computed: { commentCount: { relation: 'comments' } },
+    })
+    const { database, calls } = fakeDatabaseQueue([[{ id: 'p1' }], [{ count: 1, parent: 'p1' }]])
+
+    await Effect.runPromise(
+      source(counted, {
+        relations: { comments: (principal: string) => eq(comments.body, principal) },
+      })
+        .read({ ids: ['p1'], fields: ['id', 'commentCount'], principal: 'ada' })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    const dialect = new PgDialect()
+    const where = dialect.sqlToQuery(calls[1]!.where as SQL)
+    expect(where.sql).toContain('"comments"."body" =')
+    expect(where.params).toContain('ada')
+  })
 })
