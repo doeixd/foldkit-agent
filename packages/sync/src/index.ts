@@ -11,6 +11,7 @@ export { DocumentId, OpId, ReplicaId, documentId, opId, replicaId } from './ids.
 export {
   CheckpointRegressionError,
   CommittedOrderError,
+  ForeignAcknowledgementError,
   ForeignRejectionError,
   InvalidOutboxError,
   InvalidReplicaHistoryError,

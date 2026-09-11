@@ -71,6 +71,19 @@ export class ForeignRejectionError extends Schema.TaggedError<ForeignRejectionEr
   },
 ) {}
 
+/**
+ * The server answered an operation this request never sent, or both
+ * acknowledged and rejected it. Acting on either would let a faulty or hostile
+ * server delete local work.
+ */
+export class ForeignAcknowledgementError extends Schema.TaggedError<ForeignAcknowledgementError>()(
+  'ForeignAcknowledgementError',
+  {
+    opId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
 /** The replica was closed while work was still being submitted. */
 export class ReplicaClosedError extends Schema.TaggedError<ReplicaClosedError>()(
   'ReplicaClosedError',
@@ -98,4 +111,5 @@ export type ReplicaError =
   | CheckpointRegressionError
   | CommittedOrderError
   | ForeignRejectionError
+  | ForeignAcknowledgementError
   | ReplicaClosedError

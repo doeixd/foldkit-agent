@@ -8,6 +8,7 @@ import {
   opId,
   replicaId,
   type Committed,
+  type Exchange,
   type Operation,
   type Replica,
   type ReplicaState,
@@ -475,5 +476,51 @@ describe('the replica', () => {
     await submit(replica, created('eggs'))
     expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2', 'a:3'])
     await close(replica)
+  })
+
+  it('refuses an acknowledgement for an operation the request never sent', async () => {
+    const replica = await open('a')
+    await submit(replica, created('first'))
+
+    let release!: (value: Exchange<Shared>) => void
+    let started!: () => void
+    const ready = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const response = new Promise<Exchange<Shared>>(resolve => {
+      release = resolve
+    })
+    const running = sync(replica, {
+      exchange: () => {
+        started()
+        return response
+      },
+    })
+    await ready
+    // A second edit lands while the first exchange is in flight.
+    await submit(replica, created('second'))
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2'])
+
+    // The server claims to have acknowledged a:2, which it was never sent. If
+    // the replica trusted it, a:2 would vanish without ever being committed.
+    release({ operations: [], acknowledged: [opId('a:1'), opId('a:2')], rejected: [] })
+    await expect(running).rejects.toThrow('acknowledged an operation that was not sent')
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2'])
+  })
+
+  it('refuses a response that both acknowledges and rejects one operation', async () => {
+    const replica = await open('a')
+    await submit(replica, created('first'))
+
+    await expect(
+      sync(replica, {
+        exchange: async () => ({
+          operations: [],
+          acknowledged: [opId('a:1')],
+          rejected: [opId('a:1')],
+        }),
+      }),
+    ).rejects.toThrow('both acknowledged and rejected')
+    expect(pending(replica).map(op => op.opId)).toEqual(['a:1'])
   })
 })

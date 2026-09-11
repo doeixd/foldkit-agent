@@ -2,6 +2,7 @@ import { Effect, Metric, Ref, Schema, SynchronizedRef } from 'effect'
 import {
   CheckpointRegressionError,
   CommittedOrderError,
+  ForeignAcknowledgementError,
   ForeignRejectionError,
   InvalidOutboxError,
   InvalidReplicaHistoryError,
@@ -426,12 +427,26 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             const acknowledged = new Set(response.acknowledged ?? [])
             const rejected = new Set(response.rejected)
             const sentIds = new Set(sent.pending.map(operation => operation.opId))
-            for (const id of rejected)
+            for (const id of acknowledged)
+              if (!sentIds.has(id))
+                return yield* new ForeignAcknowledgementError({
+                  opId: id,
+                  message: 'Server acknowledged an operation that was not sent',
+                })
+            for (const id of rejected) {
               if (!sentIds.has(id))
                 return yield* new ForeignRejectionError({
                   opId: id,
                   message: 'Server rejected an operation that was not sent',
                 })
+              // An id cannot be both; removal would be ambiguous and a faulty
+              // server must not be able to make a pending operation vanish.
+              if (acknowledged.has(id))
+                return yield* new ForeignAcknowledgementError({
+                  opId: id,
+                  message: 'Server both acknowledged and rejected an operation',
+                })
+            }
             let applied = 0
             for (const raw of response.operations) {
               const { committed: operation, message } = yield* Effect.try({
