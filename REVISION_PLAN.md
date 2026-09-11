@@ -2198,14 +2198,16 @@ Fixed in `1cbf55f`: the mutation idempotency ledger retains only the most recent
 1024 settled request ids, so `MutationState.applied`/`failed` no longer grow
 without bound. A retry older than the window would re-apply its entities.
 
+Fixed in `138e589`: `Remote.select` assembles its fields and decodes them against
+the Selection, returning `Failed`/`DecodeError` on a mismatch instead of
+asserting into `Value`; the projection now carries a real `RemoteData` schema
+rather than `Schema.Unknown`.
+
 Still open (all lower severity):
 
 - **`Projection.struct` mixes roots silently.** `EntryRoot<Entries[keyof Entries]>`
   is a union; mixing ModelRefs/Projections with different `Root`s type-checks and
   reads wrong. All entries share the Root in practice, but a guard is warranted.
-- **`Remote.select` does not decode.** It returns `values as Value` and types
-  `Model` as `Schema.Unknown`, so the projected `RemoteData` value is not
-  validated against the Selection schema. Phase 4 spike shortcut.
 - **`storeOf`/`Remote.select` cast the store shape.** A change to the Remote Model
   layout would fail silently.
 - **`live.invalidateConnection` never clears `stale`.** A later successful merge
