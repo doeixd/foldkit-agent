@@ -176,6 +176,10 @@ window because its value changed — correct.
 
 ## D3 — Relation authorization
 
+**Status: A2 landed in `d43c182` as a source-level policy.** `source(binding,
+{ relations })` filters a collection relation by principal. A1/A5 remain the
+recommendation for field-level gating; A4 (server-level policy) is still open.
+
 ### Current behaviour
 
 `authorize(principal, fields)` runs on the **owning** entity source and gates
@@ -289,7 +293,8 @@ dialects in one client is a bug factory.
    shared by `query` and relations.
 4. **D1 client accumulation (B2 -> B3, B4 long-term)** — the library-grade
    connection; design B4 together with top-level queries.
-5. **D3 (A2 row-level relation `where`)** — small, when an app needs it.
+5. **D3 (A2 row-level relation `where`)** — done (`d43c182`): a principal-scoped
+   filter per collection relation on `source`.
 6. **D4** — only when an app needs computed values.
 7. **SQL window optimization** — benchmark-driven.
 
@@ -300,7 +305,7 @@ dialects in one client is a bug factory.
 | D1 cursor | A2 single-parent, C1 id cursor | M | adapter + server | Resolved server-side (`ce7dec6`); batched relations are first/last only |
 | D1 accumulation | B2 now, B3 next, B4 long-term | L | client model | Apps own merge correctness |
 | D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
-| D3 relation authz | A1/A5 now, A2 row-level later | S–M | adapter (A2) | Reveals target ids |
+| D3 relation authz | A1/A5 field gating; A2 landed (`d43c182`) | S–M | adapter (A2) | Target ids revealed unless fields are gated |
 | D4 computed | A1 defer, A2 counts later | S–M | adapter | No aggregates |
 | Nullable ordering | NULL-aware keyset | S | cursor kernel | Resolved (`6aca3b7`) |
 | Window functions | Defer, benchmark-driven | L | database contract | N queries for N parents |
