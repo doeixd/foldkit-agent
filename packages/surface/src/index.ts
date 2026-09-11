@@ -227,10 +227,13 @@ type MsgOf<Ms extends readonly unknown[]> = {
 }[number]
 
 /**
- * `HtmlBuilder<Message>` is invariant in `Message`: its `MessageUniverse`
- * phantom is `(message: Message) => Message`. Stripping that one symbol key
- * leaves the contravariant element/attribute surface, which a builder for a
- * *superset* of Messages can satisfy.
+ * The renderer's builder: the real `HtmlBuilder` with its private
+ * `MessageUniverse` phantom removed, so the renderer's `OnClick` accepts only
+ * the Surface's Message subset. `HtmlBuilder<M>` stays invariant even without
+ * the phantom (`OnClick` returns `{ message: M }`), so a superset builder is
+ * not assignable to this; `Surface.view` casts, which is sound because the
+ * renderer can only construct subset Messages and the real builder accepts the
+ * superset.
  */
 type ViewBuilder<Message> = Omit<HtmlBuilder<Message>, keyof HtmlBuilder<never> & symbol>
 
