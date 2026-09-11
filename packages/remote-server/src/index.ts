@@ -8,12 +8,18 @@
 import { Effect, Schema } from 'effect'
 import {
   MutationResult,
+  QueryRequest,
+  QueryResult,
   ReadBatch,
   ReadBatchResult,
   RemoteMutationError,
+  RemoteQueryError,
   RemoteReadError,
+  type Boundary,
   type EntityDescriptor,
   type MutationDescriptor,
+  type QueryDescriptor,
+  type QueryWindow,
 } from 'foldkit-remote'
 
 export class RemoteServerError extends Schema.TaggedError<RemoteServerError>()(
@@ -67,9 +73,30 @@ export interface MutationSource<P> {
   >
 }
 
+export interface QueryPage {
+  readonly edges: ReadonlyArray<{
+    readonly entity: string
+    readonly id: string
+    readonly key: string
+  }>
+  readonly start: Boundary
+  readonly end: Boundary
+}
+
+export interface QuerySource<P> {
+  readonly query: string
+  readonly Input: Schema.Codec<unknown>
+  readonly run: (context: {
+    readonly input: unknown
+    readonly window: QueryWindow
+    readonly principal: P
+  }) => Effect.Effect<QueryPage, RemoteServerError>
+}
+
 export interface ServerDefinition<P> {
   readonly entities: ReadonlyMap<string, EntitySource<P>>
   readonly mutations: ReadonlyMap<string, MutationSource<P>>
+  readonly queries: ReadonlyMap<string, QuerySource<P>>
 }
 
 export const RemoteServer = {
@@ -101,15 +128,31 @@ export const RemoteServer = {
       ),
   }),
 
+  query: <P = unknown, Input = unknown>(
+    query: QueryDescriptor<string, Input, unknown>,
+    run: (context: {
+      readonly input: Input
+      readonly window: QueryWindow
+      readonly principal: P
+    }) => Effect.Effect<QueryPage, RemoteServerError>,
+  ): QuerySource<P> => ({
+    query: query.name,
+    Input: query.Input,
+    run: context =>
+      run({ input: context.input as Input, window: context.window, principal: context.principal }),
+  }),
+
   make: <P = unknown>(
     _data: unknown,
     config: {
       readonly entities: readonly EntitySource<P>[]
       readonly mutations?: readonly MutationSource<P>[]
+      readonly queries?: readonly QuerySource<P>[]
     },
   ): ServerDefinition<P> => ({
     entities: new Map(config.entities.map(source => [source.entity, source])),
     mutations: new Map((config.mutations ?? []).map(source => [source.mutation, source])),
+    queries: new Map((config.queries ?? []).map(source => [source.query, source])),
   }),
 
   /**
@@ -130,6 +173,9 @@ export const RemoteServer = {
       readonly mutation: string
       readonly input: unknown
     }) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
+    readonly FoldkitRemoteQuery: (
+      payload: Schema.Schema.Type<typeof QueryRequest>,
+    ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
   } => ({
     FoldkitRemoteRead: payload =>
       Effect.gen(function* () {
@@ -200,6 +246,25 @@ export const RemoteServer = {
             values: patch.values,
           })),
         }
+      }),
+
+    FoldkitRemoteQuery: payload =>
+      Effect.gen(function* () {
+        const source = server.queries.get(payload.query)
+        if (source === undefined) {
+          return yield* new RemoteQueryError({ message: `Unknown query: ${payload.query}` })
+        }
+
+        const input = yield* Effect.try({
+          try: () => Schema.decodeUnknownSync(source.Input)(payload.input),
+          catch: () => new RemoteQueryError({ message: 'Invalid query input' }),
+        })
+
+        const page = yield* source
+          .run({ input, window: payload.window, principal })
+          .pipe(Effect.mapError(error => new RemoteQueryError({ message: error.message })))
+
+        return { edges: page.edges, start: page.start, end: page.end }
       }),
   }),
 }

@@ -30,6 +30,8 @@ describe('Remote wire', () => {
           order.push(payload.requestId)
           return { output: { ok: true }, entities: [] }
         }),
+      FoldkitRemoteQuery: () =>
+        Effect.succeed({ edges: [], start: { _tag: 'Terminal' }, end: { _tag: 'Terminal' } }),
       FoldkitRemoteLive: () => Stream.empty,
     })
 

@@ -1,6 +1,6 @@
 import { Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
-import { Entity, Mutation, RemoteRpc } from 'foldkit-remote'
+import { Entity, Mutation, Query, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import { RemoteServer } from '../src/index.js'
 
@@ -12,6 +12,11 @@ const User = Entity.make(
 const RenameUser = Mutation.make('RenameUser', {
   Input: Schema.Struct({ id: Schema.String, name: Schema.String }),
   Output: Schema.Struct({ id: Schema.String }),
+})
+
+const ProjectsByOwner = Query.make('ProjectsByOwner', {
+  Input: Schema.Struct({ ownerId: Schema.String }),
+  Result: Query.connection({ name: 'Project' }),
 })
 
 interface Request {
@@ -48,6 +53,20 @@ const server = RemoteServer.make(
         }),
       ),
     ],
+    queries: [
+      RemoteServer.query(ProjectsByOwner, ({ input, window }) =>
+        Effect.succeed({
+          edges: [
+            { entity: 'Project', id: `p-${input.ownerId}`, key: `Project:p-${input.ownerId}` },
+          ],
+          start: { _tag: 'Terminal' as const },
+          end:
+            window.first === undefined
+              ? { _tag: 'Unknown' as const }
+              : { _tag: 'Cursor' as const, cursor: 'c1' },
+        }),
+      ),
+    ],
   },
 )
 
@@ -73,6 +92,20 @@ const mutate = (mutation: string, input: unknown) =>
       Effect.gen(function* () {
         const client = yield* RpcTest.makeClient(RemoteRpc)
         return yield* client.FoldkitRemoteMutate({ requestId: 'r1', mutation, input })
+      }),
+    ).pipe(Effect.provide(layer('user'))),
+  )
+
+const query = (
+  name: string,
+  input: unknown,
+  window: { first?: number; last?: number; after?: string; before?: string },
+) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* RpcTest.makeClient(RemoteRpc)
+        return yield* client.FoldkitRemoteQuery({ query: name, input, window })
       }),
     ).pipe(Effect.provide(layer('user'))),
   )
@@ -116,5 +149,19 @@ describe('RemoteServer', () => {
 
   it('rejects invalid mutation input at the schema boundary', async () => {
     await expect(mutate('RenameUser', { id: 'u1' })).rejects.toThrow()
+  })
+
+  it('serves a query connection page with its boundaries', async () => {
+    const result = await query('ProjectsByOwner', { ownerId: 'u1' }, { first: 25 })
+    expect(result.edges).toEqual([{ entity: 'Project', id: 'p-u1', key: 'Project:p-u1' }])
+    expect(result.start).toEqual({ _tag: 'Terminal' })
+    expect(result.end).toEqual({ _tag: 'Cursor', cursor: 'c1' })
+
+    const unknownEnd = await query('ProjectsByOwner', { ownerId: 'u1' }, {})
+    expect(unknownEnd.end).toEqual({ _tag: 'Unknown' })
+  })
+
+  it('rejects an unknown query', async () => {
+    await expect(query('Nope', {}, {})).rejects.toThrow()
   })
 })

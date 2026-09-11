@@ -20,10 +20,10 @@ export interface ConnectionSpec {
 }
 
 export interface QueryWindow {
-  readonly first?: number
-  readonly last?: number
-  readonly after?: Cursor
-  readonly before?: Cursor
+  readonly first?: number | undefined
+  readonly last?: number | undefined
+  readonly after?: Cursor | undefined
+  readonly before?: Cursor | undefined
 }
 
 export interface QueryRef<Name extends string, Input> {

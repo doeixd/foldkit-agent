@@ -75,4 +75,43 @@ export const Live = Rpc.make('FoldkitRemoteLive', {
   stream: true,
 })
 
-export const RemoteRpc = RpcGroup.make(Read, Mutate, Live)
+export class RemoteQueryError extends Schema.TaggedError<RemoteQueryError>()('RemoteQueryError', {
+  message: Schema.String,
+}) {}
+
+export const WireBoundary = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal('Terminal') }),
+  Schema.Struct({ _tag: Schema.Literal('Cursor'), cursor: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal('Unknown') }),
+])
+
+export const QueryRequest = Schema.Struct({
+  query: Schema.String,
+  input: Schema.Unknown,
+  window: Schema.Struct({
+    first: Schema.optional(Schema.Number),
+    last: Schema.optional(Schema.Number),
+    after: Schema.optional(Schema.String),
+    before: Schema.optional(Schema.String),
+  }),
+})
+
+export const QueryEdge = Schema.Struct({
+  entity: Schema.String,
+  id: Schema.String,
+  key: Schema.String,
+})
+
+export const QueryResult = Schema.Struct({
+  edges: Schema.Array(QueryEdge),
+  start: WireBoundary,
+  end: WireBoundary,
+})
+
+export const QueryRpc = Rpc.make('FoldkitRemoteQuery', {
+  payload: QueryRequest,
+  success: QueryResult,
+  error: RemoteQueryError,
+})
+
+export const RemoteRpc = RpcGroup.make(Read, Mutate, QueryRpc, Live)
