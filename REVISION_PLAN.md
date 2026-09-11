@@ -2178,7 +2178,8 @@ ships or is dropped (open question 7); the Surface-based `Sync.make` on top of
 now uses both, replacing its hand-written replica and journal contracts
 (`0cb9d0e`); `packages/sync/README.md` and `CHANGELOG.md` document the new layer
 (`717a28e`); the Foldkit runtime-binding gap and the proposed upstream hook are
-documented in `docs/sync-runtime-binding.md` (`fdd9789`); the reference-based
+documented in `docs/sync-runtime-binding.md` (`fdd9789`, with the concrete
+admission-hook proposal in `c3d6c91`); the reference-based
 selection from `packages/agent/DESIGN.md` started as `Surface.pick` over keyed,
 owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
 landed next (`8daf52b`); typed Message subsets landed as `Surface.messages`
