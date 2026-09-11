@@ -98,6 +98,15 @@ describe('Surface runtime', () => {
     expect(selected.read({ ...example, projects: {} })).toEqual(Option.none())
   })
 
+  it('rejects duplicate Surface names in a registry', () => {
+    const model = () => Projection.struct({ name: App.model.session.user.name })
+    const a = Surface.define(App, 'Card', { model, messages: [Message.Ping] })
+    const b = Surface.define(App, 'Card', { model, messages: [Message.Ping] })
+
+    expect(() => Surface.registry(App, [a, b])).toThrow('Duplicate Surface name: Card')
+    expect(Surface.registry(App, [a]).surfaces).toEqual([a])
+  })
+
   it('starts a Remote selection as Initial', () => {
     const Data = Remote.make({ entities: [User] })
     const selection = Selection.make(User, { id: true, name: true })

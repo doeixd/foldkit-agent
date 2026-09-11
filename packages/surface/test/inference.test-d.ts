@@ -169,6 +169,19 @@ const _entities = RemoteApp.model.remote.entities
 // @ts-expect-error `nope` is not a field of the Remote store
 RemoteApp.model.remote.nope
 
+const CardA = Surface.define(App, 'CardA', {
+  model: ({ model }) => Projection.struct({ name: model.session.user.name }),
+  messages: [Message.ChangedProjectName],
+})
+const _registry = Surface.registry(App, [ProjectCard, CardA])
+
+const RemoteCard = Surface.define(RemoteApp, 'RemoteCard', {
+  model: ({ model }) => Projection.struct({ route: model.route }),
+  messages: [RemoteMessage.Ping],
+})
+// @ts-expect-error `RemoteCard` belongs to a different App Root
+Surface.registry(App, [RemoteCard])
+
 // --- case 5: Entity.patch rejects unknown and mistyped fields --------------
 
 Entity.patch(Project.ref('p1'), { name: 'Renamed' })

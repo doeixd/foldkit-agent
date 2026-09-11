@@ -370,6 +370,32 @@ export const Surface = {
     return <AppMessage>(root: Root, h: HtmlBuilder<AppMessage>): Html =>
       render(projection.read(root), h as unknown as ViewBuilder<Message>)
   },
+
+  /**
+   * An explicit collection of Surfaces for one App; there is no hidden global
+   * registry. Duplicate names are rejected here so a diagnostic name cannot
+   * silently collide.
+   */
+  registry: <
+    Root,
+    F extends Schema.Struct.Fields,
+    Cases extends Record<string, Schema.Struct.Fields>,
+  >(
+    app: AppScope<Root, F, Cases>,
+    surfaces: readonly Surface<Root, any, any, any>[],
+  ): {
+    readonly app: AppScope<Root, F, Cases>
+    readonly surfaces: readonly Surface<Root, any, any, any>[]
+  } => {
+    const seen = new Set<string>()
+    for (const surface of surfaces) {
+      if (seen.has(surface.name)) {
+        throw new Error(`Duplicate Surface name: ${surface.name}`)
+      }
+      seen.add(surface.name)
+    }
+    return { app, surfaces }
+  },
 }
 
 // ===========================================================================
