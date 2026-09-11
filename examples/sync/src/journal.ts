@@ -14,14 +14,7 @@ import {
   type Operation,
   type TransportClient,
 } from 'foldkit-sync'
-import {
-  decodeShared,
-  decodeMessage,
-  encodeShared,
-  replay,
-  type Message,
-  type Shared,
-} from './app.js'
+import { decodeMessage, encodeShared, type Message, type Shared } from './app.js'
 import { Sync } from './sync.js'
 
 /** Supplied by a trusted transport, never decoded from an operation. */
@@ -86,11 +79,10 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
     try {
       return Effect.runSync(
         makeJournal<Operation, Shared, Principal>({
+          // The replica contract also produces the durable journal's codecs,
+          // initial snapshot, and replay, so they are not written twice.
+          ...Sync.journalContract(),
           file: path,
-          operation: { encode: operation => operation, decode: Sync.normalizeOperation },
-          snapshot: { encode: snapshot => snapshot, decode: decodeShared },
-          empty: () => ({ todos: [] }),
-          reduce: (snapshot, operation) => replay(snapshot, decodeMessage(operation.message)),
           opId: operation => toOpId(operation.opId),
           actorId: principal => toActorId(principal.actorId),
           validate: ({ key, operation, cursor }) => {

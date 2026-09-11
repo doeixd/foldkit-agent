@@ -59,6 +59,9 @@ importers:
       foldkit-durable:
         specifier: workspace:*
         version: link:../../packages/durable
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../../packages/surface
       foldkit-sync:
         specifier: workspace:*
         version: link:../../packages/sync

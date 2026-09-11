@@ -14,6 +14,7 @@
     "foldkit-agent": "workspace:*",
     "foldkit-durable": "workspace:*",
     "foldkit-sync": "workspace:*",
+    "foldkit-surface": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {
