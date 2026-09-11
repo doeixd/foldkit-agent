@@ -2177,7 +2177,9 @@ ships or is dropped (open question 7); the Surface-based `Sync.make` on top of
 `TodoSync.journalContract()`, not `Sync.journalContract(TodoSync)`; `examples/sync`
 now uses both, replacing its hand-written replica and journal contracts
 (`0cb9d0e`); `packages/sync/README.md` and `CHANGELOG.md` document the new layer
-(`717a28e`); work through the review findings and open questions below.
+(`717a28e`); the Foldkit runtime-binding gap and the proposed upstream hook are
+documented in `docs/sync-runtime-binding.md` (`fdd9789`); work through the review
+findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
