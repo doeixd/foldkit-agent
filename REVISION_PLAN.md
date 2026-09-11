@@ -915,9 +915,14 @@ diffs it against the cache and returns the minimal missing/stale selections.
 ```ts
 const Read   = Rpc.make("FoldkitRemoteRead",   { payload: ReadBatch,      success: ReadBatchResult, error: RemoteReadError })
 const Mutate = Rpc.make("FoldkitRemoteMutate", { payload: MutationRequest, success: MutationResult,  error: RemoteMutationError })
-const Live   = Rpc.make("FoldkitRemoteLive",   { payload: LiveRequirement, success: RpcSchema.Stream(LivePatch, RemoteLiveError), error: RemoteLiveError })
+const Live   = Rpc.make("FoldkitRemoteLive",   { payload: LiveRequirement, success: LivePatch, error: RemoteLiveError, stream: true })
 const RemoteRpc = RpcGroup.make(Read, Mutate, Live)
 ```
+
+**Verified rc.112:** `Rpc.make(tag, { payload, success, error, stream: true })` — the
+`stream: true` flag derives `RpcSchema.Stream<Success, Error>` itself; do not pass
+`success: RpcSchema.Stream(...)`. `RpcGroup.make(...rpcs)`; handlers via
+`RpcGroup.toHandlers/toLayer`; in-process tests via `RpcTest.makeClient(group)`.
 
 Verify exact syntax against rc.112.
 
@@ -1703,6 +1708,9 @@ directory (a probe from the repo root may resolve a different `effect`).
 - `Optic.at` is a **prism**, not a lens: `replace` is a no-op on an absent key, so
   it cannot insert or remove. Keyed/optional `ModelRef` writes need container-aware
   setters (Phase 1).
+- `Rpc.make` uses **`stream: true`**; it derives `RpcSchema.Stream<Success, Error>`
+  itself. Passing `success: RpcSchema.Stream(...)` is not the rc.112 form. Handlers
+  come from `RpcGroup.toLayer`; `RpcTest.makeClient(group)` is the in-process client.
 
 **Effect Schema**
 

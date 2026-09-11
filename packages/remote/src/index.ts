@@ -14,6 +14,7 @@ export * from './store.js'
 export * from './plan.js'
 export * from './connection.js'
 export * from './query.js'
+export * from './wire.js'
 
 // ===========================================================================
 // Entity
