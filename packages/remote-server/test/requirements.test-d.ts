@@ -32,22 +32,19 @@ type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Assert<Value extends true> = Value
 
 // A source's requirement is not lost when it is the only service.
-const single = RemoteServer.handlers(RemoteServer.make({}, { entities: [userSource] }), 'user')
+const single = RemoteServer.handlers(RemoteServer.make({ entities: [userSource] }), 'user')
 type _single = Assert<Equals<Requirements<ReturnType<typeof single.FoldkitRemoteRead>>, Db>>
 
 // Sources with different services need an explicit union; they cannot be
 // inferred, because a single `R` would have to be one of them.
 // @ts-expect-error Db and Cache are not the same requirement
-RemoteServer.make({}, { entities: [userSource], queries: [projectsSource] })
+RemoteServer.make({ entities: [userSource], queries: [projectsSource] })
 
 const mixed = RemoteServer.handlers(
-  RemoteServer.make<string, Db | Cache>(
-    {},
-    {
-      entities: [userSource],
-      queries: [projectsSource],
-    },
-  ),
+  RemoteServer.make<string, Db | Cache>({
+    entities: [userSource],
+    queries: [projectsSource],
+  }),
   'user',
 )
 type _read = Assert<Equals<Requirements<ReturnType<typeof mixed.FoldkitRemoteRead>>, Db | Cache>>
@@ -64,7 +61,7 @@ const renameSource = RemoteServer.mutation<string, never, 'Rename', { id: string
 )
 
 const common = RemoteServer.handlers(
-  RemoteServer.make({}, { entities: [userSource], mutations: [renameSource] }),
+  RemoteServer.make({ entities: [userSource], mutations: [renameSource] }),
   'user',
 )
 type _commonRead = Assert<Equals<Requirements<ReturnType<typeof common.FoldkitRemoteRead>>, Db>>

@@ -176,15 +176,12 @@ export const RemoteServer = {
     subscribe: options.subscribe,
   }),
 
-  make: <P = unknown, R = never>(
-    _data: unknown,
-    config: {
-      readonly entities: readonly EntitySource<P, R>[]
-      readonly mutations?: readonly MutationSource<P, R>[]
-      readonly queries?: readonly QuerySource<P, R>[]
-      readonly live?: readonly LiveSource<P, R>[]
-    },
-  ): ServerDefinition<P, R> => ({
+  make: <P = unknown, R = never>(config: {
+    readonly entities: readonly EntitySource<P, R>[]
+    readonly mutations?: readonly MutationSource<P, R>[]
+    readonly queries?: readonly QuerySource<P, R>[]
+    readonly live?: readonly LiveSource<P, R>[]
+  }): ServerDefinition<P, R> => ({
     entities: new Map(config.entities.map(source => [source.entity, source])),
     mutations: new Map((config.mutations ?? []).map(source => [source.mutation, source])),
     queries: new Map((config.queries ?? []).map(source => [source.query, source])),

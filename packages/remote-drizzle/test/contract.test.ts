@@ -67,7 +67,7 @@ describe('RemoteDrizzle end to end', () => {
       [{ id: 'p1', name: 'P', owner: 'u1', comments: 'p1' }],
       [{ child: 'c1', parent: 'p1' }],
     ])
-    const server = RemoteServer.make({}, { entities: [source(ProjectBinding)] })
+    const server = RemoteServer.make({ entities: [source(ProjectBinding)] })
     const request = { entity: 'Project', id: 'p1', fields: selection.fields }
 
     const result = await Effect.runPromise(
@@ -115,7 +115,7 @@ describe('RemoteDrizzle end to end', () => {
         { child: 'c2', parent: 'p1' },
       ],
     ])
-    const server = RemoteServer.make({}, { entities: [source(ProjectBinding)] })
+    const server = RemoteServer.make({ entities: [source(ProjectBinding)] })
     const request = {
       entity: 'Project',
       id: 'p1',

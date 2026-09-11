@@ -25,50 +25,45 @@ interface Request {
   readonly fields: ReadonlyArray<string>
 }
 
-const server = RemoteServer.make(
-  {},
-  {
-    entities: [
-      RemoteServer.entity<string>(User, {
-        authorize: (principal, fields) =>
-          principal === 'admin' ? fields : fields.filter(field => field !== 'admin'),
-        read: ({ ids, fields }) =>
-          Effect.succeed(
-            ids.map(id => ({
-              id,
-              values: Object.fromEntries(
-                fields
-                  .filter(field => field !== 'missing')
-                  .map(field => [field, field === 'admin' ? true : `${field}:${id}`]),
-              ),
-            })),
-          ),
+const server = RemoteServer.make({
+  entities: [
+    RemoteServer.entity<string>(User, {
+      authorize: (principal, fields) =>
+        principal === 'admin' ? fields : fields.filter(field => field !== 'admin'),
+      read: ({ ids, fields }) =>
+        Effect.succeed(
+          ids.map(id => ({
+            id,
+            values: Object.fromEntries(
+              fields
+                .filter(field => field !== 'missing')
+                .map(field => [field, field === 'admin' ? true : `${field}:${id}`]),
+            ),
+          })),
+        ),
+    }),
+  ],
+  mutations: [
+    RemoteServer.mutation(RenameUser, ({ input }) =>
+      Effect.succeed({
+        output: { id: input.id },
+        entities: [Entity.patch(User.ref(input.id), { name: input.name })],
       }),
-    ],
-    mutations: [
-      RemoteServer.mutation(RenameUser, ({ input }) =>
-        Effect.succeed({
-          output: { id: input.id },
-          entities: [Entity.patch(User.ref(input.id), { name: input.name })],
-        }),
-      ),
-    ],
-    queries: [
-      RemoteServer.query(ProjectsByOwner, ({ input, window }) =>
-        Effect.succeed({
-          edges: [
-            { entity: 'Project', id: `p-${input.ownerId}`, key: `Project:p-${input.ownerId}` },
-          ],
-          start: { _tag: 'Terminal' as const },
-          end:
-            window.first === undefined
-              ? { _tag: 'Unknown' as const }
-              : { _tag: 'Cursor' as const, cursor: 'c1' },
-        }),
-      ),
-    ],
-  },
-)
+    ),
+  ],
+  queries: [
+    RemoteServer.query(ProjectsByOwner, ({ input, window }) =>
+      Effect.succeed({
+        edges: [{ entity: 'Project', id: `p-${input.ownerId}`, key: `Project:p-${input.ownerId}` }],
+        start: { _tag: 'Terminal' as const },
+        end:
+          window.first === undefined
+            ? { _tag: 'Unknown' as const }
+            : { _tag: 'Cursor' as const, cursor: 'c1' },
+      }),
+    ),
+  ],
+})
 
 const layer = (principal: string) =>
   RemoteRpc.toLayer({
@@ -137,25 +132,22 @@ describe('RemoteServer', () => {
   })
 
   it('never returns a field the client did not request, even if authorize is permissive', async () => {
-    const permissive = RemoteServer.make(
-      {},
-      {
-        entities: [
-          RemoteServer.entity<string>(User, {
-            authorize: () => ['id', 'name', 'admin'],
-            read: ({ ids, fields }) =>
-              Effect.succeed(
-                ids.map(id => ({
-                  id,
-                  values: Object.fromEntries(
-                    fields.map(field => [field, field === 'admin' ? true : `${field}:${id}`]),
-                  ),
-                })),
-              ),
-          }),
-        ],
-      },
-    )
+    const permissive = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          authorize: () => ['id', 'name', 'admin'],
+          read: ({ ids, fields }) =>
+            Effect.succeed(
+              ids.map(id => ({
+                id,
+                values: Object.fromEntries(
+                  fields.map(field => [field, field === 'admin' ? true : `${field}:${id}`]),
+                ),
+              })),
+            ),
+        }),
+      ],
+    })
 
     const result = await Effect.runPromise(
       Effect.scoped(
@@ -206,16 +198,13 @@ describe('RemoteServer', () => {
   })
 
   it('remaps a source RemoteServerError onto the wire error', async () => {
-    const failing = RemoteServer.make(
-      {},
-      {
-        entities: [
-          RemoteServer.entity<string>(User, {
-            read: () => Effect.fail(new RemoteServerError({ message: 'source refused the read' })),
-          }),
-        ],
-      },
-    )
+    const failing = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          read: () => Effect.fail(new RemoteServerError({ message: 'source refused the read' })),
+        }),
+      ],
+    })
     const failingLayer = RemoteRpc.toLayer({
       ...RemoteServer.handlers(failing, 'user'),
     })
@@ -239,24 +228,21 @@ describe('RemoteServer', () => {
 
   it('groups requests per entity, unions fields, and dedupes ids', async () => {
     const calls: Array<{ ids: readonly string[]; fields: readonly string[] }> = []
-    const recording = RemoteServer.make(
-      {},
-      {
-        entities: [
-          RemoteServer.entity<string>(User, {
-            read: ({ ids, fields }) => {
-              calls.push({ ids, fields })
-              return Effect.succeed(
-                ids.map(id => ({
-                  id,
-                  values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
-                })),
-              )
-            },
-          }),
-        ],
-      },
-    )
+    const recording = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          read: ({ ids, fields }) => {
+            calls.push({ ids, fields })
+            return Effect.succeed(
+              ids.map(id => ({
+                id,
+                values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
+              })),
+            )
+          },
+        }),
+      ],
+    })
 
     const result = await Effect.runPromise(
       Effect.scoped(
@@ -299,22 +285,19 @@ describe('RemoteServer', () => {
   })
 
   it('ignores inherited properties for a crafted field name', async () => {
-    const crafted = RemoteServer.make(
-      {},
-      {
-        entities: [
-          RemoteServer.entity<string>(User, {
-            read: ({ ids }) =>
-              Effect.succeed(
-                ids.map(id => ({
-                  id,
-                  values: Object.assign(Object.create({ toString: 'leaked' }), { id }),
-                })),
-              ),
-          }),
-        ],
-      },
-    )
+    const crafted = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          read: ({ ids }) =>
+            Effect.succeed(
+              ids.map(id => ({
+                id,
+                values: Object.assign(Object.create({ toString: 'leaked' }), { id }),
+              })),
+            ),
+        }),
+      ],
+    })
 
     const result = await Effect.runPromise(
       Effect.scoped(
@@ -349,7 +332,7 @@ describe('RemoteServer', () => {
           }))
         }),
     })
-    const withTick = RemoteServer.make({}, { entities: [source] })
+    const withTick = RemoteServer.make({ entities: [source] })
 
     const result = await Effect.runPromise(
       Effect.scoped(
@@ -373,22 +356,19 @@ describe('RemoteServer', () => {
   })
 
   it('refuses a read batch that exceeds the per-entity id limit', async () => {
-    const server = RemoteServer.make(
-      {},
-      {
-        entities: [
-          RemoteServer.entity<string>(User, {
-            read: ({ ids, fields }) =>
-              Effect.succeed(
-                ids.map(id => ({
-                  id,
-                  values: Object.fromEntries(fields.map(field => [field, field])),
-                })),
-              ),
-          }),
-        ],
-      },
-    )
+    const server = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          read: ({ ids, fields }) =>
+            Effect.succeed(
+              ids.map(id => ({
+                id,
+                values: Object.fromEntries(fields.map(field => [field, field])),
+              })),
+            ),
+        }),
+      ],
+    })
     const limited = RemoteRpc.toLayer({
       ...RemoteServer.handlers(server, 'user', { maxIdsPerEntity: 2 }),
     })
@@ -416,24 +396,21 @@ describe('RemoteServer', () => {
 
   const readWithWindows = async (requests: Schema.Schema.Type<typeof ReadBatch>['requests']) => {
     const seen: Array<unknown> = []
-    const server = RemoteServer.make(
-      {},
-      {
-        entities: [
-          RemoteServer.entity<string>(User, {
-            read: ({ ids, fields, windows }) => {
-              seen.push(windows)
-              return Effect.succeed(
-                ids.map(id => ({
-                  id,
-                  values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
-                })),
-              )
-            },
-          }),
-        ],
-      },
-    )
+    const server = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          read: ({ ids, fields, windows }) => {
+            seen.push(windows)
+            return Effect.succeed(
+              ids.map(id => ({
+                id,
+                values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
+              })),
+            )
+          },
+        }),
+      ],
+    })
     const layer = RemoteRpc.toLayer({
       ...RemoteServer.handlers(server, 'user'),
     })
@@ -480,18 +457,15 @@ describe('RemoteServer', () => {
     )
 
   it('streams live patches and threads the resume cursor', async () => {
-    const liveServer = RemoteServer.make(
-      {},
-      {
-        entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
-        live: [
-          RemoteServer.live<string>(User, {
-            subscribe: ({ after }) =>
-              Stream.make({ cursor: after + 1, entity: 'User', id: 'u1', values: { name: 'ada' } }),
-          }),
-        ],
-      },
-    )
+    const liveServer = RemoteServer.make({
+      entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
+      live: [
+        RemoteServer.live<string>(User, {
+          subscribe: ({ after }) =>
+            Stream.make({ cursor: after + 1, entity: 'User', id: 'u1', values: { name: 'ada' } }),
+        }),
+      ],
+    })
 
     const patches = await collectLive(liveServer, {
       requirements: [{ entity: 'User', id: 'u1', fields: ['name'] }],
@@ -501,10 +475,9 @@ describe('RemoteServer', () => {
   })
 
   it('emits nothing for an entity with no live source', async () => {
-    const noLive = RemoteServer.make(
-      {},
-      { entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })] },
-    )
+    const noLive = RemoteServer.make({
+      entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
+    })
     const patches = await collectLive(noLive, {
       requirements: [{ entity: 'User', id: 'u1', fields: ['name'] }],
       after: 0,

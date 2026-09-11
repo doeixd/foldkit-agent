@@ -119,7 +119,7 @@ describe('RemoteDrizzle execution', () => {
 
   it('serves through RemoteServer with a provided database service', async () => {
     const { database } = fakeDatabase([{ id: 'a', name: 'A', email: 'a@b.c' }])
-    const server = RemoteServer.make({}, { entities: [source(UserBinding)] })
+    const server = RemoteServer.make({ entities: [source(UserBinding)] })
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
@@ -163,7 +163,7 @@ describe('RemoteDrizzle execution', () => {
         return { from: () => statement }
       },
     }
-    const server = RemoteServer.make({}, { entities: [source(UserBinding)] })
+    const server = RemoteServer.make({ entities: [source(UserBinding)] })
 
     const result = await Effect.runPromise(
       Effect.result(
