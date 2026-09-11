@@ -1,0 +1,153 @@
+/**
+ * Phase 0 inference contract. These assertions run under `pnpm typecheck`
+ * (`*.test-d.ts` is type-checked but not executed). Every `@ts-expect-error`
+ * must fail `tsc` when the rejected expression is made legal.
+ */
+import { Schema } from 'effect'
+import type { Option } from 'effect'
+import type { Html, HtmlBuilder } from 'foldkit/html'
+import { defineMessageUnion } from 'foldkit/message'
+import {
+  Entity,
+  Projection,
+  Remote,
+  Selection,
+  Surface,
+  type ModelRef,
+  type RemoteData,
+} from '../src/index.js'
+
+// --- fixtures --------------------------------------------------------------
+
+const User = Entity.make(
+  'User',
+  Schema.Struct({ id: Schema.String, name: Schema.String, avatarUrl: Schema.String }),
+)
+const Project = Entity.make(
+  'Project',
+  Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    status: Schema.String,
+    owner: User.schema,
+  }),
+)
+
+const Model = Schema.Struct({
+  session: Schema.Struct({ user: Schema.Struct({ name: Schema.String }) }),
+  projects: Schema.Record(Schema.String, Project.schema),
+  todos: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
+})
+type ModelValue = Schema.Schema.Type<typeof Model>
+
+const Message = defineMessageUnion({
+  ChangedProjectName: { name: Schema.String },
+  ClickedArchiveProject: {},
+})
+type AppMessage = Schema.Schema.Type<typeof Message>
+
+const App = Surface.make({ Model, Message })
+
+// --- case 1: App.model tree is typed, optional accesses are Option ---------
+
+const _name: ModelRef<ModelValue, string> = App.model.session.user.name
+const _todos: ModelRef<
+  ModelValue,
+  ReadonlyArray<{ readonly id: string; readonly title: string }>
+> = App.model.todos
+
+const _project: ModelRef<
+  ModelValue,
+  Option.Option<Schema.Schema.Type<typeof Project.schema>>
+> = App.model.projects.at('p1')
+const _todo: ModelRef<
+  ModelValue,
+  Option.Option<{ readonly id: string; readonly title: string }>
+> = App.model.todos.index(0)
+
+// @ts-expect-error `nope` is not a field of the Model
+App.model.nope
+
+// --- case 2: Projection.of checks keys and nested Projection roots ---------
+
+const UserSummary = Projection.of(User.schema)({ id: true, name: true })
+const _userSummary: Projection<
+  Schema.Schema.Type<typeof User.schema>,
+  { readonly id: string; readonly name: string }
+> = UserSummary
+
+const ProjectSummary = Projection.of(Project.schema)({
+  id: true,
+  name: true,
+  owner: UserSummary,
+})
+const _projectSummary: Projection<
+  Schema.Schema.Type<typeof Project.schema>,
+  {
+    readonly id: string
+    readonly name: string
+    readonly owner: { readonly id: string; readonly name: string }
+  }
+> = ProjectSummary
+
+// @ts-expect-error `nope` is not a field of User
+Projection.of(User.schema)({ nope: true })
+
+// @ts-expect-error the nested Projection must focus the field's own Schema (User), not Project
+Projection.of(Project.schema)({ owner: Projection.of(Project.schema)({ id: true }) })
+
+const listProjection = Projection.struct({
+  todos: App.model.todos,
+  selected: App.model.session.user.name,
+})
+const _listProjection: Projection<
+  ModelValue,
+  {
+    readonly todos: ReadonlyArray<{ readonly id: string; readonly title: string }>
+    readonly selected: string
+  }
+> = listProjection
+
+// --- case 3: Surface.view narrows the projected Model and Message set ------
+
+const ProjectCard = Surface.define(App, 'ProjectCard', {
+  model: ({ model }) => Projection.struct({ name: model.session.user.name }),
+  messages: [Message.ChangedProjectName],
+})
+
+const cardView = Surface.view(ProjectCard, (model, h) => {
+  const _cardName: string = model.name
+  h.OnClick(Message.ChangedProjectName({ name: 'x' }))
+  // @ts-expect-error `ClickedArchiveProject` is not in this Surface's Message set
+  h.OnClick(Message.ClickedArchiveProject())
+  return h.empty
+})
+
+// A builder for the superset App Message must satisfy the narrowed view.
+const _appView: (model: ModelValue, h: HtmlBuilder<AppMessage>) => Html = cardView
+
+// --- case 4: Remote.make embeds without `any`; Remote.select is RemoteData --
+
+const Data = Remote.make({ entities: [User, Project] })
+const SelectedUser = Selection.make(User, { id: true, name: true })
+const selectedUser: RemoteData<{ readonly id: string; readonly name: string }> = Remote.select(
+  Data,
+  SelectedUser,
+)
+void selectedUser
+
+const RemoteModel = Schema.Struct({ remote: Data.Model, route: Schema.String })
+const RemoteMessage = defineMessageUnion({ Ping: {} })
+const RemoteApp = Surface.make({ Model: RemoteModel, Message: RemoteMessage })
+const _entities = RemoteApp.model.remote.entities
+// @ts-expect-error `nope` is not a field of the Remote store
+RemoteApp.model.remote.nope
+
+// --- case 5: Entity.patch rejects unknown and mistyped fields --------------
+
+Entity.patch(Project.ref('p1'), { name: 'Renamed' })
+Entity.patch(Project.ref('p1'), { status: 'archived' })
+// @ts-expect-error `banana` is not a field of Project
+Entity.patch(Project.ref('p1'), { banana: 1 })
+// @ts-expect-error `status` is a string, not a number
+Entity.patch(Project.ref('p1'), { status: 123 })

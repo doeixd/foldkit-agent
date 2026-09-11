@@ -1,0 +1,44 @@
+{
+  "name": "foldkit-surface",
+  "version": "0.0.0",
+  "description": "Typed observation and capability boundaries for Foldkit: ModelRef, Projection, and Surface.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Patrick Glenn <doeixd@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doeixd/foldkit-plus.git",
+    "directory": "packages/surface"
+  },
+  "homepage": "https://github.com/doeixd/foldkit-plus/tree/main/packages/surface#readme",
+  "bugs": {
+    "url": "https://github.com/doeixd/foldkit-plus/issues"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -b"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-rc.112",
+    "foldkit": "^0.158.2"
+  },
+  "devDependencies": {
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.7.2"
+  }
+}
