@@ -5,6 +5,7 @@
  */
 export * as Button from './button.js'
 export * as Checkbox from './checkbox.js'
+export * as Dialog from './dialog.js'
 export * as Disclosure from './disclosure.js'
 export * as Fieldset from './fieldset.js'
 export * as Input from './input.js'
@@ -13,6 +14,7 @@ export * as Textarea from './textarea.js'
 
 export { ButtonSlots } from './button.js'
 export { CheckboxSlots } from './checkbox.js'
+export { DialogSlots } from './dialog.js'
 export { DisclosureSlots } from './disclosure.js'
 export { FieldsetSlots } from './fieldset.js'
 export { InputSlots } from './input.js'

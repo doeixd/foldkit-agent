@@ -23,6 +23,7 @@ export const describe = (event: EventToken): { readonly name: string } => ({
 
 export const Press = make('press')
 export const Click = make('click')
+export const Cancel = make('cancel')
 export const Input = make('input')
 export const Change = make('change')
 export const Focus = make('focus')

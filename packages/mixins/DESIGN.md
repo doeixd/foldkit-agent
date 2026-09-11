@@ -245,12 +245,19 @@ override even when a later attachment would otherwise win.
 - Published contracts: Button (`button`), Input (`input`/`label`/`description`),
   Textarea (`textarea`/`label`/`description`), Checkbox
   (`checkbox`/`label`/`description`/`hiddenInput`), Switch, Fieldset
-  (`fieldset`/`legend`/`description`), and Disclosure (`button`/`panel`). A slot
-  advertises the capability, events and attributes a Behavior may require; the
-  base bundle's ownership is what turns taking over a click into a
-  `mixins:event-conflict` rather than a second silent handler.
-- The later component set (Dialog, Menu, Tabs, ComboBox, ...) and the Surface
-  adapter remain.
+  (`fieldset`/`legend`/`description`), Disclosure (`button`/`panel`), and
+  Dialog (`dialog`/`backdrop`/`panel`/`title`/`description`/`initialFocus`/
+  `closeButton`). A slot advertises the capability, events and attributes a
+  Behavior may require; the base bundle's ownership is what turns taking over a
+  click into a `mixins:event-conflict` rather than a second silent handler.
+- Dialog is a Submodel: its bundles are `ChildAttribute` groups carrying the
+  dialog boundary's dispatcher. `Dialog.resolve` preserves them by identity and
+  passes `isVisible` through. It is tested with `foldkit/test`'s `Scene`, which
+  supplies a runtime frame and the real `h` without a DOM, so the resolver is
+  exercised against real ChildAttributes — including the close button's owned
+  `click`.
+- The remaining Submodels (Menu, Tabs, ComboBox, ...) and the Surface adapter
+  remain.
 
 ## Phase plan (this package)
 
@@ -263,8 +270,8 @@ override even when a later attachment would otherwise win.
 6. Behavior v1 (no hidden state). Done.
 7. Mount composition. Done.
 8. A11y patterns + diagnostics. Done.
-9. `@foldkit/ui` adapter (separate package). Button/Input/Textarea/Checkbox/
-   Switch/Fieldset/Disclosure done; Submodel components remain.
+9. `@foldkit/ui` adapter (separate package). Stateless set + Dialog (Submodel)
+   done; further Submodel components remain.
 10. Surface adapter (separate package).
 
 Style CSS compiler, DevTools, and agent metadata wait until the core

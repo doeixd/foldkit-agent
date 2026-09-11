@@ -54,6 +54,11 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   Messages and `ChildAttribute`s are preserved; a Behavior cannot take over an
   event the component already owns. The remaining components and the Surface
   adapter are not in this slice.
+- **Submodel adapter.** Dialog's seven `ChildAttribute` groups are published as
+  `DialogSlots`; `resolve` preserves them by identity and passes `isVisible`
+  through. Tested DOM-free with `foldkit/test`'s `Scene`, so real
+  ChildAttributes exercise the resolver, including the close button's owned
+  `click`. `Event.Cancel` was added for the dialog's Escape handler.
 
 ### `foldkit-agent`
 
