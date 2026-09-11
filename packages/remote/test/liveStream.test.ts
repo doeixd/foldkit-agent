@@ -9,7 +9,9 @@ import {
   RemoteLiveError,
   Selection,
   emptyStore,
+  initialRemoteModel,
   type LiveEvent,
+  type RemoteMessage,
 } from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
@@ -35,7 +37,7 @@ const UserPage = Surface.define(App, 'UserPage', {
 })
 
 const root = {
-  remote: { entities: emptyStore, connections: {}, requests: {}, mutations: {} },
+  remote: { ...initialRemoteModel, entities: emptyStore },
 }
 
 const patched: LiveEvent = {
@@ -46,19 +48,19 @@ const patched: LiveEvent = {
   cursor: 1,
 }
 
-const toMessage = (event: LiveEvent): LiveMessageType =>
-  LiveMessage.Patched({ cursor: event.cursor })
-const onResumeUnavailable = (error: RemoteLiveError): LiveMessageType =>
-  LiveMessage.ResumeUnavailable({ message: error.message })
+const toMessage = (message: RemoteMessage): LiveMessageType => {
+  switch (message._tag) {
+    case 'LiveReceived':
+      return LiveMessage.Patched({ cursor: message.event.cursor })
+    case 'ReadFailed':
+    case 'MutationFailed':
+      return LiveMessage.ResumeUnavailable({ message: message.error.message })
+    default:
+      throw new Error(`unexpected remote message: ${message._tag}`)
+  }
+}
 
-const entry = Remote.live(
-  AppRemote,
-  UserPage,
-  { userId: 'u1' },
-  { cursor: () => 0 },
-  toMessage,
-  onResumeUnavailable,
-)
+const entry = Remote.live(AppRemote, UserPage, { userId: 'u1' }, { cursor: () => 0 }, toMessage)
 
 const dependencies = entry.modelToDependencies(root)
 

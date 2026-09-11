@@ -114,12 +114,15 @@ export const applyEntityEvent = (
   state: LiveState,
   store: EntityStore,
   event: Extract<LiveEvent, { _tag: 'EntityPatched' | 'EntityDeleted' }>,
+  now = 0,
 ): EntityApplied => {
   const outcome = classifyLive(state, event.cursor)
   if (outcome !== 'applied') return { state, store, outcome }
   const key = entityKey(event.ref.entity, event.ref.id)
   const next =
-    event._tag === 'EntityPatched' ? writeEntity(store, key, event.values) : tombstone(store, key)
+    event._tag === 'EntityPatched'
+      ? writeEntity(store, key, event.values, now)
+      : tombstone(store, key)
   return { state: advance(state, event.cursor), store: next, outcome }
 }
 

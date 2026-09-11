@@ -8,6 +8,7 @@ import {
   Selection,
   emptyStore,
   entityKey,
+  initialRemoteModel,
   plan,
   tombstone,
   writeEntity,
@@ -27,7 +28,7 @@ const UserSummary = Selection.make(User, { id: true, name: true })
 const selectUser = Remote.select(AppRemote, UserSummary)
 
 const root = (store = emptyStore) => ({
-  remote: { entities: store, connections: {}, requests: {}, mutations: {} },
+  remote: { ...initialRemoteModel, entities: store },
   route: '/users/u1',
 })
 
@@ -77,9 +78,7 @@ describe('Remote and Surface', () => {
     })
 
     const projection = UserPage.projection({ userId: 'u1' })
-    expect(projection.requirements).toEqual([
-      { entity: 'User', id: 'u1', fields: ['id', 'name'] },
-    ])
+    expect(projection.requirements).toEqual([{ entity: 'User', id: 'u1', fields: ['id', 'name'] }])
 
     const store = emptyStore
     expect(projection.read(root(store))).toEqual({

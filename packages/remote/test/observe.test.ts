@@ -4,15 +4,16 @@ import { Projection, Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
-  ReadBatchResult,
   Remote,
   RemoteClient,
   RemoteReadError,
   Selection,
   emptyStore,
   entityKey,
+  initialRemoteModel,
   readField,
   writeEntity,
+  type RemoteMessage,
 } from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
@@ -58,7 +59,7 @@ const FakeClient = Layer.succeed(RemoteClient, {
 })
 
 const root = (store = emptyStore) => ({
-  remote: { entities: store, connections: {}, requests: {}, mutations: {} },
+  remote: { ...initialRemoteModel, entities: store },
   route: '/users/u1',
 })
 
@@ -76,16 +77,22 @@ const ObserveMessage = defineMessageUnion({
 })
 type ObserveMessageType = Schema.Schema.Type<typeof ObserveMessage>
 
-const toMessage = (result: Schema.Schema.Type<typeof ReadBatchResult>): ObserveMessageType =>
-  ObserveMessage.Batch({
-    entities: result.entities as ReadonlyArray<{
-      readonly entity: string
-      readonly id: string
-      readonly values: Record<string, unknown>
-    }>,
-  })
-const onError = (error: RemoteReadError): ObserveMessageType =>
-  ObserveMessage.ReadError({ message: error.message })
+const toMessage = (message: RemoteMessage): ObserveMessageType => {
+  switch (message._tag) {
+    case 'ReadReceived':
+      return ObserveMessage.Batch({
+        entities: message.result.entities as ReadonlyArray<{
+          readonly entity: string
+          readonly id: string
+          readonly values: Record<string, unknown>
+        }>,
+      })
+    case 'ReadFailed':
+      return ObserveMessage.ReadError({ message: message.error.message })
+    default:
+      throw new Error(`unexpected remote message: ${message._tag}`)
+  }
+}
 
 describe('Remote observation', () => {
   it('plans missing fields purely; render does no I/O', () => {
@@ -139,7 +146,7 @@ describe('Remote observation', () => {
 
   it('exposes a Foldkit Subscription entry that fetches the plan', async () => {
     calls.length = 0
-    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage, onError)
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage)
     const dependencies = entry.modelToDependencies(root())
     expect(dependencies.requirements).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
@@ -160,7 +167,7 @@ describe('Remote observation', () => {
   it('emits no stream when the Surface is fully known', async () => {
     calls.length = 0
     const store = writeEntity(emptyStore, entityKey('User', 'u1'), { id: 'u1', name: 'ada' })
-    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage, onError)
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage)
     const dependencies = entry.modelToDependencies(root(store))
     expect(dependencies.requirements).toEqual([])
 
@@ -178,7 +185,7 @@ describe('Remote observation', () => {
       mutate: () => Effect.die('unused'),
       live: () => Stream.empty,
     })
-    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage, onError)
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, toMessage)
 
     const messages = await Effect.runPromise(
       Stream.runCollect(entry.dependenciesToStream(entry.modelToDependencies(root()))).pipe(

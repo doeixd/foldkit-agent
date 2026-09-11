@@ -56,10 +56,14 @@ export const MutationResult = Schema.Struct({
   entities: Schema.Array(NormalizedEntity),
 })
 
-export const LiveRequirement = Schema.Struct({ requirements: Schema.Array(ReadRequest) })
+export const LiveRequirement = Schema.Struct({
+  requirements: Schema.Array(ReadRequest),
+  /** Resume cursor; events at or before it are duplicates. */
+  after: Schema.Number,
+})
 
 export const LivePatch = Schema.Struct({
-  cursor: Schema.String,
+  cursor: Schema.Number,
   entity: Schema.String,
   id: Schema.String,
   values: Schema.Record(Schema.String, Schema.Unknown),

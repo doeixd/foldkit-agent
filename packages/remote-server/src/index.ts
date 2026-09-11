@@ -5,22 +5,26 @@
  * turning them into Effect RPC handlers. It does not own HTTP, serialization, or
  * auth protocol; `principal` is resolved outside and passed in.
  */
-import { Effect, Schema } from 'effect'
+import { Effect, Schema, Stream } from 'effect'
 import {
   MutationResult,
   QueryRequest,
   QueryResult,
   ReadBatch,
   ReadBatchResult,
+  RemoteLiveError,
   RemoteMutationError,
   RemoteQueryError,
   RemoteReadError,
   type Boundary,
   type EntityDescriptor,
+  type LivePatch,
+  type LiveRequirement,
   type MutationDescriptor,
   type NormalizedPatch,
   type QueryDescriptor,
   type QueryWindow,
+  type ReadRequest,
 } from 'foldkit-remote'
 
 export class RemoteServerError extends Schema.TaggedError<RemoteServerError>()(
@@ -91,10 +95,20 @@ export interface QuerySource<P, R = never> {
   }) => Effect.Effect<QueryPage, RemoteServerError, R>
 }
 
+export interface LiveSource<P, R = never> {
+  readonly entity: string
+  readonly subscribe: (context: {
+    readonly requirements: ReadonlyArray<Schema.Schema.Type<typeof ReadRequest>>
+    readonly after: number
+    readonly principal: P
+  }) => Stream.Stream<Schema.Schema.Type<typeof LivePatch>, RemoteServerError, R>
+}
+
 export interface ServerDefinition<P, R = never> {
   readonly entities: ReadonlyMap<string, EntitySource<P, R>>
   readonly mutations: ReadonlyMap<string, MutationSource<P, R>>
   readonly queries: ReadonlyMap<string, QuerySource<P, R>>
+  readonly live: ReadonlyMap<string, LiveSource<P, R>>
 }
 
 /** A read batch may not carry more than this many distinct ids per entity. */
@@ -153,17 +167,28 @@ export const RemoteServer = {
       run({ input: context.input as Input, window: context.window, principal: context.principal }),
   }),
 
+  /** Streams live entity patches for a client's live requirements. */
+  live: <P = unknown, R = never>(
+    entity: EntityDescriptor<any, any>,
+    options: { readonly subscribe: LiveSource<P, R>['subscribe'] },
+  ): LiveSource<P, R> => ({
+    entity: entity.name,
+    subscribe: options.subscribe,
+  }),
+
   make: <P = unknown, R = never>(
     _data: unknown,
     config: {
       readonly entities: readonly EntitySource<P, R>[]
       readonly mutations?: readonly MutationSource<P, R>[]
       readonly queries?: readonly QuerySource<P, R>[]
+      readonly live?: readonly LiveSource<P, R>[]
     },
   ): ServerDefinition<P, R> => ({
     entities: new Map(config.entities.map(source => [source.entity, source])),
     mutations: new Map((config.mutations ?? []).map(source => [source.mutation, source])),
     queries: new Map((config.queries ?? []).map(source => [source.query, source])),
+    live: new Map((config.live ?? []).map(source => [source.entity, source])),
   }),
 
   /**
@@ -188,6 +213,9 @@ export const RemoteServer = {
     readonly FoldkitRemoteQuery: (
       payload: Schema.Schema.Type<typeof QueryRequest>,
     ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
+    readonly FoldkitRemoteLive: (
+      payload: Schema.Schema.Type<typeof LiveRequirement>,
+    ) => Stream.Stream<Schema.Schema.Type<typeof LivePatch>, RemoteLiveError, R>
   } => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
       const grouped = new Map<
@@ -328,5 +356,25 @@ export const RemoteServer = {
 
       return { edges: page.edges, start: page.start, end: page.end }
     }),
+
+    FoldkitRemoteLive: payload => {
+      const entities = [...new Set(payload.requirements.map(request => request.entity))]
+      const streams = entities.flatMap(entity => {
+        const source = server.live.get(entity)
+        if (source === undefined) return []
+        return [
+          source.subscribe({
+            requirements: payload.requirements.filter(request => request.entity === entity),
+            after: payload.after,
+            principal,
+          }),
+        ]
+      })
+      // An entity with no live source simply contributes nothing; the client's
+      // planner refetches it rather than the stream failing.
+      return Stream.mergeAll(streams, { concurrency: 'unbounded' }).pipe(
+        Stream.mapError(error => new RemoteLiveError({ message: error.message })),
+      )
+    },
   }),
 }

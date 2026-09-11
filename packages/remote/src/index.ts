@@ -8,11 +8,43 @@
 import { Context, Effect, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
 import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
-import { entityKey, isTombstone, readField, writeEntity, type EntityStore } from './store.js'
-import { plan, windowKey } from './plan.js'
+import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
+import {
+  addLayer,
+  emptyOptimistic,
+  removeLayer,
+  type EntityLayer,
+  type Optimistic,
+} from './optimistic.js'
+import {
+  applyConnectionEvent,
+  applyEntityEvent,
+  emptyLiveState,
+  type LiveCursor,
+  type LiveEvent,
+  type LiveState,
+} from './live.js'
+import {
+  beginMutation,
+  emptyMutationState,
+  failMutation,
+  reconcileMutation,
+  type MutationState,
+  type NormalizedPatch,
+} from './mutation.js'
+import {
+  entityKey,
+  emptyStore,
+  isTombstone,
+  readField,
+  writeEntity,
+  type EntityStore,
+} from './store.js'
+import { plan, windowKey, type PlanFreshness } from './plan.js'
 import {
   MutationRequest,
   MutationResult,
+  NormalizedEntity,
   QueryRequest,
   QueryResult,
   ReadBatch,
@@ -22,9 +54,9 @@ import {
   RemoteMutationError,
   RemoteQueryError,
   RemoteReadError,
+  RemoteRpc,
 } from './wire.js'
-import type { LiveCursor, LiveEvent } from './live.js'
-import type { QueryWindow } from './query.js'
+import type { LivePolicy, QueryDescriptor, QueryWindow } from './query.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -361,45 +393,258 @@ export const RemoteData = {
   },
 }
 
-/** The Remote scope's slot in the application Model. */
+/**
+ * The Remote scope's slot in the application Model. `Remote.make` returns a
+ * schema and an `update` for this shape, so the normalized cache is an ordinary
+ * Foldkit Submodel: reads, mutation results, live events, and optimistic layers
+ * all reconcile through `Remote.update`.
+ */
 export interface RemoteModel {
+  /** Entity values, presence, staleness, tombstones, and applied windows. */
   readonly entities: EntityStore
-  readonly connections: Readonly<Record<string, unknown>>
-  readonly requests: Readonly<Record<string, unknown>>
-  readonly mutations: Readonly<Record<string, unknown>>
+  /** Normalized ordered connections, keyed by connection identity. */
+  readonly connections: Readonly<Record<string, Connection>>
+  /** Optimistic entity layers and connection overlays over the base store. */
+  readonly optimistic: Optimistic
+  /** Live cursor and boundary state, keyed by the subscription's stream key. */
+  readonly live: Readonly<Record<string, LiveState>>
+  /** Mutation pending/applied/failed ledger. */
+  readonly mutations: MutationState
+  /** Streams whose live cursor fell behind; the caller should resync or refetch. */
+  readonly gaps: ReadonlySet<string>
 }
+
+export const initialRemoteModel: RemoteModel = {
+  entities: emptyStore,
+  connections: {},
+  optimistic: emptyOptimistic,
+  live: {},
+  mutations: emptyMutationState,
+  gaps: new Set(),
+}
+
+/** The entity store and the mutation ledger are runtime values, not wire shapes. */
+const runtimeSchema = Schema.Unknown
+
+const remoteModelSchema = (): Schema.Schema<RemoteModel> =>
+  Schema.Struct({
+    entities: runtimeSchema,
+    connections: Schema.Record(Schema.String, runtimeSchema),
+    optimistic: runtimeSchema,
+    live: Schema.Record(Schema.String, runtimeSchema),
+    mutations: runtimeSchema,
+    gaps: runtimeSchema,
+  }) as unknown as Schema.Schema<RemoteModel>
 
 /**
- * `EntityStore` is a runtime value (Sets and all), not a wire shape, and the
- * store is built in memory rather than decoded. This schema carries the layout
- * for `RemoteModel` without pretending to validate the entries.
+ * The Remote submodel's Messages. The four producers of new facts — a read
+ * batch, a mutation result, a live event, and an optimistic layer — all reduce
+ * to `RemoteModel` through `Remote.update`.
  */
-const entityStoreSchema = Schema.Unknown as unknown as Schema.Schema<EntityStore>
+export type RemoteMessage =
+  | {
+      readonly _tag: 'ReadReceived'
+      readonly requests: readonly Requirement[]
+      readonly result: Schema.Schema.Type<typeof ReadBatchResult>
+      readonly now: number
+    }
+  | {
+      readonly _tag: 'ReadFailed'
+      readonly requests: readonly Requirement[]
+      readonly error: RemoteError
+    }
+  | { readonly _tag: 'MutationStarted'; readonly requestId: string }
+  | {
+      readonly _tag: 'MutationSucceeded'
+      readonly requestId: string
+      readonly entities: readonly NormalizedPatch[]
+    }
+  | { readonly _tag: 'MutationFailed'; readonly requestId: string; readonly error: RemoteError }
+  | {
+      readonly _tag: 'LiveReceived'
+      readonly stream: string
+      readonly event: LiveEvent
+      readonly policy?: LivePolicy
+      readonly now: number
+    }
+  | { readonly _tag: 'ConnectionMerged'; readonly connection: string; readonly page: Segment }
+  | { readonly _tag: 'ConnectionInvalidated'; readonly connection: string }
+  | { readonly _tag: 'ConnectionRefreshed'; readonly connection: string }
+  | { readonly _tag: 'OptimisticAdded'; readonly layer: EntityLayer }
+  | { readonly _tag: 'OptimisticRemoved'; readonly id: string }
 
-const remoteModelSchema = (): Schema.Struct<{
-  readonly entities: Schema.Schema<EntityStore>
-  readonly connections: Schema.Schema<Readonly<Record<string, unknown>>>
-  readonly requests: Schema.Schema<Readonly<Record<string, unknown>>>
-  readonly mutations: Schema.Schema<Readonly<Record<string, unknown>>>
-}> =>
+const remoteMessageSchema = Schema.Union([
   Schema.Struct({
-    entities: entityStoreSchema,
-    connections: Schema.Record(Schema.String, Schema.Unknown),
-    requests: Schema.Record(Schema.String, Schema.Unknown),
-    mutations: Schema.Record(Schema.String, Schema.Unknown),
-  })
+    _tag: Schema.Literal('ReadReceived'),
+    requests: Schema.Array(ReadRequest),
+    result: ReadBatchResult,
+    now: Schema.Number,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('ReadFailed'),
+    requests: Schema.Array(ReadRequest),
+    error: remoteErrorSchema,
+  }),
+  Schema.Struct({ _tag: Schema.Literal('MutationStarted'), requestId: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.Literal('MutationSucceeded'),
+    requestId: Schema.String,
+    entities: Schema.Array(NormalizedEntity),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('MutationFailed'),
+    requestId: Schema.String,
+    error: remoteErrorSchema,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('LiveReceived'),
+    stream: Schema.String,
+    event: Schema.Unknown,
+    policy: Schema.optional(Schema.Unknown),
+    now: Schema.Number,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('ConnectionMerged'),
+    connection: Schema.String,
+    page: Schema.Unknown,
+  }),
+  Schema.Struct({ _tag: Schema.Literal('ConnectionInvalidated'), connection: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal('ConnectionRefreshed'), connection: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal('OptimisticAdded'), layer: Schema.Unknown }),
+  Schema.Struct({ _tag: Schema.Literal('OptimisticRemoved'), id: Schema.String }),
+]) as unknown as Schema.Schema<RemoteMessage>
 
-export interface RemoteDescriptor<Model extends Schema.Struct<Schema.Struct.Fields>> {
-  readonly entities: readonly unknown[]
-  readonly Model: Model
+const setConnectionStale = (
+  connections: Readonly<Record<string, Connection>>,
+  connection: string,
+  stale: boolean,
+): Readonly<Record<string, Connection>> => {
+  const current = connections[connection] ?? emptyConnection
+  return { ...connections, [connection]: { ...current, stale } }
 }
 
-export interface BoundRemote<AppModel, Store extends RemoteModel> {
+const markGap = (model: RemoteModel, stream: string): RemoteModel =>
+  model.gaps.has(stream) ? model : { ...model, gaps: new Set([...model.gaps, stream]) }
+
+/**
+ * The pure reducer all four producers share. A live event that arrives ahead of
+ * its cursor is a gap: it is not applied, and the stream is recorded so the host
+ * can resubscribe rather than silently miss facts.
+ */
+export const updateRemote = (model: RemoteModel, message: RemoteMessage): RemoteModel => {
+  switch (message._tag) {
+    case 'ReadReceived':
+      return {
+        ...model,
+        entities: writeRead(model.entities, message.requests, message.result, message.now),
+      }
+    case 'ReadFailed':
+      return model
+    case 'MutationStarted':
+      return { ...model, mutations: beginMutation(model.mutations, message.requestId) }
+    case 'MutationSucceeded': {
+      const reconciled = reconcileMutation(
+        model.entities,
+        model.mutations,
+        message.requestId,
+        message.entities,
+      )
+      // Settling the layer is remove-the-layer, so overlapping optimistic layers
+      // rebase instead of needing inverse patches.
+      return {
+        ...model,
+        entities: reconciled.store,
+        mutations: reconciled.state,
+        optimistic: removeLayer(model.optimistic, message.requestId),
+      }
+    }
+    case 'MutationFailed':
+      return {
+        ...model,
+        mutations: failMutation(model.mutations, message.requestId),
+        optimistic: removeLayer(model.optimistic, message.requestId),
+      }
+    case 'LiveReceived': {
+      const state = model.live[message.stream] ?? emptyLiveState
+      if (message.event._tag === 'EntityPatched' || message.event._tag === 'EntityDeleted') {
+        const applied = applyEntityEvent(state, model.entities, message.event, message.now)
+        return applied.outcome === 'gap'
+          ? markGap(model, message.stream)
+          : {
+              ...model,
+              entities: applied.store,
+              live: { ...model.live, [message.stream]: applied.state },
+            }
+      }
+      const applied = applyConnectionEvent(state, model.optimistic, message.event, message.policy)
+      return applied.outcome === 'gap'
+        ? markGap(model, message.stream)
+        : {
+            ...model,
+            optimistic: applied.optimistic,
+            live: { ...model.live, [message.stream]: applied.state },
+          }
+    }
+    case 'ConnectionMerged': {
+      const current = model.connections[message.connection] ?? emptyConnection
+      return {
+        ...model,
+        connections: { ...model.connections, [message.connection]: merge(current, message.page) },
+      }
+    }
+    case 'ConnectionInvalidated':
+      return {
+        ...model,
+        connections: setConnectionStale(model.connections, message.connection, true),
+      }
+    case 'ConnectionRefreshed':
+      return {
+        ...model,
+        connections: setConnectionStale(model.connections, message.connection, false),
+      }
+    case 'OptimisticAdded':
+      return { ...model, optimistic: addLayer(model.optimistic, message.layer) }
+    case 'OptimisticRemoved':
+      return { ...model, optimistic: removeLayer(model.optimistic, message.id) }
+  }
+}
+
+type EntityName<D> = D extends EntityDescriptor<infer Name, any> ? Name : never
+
+export interface RemoteDescriptor<
+  Entities extends readonly EntityDescriptor<any, any>[] = readonly EntityDescriptor<any, any>[],
+  Queries extends readonly QueryDescriptor<any, any, any>[] = readonly QueryDescriptor<
+    any,
+    any,
+    any
+  >[],
+  Mutations extends readonly MutationDescriptor<any, any, any>[] = readonly MutationDescriptor<
+    any,
+    any,
+    any
+  >[],
+> {
+  readonly entities: Entities
+  readonly queries: Queries
+  readonly mutations: Mutations
+  readonly Model: Schema.Schema<RemoteModel>
+  readonly initial: RemoteModel
+  readonly Message: Schema.Schema<RemoteMessage>
+  readonly update: (model: RemoteModel, message: RemoteMessage) => RemoteModel
+  readonly rpc: typeof RemoteRpc
+}
+
+declare const boundRemoteNames: unique symbol
+
+export interface BoundRemote<AppModel, Store extends RemoteModel, Names extends string = string> {
+  readonly definition: RemoteDescriptor
   readonly store: ModelRef<AppModel, Store>
+  /** Phantom: the entity names this Remote definition registers. */
+  readonly [boundRemoteNames]?: Names
 }
 
-const storeOf = <AppModel, Store extends RemoteModel>(
-  bound: BoundRemote<AppModel, Store>,
+const storeOf = <AppModel, Store extends RemoteModel, Names extends string>(
+  bound: BoundRemote<AppModel, Store, Names>,
   model: AppModel,
 ): EntityStore => bound.store.get(model).entities
 
@@ -512,21 +757,98 @@ const writeRead = (
   }, store)
 }
 
+const remoteError = (error: { readonly _tag: string; readonly message: string }): RemoteError => ({
+  _tag: error._tag,
+  message: error.message,
+})
+
+/** A stable key for a live subscription's requirement set. */
+const liveStreamKey = (requirements: readonly Requirement[]): string =>
+  requirements
+    .map(
+      requirement =>
+        `${entityKey(requirement.entity, requirement.id)}:${[...requirement.fields].sort().join(',')}`,
+    )
+    .sort()
+    .join('|')
+
+/**
+ * `Remote.mutate` as a standalone effect, so `Remote.mutateInto` can reuse it
+ * without the object literal referencing itself.
+ */
+const mutateRemote = Effect.fn('Remote.mutate')(function* <Name extends string, Input, Output>(
+  mutation: MutationDescriptor<Name, Input, Output>,
+  input: Input,
+  requestId: string,
+) {
+  yield* Effect.annotateCurrentSpan({ mutation: mutation.name, requestId })
+  const client = yield* RemoteClient
+  const encoded = yield* Schema.encodeUnknownEffect(mutation.Input)(input).pipe(
+    Effect.catchTag('SchemaError', error =>
+      Effect.fail(new RemoteMutationError({ message: error.message })),
+    ),
+  )
+  const result = yield* client.mutate({
+    requestId,
+    mutation: mutation.name,
+    input: encoded,
+  })
+  const output = yield* Schema.decodeUnknownEffect(mutation.Output)(result.output).pipe(
+    Effect.catchTag('SchemaError', error =>
+      Effect.fail(new RemoteMutationError({ message: error.message })),
+    ),
+  )
+  return { output, entities: result.entities }
+})
+
 export const Remote = {
-  make: <const Entities extends readonly EntityDescriptor<any, any>[]>(config: {
+  /**
+   * Declares a Remote domain: the entities, queries, and mutations the
+   * application can observe, plus the submodel (`Model`, `initial`, `Message`,
+   * `update`, `rpc`) the app embeds and reduces.
+   */
+  make: <
+    const Entities extends readonly EntityDescriptor<any, any>[],
+    const Queries extends readonly QueryDescriptor<any, any, any>[] = readonly QueryDescriptor<
+      any,
+      any,
+      any
+    >[],
+    const Mutations extends readonly MutationDescriptor<any, any, any>[] =
+      readonly MutationDescriptor<any, any, any>[],
+  >(config: {
     readonly entities: Entities
-    readonly queries?: readonly unknown[]
-    readonly mutations?: readonly unknown[]
-  }): RemoteDescriptor<ReturnType<typeof remoteModelSchema>> => ({
+    readonly queries?: Queries
+    readonly mutations?: Mutations
+  }): RemoteDescriptor<Entities, Queries, Mutations> => ({
     entities: config.entities,
+    queries: (config.queries ?? []) as unknown as Queries,
+    mutations: (config.mutations ?? []) as unknown as Mutations,
     Model: remoteModelSchema(),
+    initial: initialRemoteModel,
+    Message: remoteMessageSchema,
+    update: updateRemote,
+    rpc: RemoteRpc,
   }),
 
-  /** Binds a Remote scope to its store's location in the application Model. */
-  at: <AppModel, Store extends RemoteModel>(
-    _definition: RemoteDescriptor<any>,
+  /**
+   * Binds a Remote domain to its store's location in the application Model. The
+   * registered entity names are carried on the returned value, so `Remote.select`
+   * rejects a selection for an entity this domain never declared.
+   */
+  at: <
+    AppModel,
+    Store extends RemoteModel,
+    Entities extends readonly EntityDescriptor<any, any>[],
+    Queries extends readonly QueryDescriptor<any, any, any>[],
+    Mutations extends readonly MutationDescriptor<any, any, any>[],
+  >(
+    definition: RemoteDescriptor<Entities, Queries, Mutations>,
     store: ModelRef<AppModel, Store>,
-  ): BoundRemote<AppModel, Store> => ({ store }),
+  ): BoundRemote<AppModel, Store, EntityName<Entities[number]>> => ({
+    definition,
+    store,
+  }),
 
   /**
    * A Projection node that reads a `RemoteData` value out of the store. The id
@@ -535,9 +857,9 @@ export const Remote = {
    * as `Failed` instead of being asserted into `Value`.
    */
   select:
-    <AppModel, Store extends RemoteModel, Value>(
-      bound: BoundRemote<AppModel, Store>,
-      selection: Selection<Value>,
+    <AppModel, Store extends RemoteModel, Names extends string, Value, Name extends Names>(
+      bound: BoundRemote<AppModel, Store, Names>,
+      selection: Selection<Value, Name>,
     ) =>
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
       Model: remoteDataSchema(selection.schema),
@@ -571,14 +893,17 @@ export const Remote = {
   planProjection: <Root, Value>(
     store: EntityStore,
     projection: Projection<Root, Value>,
-  ): ReadonlyArray<Requirement> => plan(store, projection.requirements),
+    freshness?: PlanFreshness,
+  ): ReadonlyArray<Requirement> => plan(store, projection.requirements, freshness),
 
   /** The pure plan for a projection against a Model, reading its remote store. */ observeProjection:
     <AppModel, Store extends RemoteModel, Value>(
       bound: BoundRemote<AppModel, Store>,
       model: AppModel,
       projection: Projection<AppModel, Value>,
-    ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements),
+      freshness?: PlanFreshness,
+    ): ReadonlyArray<Requirement> =>
+      plan(storeOf(bound, model), projection.requirements, freshness),
 
   /** The pure plan for a Surface's projection. */
   planSurface: <AppModel, Store extends RemoteModel, Model, Message, Params>(
@@ -586,20 +911,28 @@ export const Remote = {
     model: AppModel,
     surface: Surface<AppModel, Model, Message, Params>,
     params: Params,
+    freshness?: PlanFreshness,
   ): ReadonlyArray<Requirement> =>
-    plan(storeOf(bound, model), surface.projection(params).requirements),
+    plan(storeOf(bound, model), surface.projection(params).requirements, freshness),
 
   /**
    * Executes the plan against the `RemoteClient` and returns a new store. Used
    * for SSR route prefetch, hover prefetch, and tests. Never called during render.
+   * `freshness` (milliseconds) refetches present fields older than that. The
+   * caller reads the wall clock; the planner itself stays pure and time-injected.
    */
   prefetch: Effect.fn('Remote.prefetch')(function* <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     projection: Projection<AppModel, Value>,
+    options: { readonly freshness?: number } = {},
   ) {
     const store = storeOf(bound, model)
-    const missing = plan(store, projection.requirements)
+    const freshness: PlanFreshness | undefined =
+      options.freshness === undefined
+        ? undefined
+        : { now: Date.now(), freshness: options.freshness }
+    const missing = plan(store, projection.requirements, freshness)
     if (missing.length === 0) return store
     yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
     const client = yield* RemoteClient
@@ -613,45 +946,63 @@ export const Remote = {
    */
   writeRead,
 
-  /** Runs a mutation through `RemoteClient`, decoding its typed Output. */
-  mutate: Effect.fn('Remote.mutate')(function* <Name extends string, Input, Output>(
+  /**
+   * Runs a mutation through `RemoteClient`, decoding its typed Output and
+   * returning the result's normalized patches so the caller can reconcile them
+   * through `Remote.update`'s `MutationSucceeded` (or `Remote.mutateInto`).
+   */
+  mutate: mutateRemote,
+
+  /**
+   * Runs a mutation and reconciles its patches into a `RemoteModel` in one step,
+   * returning the new model alongside the typed Output. The model-level form of
+   * `MutationStarted` → `RemoteClient.mutate` → `MutationSucceeded`.
+   */
+  mutateInto: Effect.fn('Remote.mutateInto')(function* <
+    Name extends string,
+    Input,
+    Output,
+    AppModel,
+    Store extends RemoteModel,
+  >(
+    bound: BoundRemote<AppModel, Store>,
+    model: AppModel,
     mutation: MutationDescriptor<Name, Input, Output>,
     input: Input,
     requestId: string,
   ) {
-    yield* Effect.annotateCurrentSpan({ mutation: mutation.name, requestId })
-    const client = yield* RemoteClient
-    const encoded = yield* Schema.encodeUnknownEffect(mutation.Input)(input).pipe(
-      Effect.catchTag('SchemaError', error =>
-        Effect.fail(new RemoteMutationError({ message: error.message })),
-      ),
-    )
-    const result = yield* client.mutate({
+    const started = updateRemote(bound.store.get(model), { _tag: 'MutationStarted', requestId })
+    const outcome = yield* mutateRemote(mutation, input, requestId)
+    const settled = updateRemote(started, {
+      _tag: 'MutationSucceeded',
       requestId,
-      mutation: mutation.name,
-      input: encoded,
+      entities: outcome.entities,
     })
-    return yield* Schema.decodeUnknownEffect(mutation.Output)(result.output).pipe(
-      Effect.catchTag('SchemaError', error =>
-        Effect.fail(new RemoteMutationError({ message: error.message })),
-      ),
-    )
+    return {
+      output: outcome.output,
+      model: bound.store.set(model, settled as Store),
+    }
   }),
 
   /**
    * A Foldkit Subscription entry that plans a Surface's missing fields from the
-   * Model and fetches them through `RemoteClient`, emitting a Message per batch.
-   * Pass the returned entry into the application's `Subscription.make` record.
+   * Model and fetches them through `RemoteClient`, emitting a `RemoteMessage`
+   * per outcome. Wrap it in an application Message (`toMessage`) and reduce it
+   * with the domain's `update`.
    */
-  observe: <AppModel, Store extends RemoteModel, Model, SurfaceMessage, Params, Message>(
-    bound: BoundRemote<AppModel, Store>,
+  observe: <
+    AppModel,
+    Store extends RemoteModel,
+    Names extends string,
+    Model,
+    SurfaceMessage,
+    Params,
+    Message,
+  >(
+    bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    toMessage: (
-      result: Schema.Schema.Type<typeof ReadBatchResult>,
-      requests: ReadonlyArray<Requirement>,
-    ) => Message,
-    onError: (error: RemoteReadError) => Message,
+    toMessage: (message: RemoteMessage) => Message,
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
@@ -668,34 +1019,48 @@ export const Remote = {
       requirements.length === 0
         ? Stream.empty
         : Stream.fromEffect(
-            Effect.fn('Remote.observe.read')(function* () {
+            Effect.gen(function* () {
               const client = yield* RemoteClient
-              return yield* client.read({ requests: requirements })
-            })(),
-          ).pipe(
-            Stream.map(result => toMessage(result, requirements)),
-            Stream.catchIf(
-              (_error): _error is RemoteReadError => true,
-              error => Stream.succeed(onError(error)),
-            ),
+              const now = Date.now()
+              const result = yield* Effect.result(client.read({ requests: requirements }))
+              return Result.isFailure(result)
+                ? toMessage({
+                    _tag: 'ReadFailed',
+                    requests: requirements,
+                    error: remoteError(result.failure),
+                  })
+                : toMessage({
+                    _tag: 'ReadReceived',
+                    requests: requirements,
+                    result: result.success,
+                    now,
+                  })
+            }),
           ),
   }),
 
   /**
    * A Foldkit Subscription entry that consumes the live stream for a Surface's
-   * requirements. On any stream failure (including `ResumeUnavailable`) it emits
-   * `onResumeUnavailable`, so the app invalidates and refetches rather than
-   * silently missing events.
+   * requirements, emitting a `LiveReceived` per event and a `ReadFailed` when
+   * the stream breaks (including `ResumeUnavailable`). The `RemoteModel.live`
+   * cursor is keyed by the requirement set.
    */
-  live: <AppModel, Store extends RemoteModel, Model, SurfaceMessage, Params, Message>(
-    bound: BoundRemote<AppModel, Store>,
+  live: <
+    AppModel,
+    Store extends RemoteModel,
+    Names extends string,
+    Model,
+    SurfaceMessage,
+    Params,
+    Message,
+  >(
+    bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
     options: {
       readonly cursor: (model: AppModel) => LiveCursor
     },
-    toMessage: (event: LiveEvent) => Message,
-    onResumeUnavailable: (error: RemoteLiveError) => Message,
+    toMessage: (message: RemoteMessage) => Message,
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
@@ -714,15 +1079,29 @@ export const Remote = {
       requirements.length === 0
         ? Stream.empty
         : Stream.unwrap(
-            Effect.fn('Remote.live.subscribe')(function* () {
+            Effect.gen(function* () {
               const client = yield* RemoteClient
               return client.live({ requirements, after: cursor })
-            })(),
+            }),
           ).pipe(
-            Stream.map(toMessage),
+            Stream.map(event =>
+              toMessage({
+                _tag: 'LiveReceived',
+                stream: liveStreamKey(requirements),
+                event,
+                now: Date.now(),
+              }),
+            ),
             Stream.catchIf(
               (_error): _error is RemoteLiveError => true,
-              error => Stream.succeed(onResumeUnavailable(error)),
+              error =>
+                Stream.succeed(
+                  toMessage({
+                    _tag: 'ReadFailed',
+                    requests: requirements,
+                    error: remoteError(error),
+                  }),
+                ),
             ),
           ),
   }),

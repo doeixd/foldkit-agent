@@ -39,14 +39,15 @@ const FakeClient = Layer.succeed(RemoteClient, {
 })
 
 describe('Remote mutations', () => {
-  it('runs a mutation and decodes its typed Output', async () => {
+  it('runs a mutation, decoding its typed Output and returning its patches', async () => {
     requests.length = 0
-    const output = await Effect.runPromise(
+    const { output, entities } = await Effect.runPromise(
       Remote.mutate(RenameUser, { id: 'u1', name: 'ada' }, 'req-1').pipe(
         Effect.provide(FakeClient),
       ),
     )
     expect(output).toEqual({ id: 'u1' })
+    expect(entities).toEqual([{ entity: 'User', id: 'u1', values: { name: 'ada' } }])
     expect(requests).toEqual([
       { requestId: 'req-1', mutation: 'RenameUser', input: { id: 'u1', name: 'ada' } },
     ])

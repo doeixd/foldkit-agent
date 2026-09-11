@@ -2,7 +2,7 @@ import { Context, Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
 import { Entity, Mutation, Query, ReadBatch, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
-import { RemoteServer, RemoteServerError } from '../src/index.js'
+import { RemoteServer, RemoteServerError, type ServerDefinition } from '../src/index.js'
 
 const User = Entity.make(
   'User',
@@ -73,7 +73,6 @@ const server = RemoteServer.make(
 const layer = (principal: string) =>
   RemoteRpc.toLayer({
     ...RemoteServer.handlers(server, principal),
-    FoldkitRemoteLive: () => Stream.empty,
   })
 
 const read = (principal: string, requests: ReadonlyArray<Request>) =>
@@ -170,7 +169,6 @@ describe('RemoteServer', () => {
         Effect.provide(
           RemoteRpc.toLayer({
             ...RemoteServer.handlers(permissive, 'admin'),
-            FoldkitRemoteLive: () => Stream.empty,
           }),
         ),
       ),
@@ -220,7 +218,6 @@ describe('RemoteServer', () => {
     )
     const failingLayer = RemoteRpc.toLayer({
       ...RemoteServer.handlers(failing, 'user'),
-      FoldkitRemoteLive: () => Stream.empty,
     })
     const result = await Effect.runPromise(
       Effect.result(
@@ -277,7 +274,6 @@ describe('RemoteServer', () => {
         Effect.provide(
           RemoteRpc.toLayer({
             ...RemoteServer.handlers(recording, 'admin'),
-            FoldkitRemoteLive: () => Stream.empty,
           }),
         ),
       ),
@@ -332,7 +328,6 @@ describe('RemoteServer', () => {
         Effect.provide(
           RemoteRpc.toLayer({
             ...RemoteServer.handlers(crafted, 'admin'),
-            FoldkitRemoteLive: () => Stream.empty,
           }),
         ),
       ),
@@ -368,7 +363,6 @@ describe('RemoteServer', () => {
         Effect.provide(
           RemoteRpc.toLayer({
             ...RemoteServer.handlers(withTick, 'user'),
-            FoldkitRemoteLive: () => Stream.empty,
           }),
         ),
         Effect.provideService(Tick, { value: 7 }),
@@ -397,7 +391,6 @@ describe('RemoteServer', () => {
     )
     const limited = RemoteRpc.toLayer({
       ...RemoteServer.handlers(server, 'user', { maxIdsPerEntity: 2 }),
-      FoldkitRemoteLive: () => Stream.empty,
     })
 
     const result = await Effect.runPromise(
@@ -443,7 +436,6 @@ describe('RemoteServer', () => {
     )
     const layer = RemoteRpc.toLayer({
       ...RemoteServer.handlers(server, 'user'),
-      FoldkitRemoteLive: () => Stream.empty,
     })
 
     await Effect.runPromise(
@@ -472,5 +464,51 @@ describe('RemoteServer', () => {
         { entity: 'User', id: 'u1', fields: ['id'], windows: { admin: { first: 5 } } },
       ]),
     ).toEqual([undefined])
+  })
+
+  const collectLive = (
+    definition: ServerDefinition<string, never>,
+    payload: { requirements: ReadonlyArray<Request>; after: number },
+  ) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteLive(payload).pipe(Stream.runCollect)
+        }),
+      ).pipe(Effect.provide(RemoteRpc.toLayer(RemoteServer.handlers(definition, 'user')))),
+    )
+
+  it('streams live patches and threads the resume cursor', async () => {
+    const liveServer = RemoteServer.make(
+      {},
+      {
+        entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
+        live: [
+          RemoteServer.live<string>(User, {
+            subscribe: ({ after }) =>
+              Stream.make({ cursor: after + 1, entity: 'User', id: 'u1', values: { name: 'ada' } }),
+          }),
+        ],
+      },
+    )
+
+    const patches = await collectLive(liveServer, {
+      requirements: [{ entity: 'User', id: 'u1', fields: ['name'] }],
+      after: 4,
+    })
+    expect([...patches]).toEqual([{ cursor: 5, entity: 'User', id: 'u1', values: { name: 'ada' } }])
+  })
+
+  it('emits nothing for an entity with no live source', async () => {
+    const noLive = RemoteServer.make(
+      {},
+      { entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })] },
+    )
+    const patches = await collectLive(noLive, {
+      requirements: [{ entity: 'User', id: 'u1', fields: ['name'] }],
+      after: 0,
+    })
+    expect([...patches]).toEqual([])
   })
 })
