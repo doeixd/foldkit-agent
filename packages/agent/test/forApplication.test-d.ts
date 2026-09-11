@@ -27,3 +27,7 @@ TodoAgent.define({
   context: Projection.of(Other)({ count: true }),
   messages: TodoAgent.expose(MessageUnion, {}),
 })
+
+const Changes = Surface.messages(App, [MessageUnion.RequestedCreateTodo])
+// @ts-expect-error RequestedDeleteTodo is not in the subset
+Agent.exposeSubset(Changes, { RequestedDeleteTodo: 'Delete' })

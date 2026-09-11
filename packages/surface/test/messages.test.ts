@@ -12,7 +12,7 @@ describe('Surface.messages', () => {
     expect(Changes.includes(Message.CreatedTodo({ id: 'a', title: 'A' }))).toBe(true)
     expect(Changes.includes(Message.SelectedTodo({ id: 'a' }))).toBe(false)
     expect(
-      Schema.decodeUnknownSync(Changes.schema as unknown as Schema.ConstraintDecoder<unknown>)({
+      Schema.decodeUnknownSync(Changes.schema)({
         _tag: 'CreatedTodo',
         id: 'a',
         title: 'A',
@@ -37,5 +37,33 @@ describe('Surface.messages', () => {
     expect(() => Surface.messages(App, [Message.CreatedTodo, Message.CreatedTodo])).toThrow(
       'duplicate',
     )
+  })
+
+  it('unions disjoint subsets', () => {
+    const Created = Surface.messages(App, [Message.CreatedTodo])
+    const Rest = Surface.messages(App, [Message.RenamedTodo, Message.SelectedTodo])
+    const All = Surface.unionMessages(Created, Rest)
+
+    expect([...All.tags]).toEqual(['CreatedTodo', 'RenamedTodo', 'SelectedTodo'])
+    expect(All.includes(Message.SelectedTodo({ id: 'a' }))).toBe(true)
+    expect(All.constructors).toHaveLength(3)
+  })
+
+  it('rejects a duplicate tag across subsets', () => {
+    const Created = Surface.messages(App, [Message.CreatedTodo])
+    expect(() => Surface.unionMessages(Created, Created)).toThrow('duplicate')
+  })
+
+  it('rejects subsets from different applications with an identical union', () => {
+    const Other = Surface.make({
+      Model: App.Model,
+      Message: defineMessageUnion({
+        CreatedTodo: { id: Schema.String, title: Schema.String },
+      }),
+    })
+    const Mine = Surface.messages(App, [Message.CreatedTodo])
+    const Theirs = Surface.messages(Other, [Other.Message.CreatedTodo])
+
+    expect(() => Surface.unionMessages(Mine, Theirs)).toThrow('different applications')
   })
 })

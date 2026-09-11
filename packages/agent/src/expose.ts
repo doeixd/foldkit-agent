@@ -1,7 +1,9 @@
 import type { Duration } from 'effect'
 import { Schema } from 'effect'
 import type { MessageUnion } from 'foldkit/message'
+import type { MessageSubset } from 'foldkit-surface'
 import { toJsonSchema } from './jsonSchema.js'
+import { messageTag } from './tag.js'
 import { type CompiledCompletion, compileCompletion } from './completion.js'
 import { type SnakeCase, assertValidName, defaultName } from './naming.js'
 import type {
@@ -16,6 +18,19 @@ type Fields = Schema.Struct.Fields
 
 /** The variant-name-to-fields map a `defineMessageUnion` was declared with. */
 export type Cases = Record<string, Fields>
+
+/** The literal tag a Message constructor produces. */
+type TagOfConstructor<C> = C extends (...args: never[]) => infer M
+  ? M extends { readonly _tag: infer Tag extends string }
+    ? Tag
+    : never
+  : never
+
+/** The subset of a union's cases that a constructor tuple selects. */
+export type SubsetCases<AllCases extends Cases, Ms extends readonly unknown[]> = Pick<
+  AllCases,
+  TagOfConstructor<Ms[number]> & keyof AllCases
+>
 
 /**
  * The callable constructor for one variant of a Message union.
@@ -418,3 +433,48 @@ export const expose = <
 
   return { variants: compiled }
 }
+
+/** A tag-to-constructor map for a subset, in the shape `expose` reads. */
+const subsetUnion = (subset: MessageSubset<any, any, any, any, any>): Record<string, unknown> => {
+  const union: Record<string, unknown> = {}
+  for (const constructor of subset.constructors) {
+    const tag = messageTag(constructor)
+    if (tag !== undefined) union[tag] = constructor
+  }
+  return union
+}
+
+/**
+ * Exposes the variants of a `Surface.messages` subset. A separate entry point
+ * from `expose` so the common path keeps its precise error messages; a variant
+ * outside the subset is a compile error, and the runtime only sees the subset's
+ * own constructors.
+ */
+export const exposeSubset = <
+  Root,
+  Message,
+  Subset extends Message,
+  Ms extends readonly ((...args: never[]) => Message)[],
+  AllCases extends Cases,
+  const V extends Record<string, unknown>,
+  Ext extends Record<string, unknown> = {},
+  Model = any,
+  Principal = any,
+>(
+  subset: MessageSubset<Root, Message, Subset, Ms, AllCases>,
+  variants: V & ValidateVariants<SubsetCases<AllCases, Ms>, Ext, Model, Principal>,
+): ExposedMessages<
+  Model,
+  Principal,
+  CapabilitiesByName<SubsetCases<AllCases, Ms>, V>,
+  CapabilitiesByTag<SubsetCases<AllCases, Ms>, V>
+> =>
+  expose(
+    subsetUnion(subset) as unknown as MessageUnion<SubsetCases<AllCases, Ms>>,
+    variants as never,
+  ) as unknown as ExposedMessages<
+    Model,
+    Principal,
+    CapabilitiesByName<SubsetCases<AllCases, Ms>, V>,
+    CapabilitiesByTag<SubsetCases<AllCases, Ms>, V>
+  >

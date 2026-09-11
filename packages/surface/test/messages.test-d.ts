@@ -24,3 +24,18 @@ const OtherMessage = defineMessageUnion({ Ping: {} })
 const Other = Surface.make({ Model: App.Model, Message: OtherMessage })
 // @ts-expect-error `Ping` is not a variant of App's Message union
 Surface.messages(App, [Other.Message.Ping])
+
+const All = Surface.unionMessages(
+  Surface.messages(App, [Message.CreatedTodo]),
+  Surface.messages(App, [Message.RenamedTodo]),
+)
+// A union of disjoint subsets still narrows exactly.
+const describeAll = (message: Schema.Schema.Type<typeof All.schema>): string => {
+  switch (message._tag) {
+    case 'CreatedTodo':
+      return message.title
+    case 'RenamedTodo':
+      return message.id
+  }
+}
+void describeAll

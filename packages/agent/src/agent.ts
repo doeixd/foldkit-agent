@@ -11,6 +11,7 @@ export {
 } from './errors.js'
 export {
   expose,
+  exposeSubset,
   variant,
   type ExposedMessages,
   type ExposedVariant,

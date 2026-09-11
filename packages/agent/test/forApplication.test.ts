@@ -40,4 +40,17 @@ describe('Agent.forApplication', () => {
 
     expect(definition.context?.read(emptyModel)).toEqual({ todos: [] })
   })
+
+  it('exposes only the variants of a Surface subset', () => {
+    const Changes = Surface.messages(App, [
+      MessageUnion.RequestedCreateTodo,
+      MessageUnion.RequestedRenameTodo,
+    ])
+
+    const messages = TodoAgent.exposeSubset(Changes, {
+      RequestedCreateTodo: 'Create a todo',
+    })
+
+    expect(messages.variants.map(variant => variant.tag)).toEqual(['RequestedCreateTodo'])
+  })
 })

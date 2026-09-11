@@ -19,7 +19,8 @@ import type * as Update from 'foldkit/update'
 // ===========================================================================
 
 export interface ModelRef<Root, Value> {
-  readonly Schema: Schema.Schema<Value>
+  /** A pure codec: Foldkit Model fields carry no decoding or encoding services. */
+  readonly Schema: Schema.Codec<Value, unknown, never, never>
   readonly optic: Optic.Optional<Root, Value>
   readonly dependency: readonly string[]
   readonly get: (root: Root) => Value
@@ -47,7 +48,7 @@ export const ModelRef = {
     optic: Optic.Optional<Root, Value>,
     dependency: readonly string[] = [],
   ): ModelRef<Root, Value> => ({
-    Schema,
+    Schema: Schema as unknown as ModelRef<Root, Value>['Schema'],
     optic,
     dependency,
     get: root => Result.getOrThrow(optic.getResult(root)),
@@ -517,6 +518,8 @@ export interface AppScope<
   readonly Model: Schema.Struct<F>
   readonly Message: MessageUnion<Cases>
   readonly model: RefTree<Root, F>
+  /** Identity token shared by this application's references and subsets. */
+  readonly owner: object
 }
 
 export interface SurfaceInspection {
@@ -642,11 +645,15 @@ export interface MessageSubset<
   Message,
   Subset extends Message,
   Ms extends readonly ((...args: never[]) => Message)[],
+  Cases extends Record<string, Schema.Struct.Fields> = Record<string, Schema.Struct.Fields>,
 > {
   /** Phantom owner, so a subset cannot be crossed between applications. */
   readonly [messageSubsetRoot]?: Root
+  /** The application identity token, checked when subsets compose. */
+  readonly owner: object
   readonly constructors: Ms
-  readonly schema: Schema.Schema<Subset>
+  /** A pure codec for exactly the selected variants. */
+  readonly schema: Schema.Codec<Subset, unknown, never, never>
   readonly tags: ReadonlySet<string>
   readonly includes: (message: Message) => message is Subset
 }
@@ -664,6 +671,7 @@ const makeScope = <
   return {
     Model: config.Model,
     Message: config.Message,
+    owner,
     model: makeTree(
       config.Model,
       [],
@@ -712,6 +720,23 @@ function application(config: any): any {
   return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
 }
 
+type ConstructorOfSubset<S> = S extends MessageSubset<any, any, any, infer Ms, any> ? Ms : never
+type ValueOfSubset<S> = S extends MessageSubset<any, any, infer V, any, any> ? V : never
+type RootOfSubset<S> = S extends MessageSubset<infer R, any, any, any, any> ? R : never
+type MessageOfSubset<S> = S extends MessageSubset<any, infer M, any, any, any> ? M : never
+type CasesOfSubset<S> = S extends MessageSubset<any, any, any, any, infer C> ? C : never
+
+type Concat<A extends readonly unknown[], B extends readonly unknown[]> = [...A, ...B]
+
+/** Concatenates the constructor tuples of several subsets, preserving each. */
+type MergeConstructors<Subs extends readonly MessageSubset<any, any, any, any, any>[]> =
+  Subs extends readonly [
+    infer Head extends MessageSubset<any, any, any, any, any>,
+    ...infer Tail extends readonly MessageSubset<any, any, any, any, any>[],
+  ]
+    ? Concat<ConstructorOfSubset<Head>, MergeConstructors<Tail>>
+    : []
+
 export const Surface = {
   make: <
     F extends Schema.Struct.Fields,
@@ -741,7 +766,8 @@ export const Surface = {
     Root,
     Schema.Schema.Type<MessageUnion<Cases>>,
     SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
-    Ms
+    Ms,
+    Cases
   > => {
     const tags = new Set<string>()
     for (const constructor of messages) {
@@ -758,12 +784,63 @@ export const Surface = {
       tags.add(tag)
     }
     return {
+      owner: app.owner,
       constructors: messages,
       schema: Schema.Union([...messages] as unknown as ReadonlyArray<
         Schema.Schema<unknown>
-      >) as unknown as Schema.Schema<SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>>,
+      >) as unknown as Schema.Codec<
+        SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
+        unknown,
+        never,
+        never
+      >,
       tags,
       includes: (message): message is SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>> =>
+        tags.has((message as { readonly _tag?: string })._tag ?? ''),
+    }
+  },
+
+  /**
+   * Unions several Message subsets into one. Every subset must belong to the
+   * same application; a tag declared twice throws. Disjoint feature modules can
+   * each declare their own subset and compose them here.
+   */
+  unionMessages: <const Subs extends readonly MessageSubset<any, any, any, any, any>[]>(
+    ...subsets: Subs
+  ): MessageSubset<
+    RootOfSubset<Subs[number]>,
+    MessageOfSubset<Subs[number]>,
+    ValueOfSubset<Subs[number]>,
+    MergeConstructors<Subs>,
+    CasesOfSubset<Subs[number]>
+  > => {
+    const parts = [...subsets]
+    const owner = parts[0]?.owner
+    const tags = new Set<string>()
+    const constructors: Array<Schema.Schema<unknown>> = []
+    for (const part of parts) {
+      if (part.owner !== owner) {
+        throw new Error('Surface.unionMessages: subsets from different applications')
+      }
+      for (const constructor of part.constructors) {
+        const tag = messageTag(constructor)
+        if (tag === undefined) continue
+        if (tags.has(tag)) throw new Error(`Surface.unionMessages: duplicate "${tag}"`)
+        tags.add(tag)
+        constructors.push(constructor as Schema.Schema<unknown>)
+      }
+    }
+    return {
+      owner: owner as object,
+      constructors: constructors as never,
+      schema: Schema.Union(constructors) as unknown as Schema.Codec<
+        ValueOfSubset<Subs[number]>,
+        unknown,
+        never,
+        never
+      >,
+      tags,
+      includes: (message): message is ValueOfSubset<Subs[number]> =>
         tags.has((message as { readonly _tag?: string })._tag ?? ''),
     }
   },

@@ -11,12 +11,10 @@ describe('Surface.pick', () => {
 
     expect(Pick.dependencies).toEqual([['todos'], ['selectedTodoId']])
     expect(Pick.get(model)).toEqual({ todos: [{ id: 'a', title: 'A' }], selectedTodoId: 'a' })
-    expect(
-      Schema.decodeUnknownSync(Pick.schema as unknown as Schema.ConstraintDecoder<unknown>)({
-        todos: [],
-        selectedTodoId: null,
-      }),
-    ).toEqual({ todos: [], selectedTodoId: null })
+    expect(Schema.decodeUnknownSync(Pick.schema)({ todos: [], selectedTodoId: null })).toEqual({
+      todos: [],
+      selectedTodoId: null,
+    })
   })
 
   it('installs only the declared fields', () => {

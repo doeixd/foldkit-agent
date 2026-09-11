@@ -6,13 +6,16 @@ import {
   type CapabilitiesByTag,
   type Cases,
   type ExposedMessages,
+  type SubsetCases,
   type ValidateVariants,
   expose,
+  exposeSubset,
 } from './expose.js'
 import { type Resource, type ResourceOptions, resource } from './resource.js'
 import { type AgentRuntime, type BindOptions, bind } from './runtime.js'
 import type { AnyMessage } from './types.js'
 import type { MessageUnion } from 'foldkit/message'
+import type { MessageSubset } from 'foldkit-surface'
 
 /**
  * The `foldkit-agent` constructors with `Model` and `Principal` already fixed.
@@ -29,6 +32,24 @@ export interface BoundAgent<Model, Principal> {
     message: MessageUnion<C>,
     variants: V & ValidateVariants<C, Ext, Model, Principal>,
   ) => ExposedMessages<Model, Principal, CapabilitiesByName<C, V>, CapabilitiesByTag<C, V>>
+
+  readonly exposeSubset: <
+    Root,
+    Message,
+    Subset extends Message,
+    Ms extends readonly ((...args: never[]) => Message)[],
+    AllCases extends Cases,
+    const V extends Record<string, unknown>,
+    Ext extends Record<string, unknown> = {},
+  >(
+    subset: MessageSubset<Root, Message, Subset, Ms, AllCases>,
+    variants: V & ValidateVariants<SubsetCases<AllCases, Ms>, Ext, Model, Principal>,
+  ) => ExposedMessages<
+    Model,
+    Principal,
+    CapabilitiesByName<SubsetCases<AllCases, Ms>, V>,
+    CapabilitiesByTag<SubsetCases<AllCases, Ms>, V>
+  >
 
   readonly resource: <Value>(
     name: string,
@@ -73,6 +94,7 @@ export interface BoundAgent<Model, Principal> {
  */
 export const forModel = <Model, Principal = unknown>(): BoundAgent<Model, Principal> => ({
   expose: expose as BoundAgent<Model, Principal>['expose'],
+  exposeSubset: exposeSubset as BoundAgent<Model, Principal>['exposeSubset'],
   resource,
   define,
   bind,

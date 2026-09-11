@@ -6,6 +6,7 @@ import {
   type AnyCapabilitiesByTag,
   type ExposedMessages,
   expose,
+  exposeSubset,
 } from './expose.js'
 import { type BoundAgent } from './forModel.js'
 import { type Resource, resource } from './resource.js'
@@ -79,6 +80,7 @@ const buildAgent = <Model, Principal>(
 
   return {
     expose: expose as ApplicationAgent<Model, Principal>['expose'],
+    exposeSubset: exposeSubset as ApplicationAgent<Model, Principal>['exposeSubset'],
     resource,
     bind,
     define: agentDefine,
