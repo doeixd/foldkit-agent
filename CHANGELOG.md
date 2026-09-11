@@ -18,8 +18,10 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   `Resolver.resolve`: additive deduplicated classes, per-property inline styles,
   single-owner events and scalar attributes, protected slots, opaque
   `ChildAttribute` preservation, and one composed `OnMount`. Conflicts throw a
-  structured `DiagnosticError`. Style, Behavior, and `SlotView` are not in this
-  slice.
+  structured `DiagnosticError`.
+- **SlotView.** `SlotView.define` publishes typed Slots and resolves attached
+  Mixins per slot into ordinary Foldkit attributes; `SlotView.attach` is
+  immutable. Style and Behavior are not in this slice.
 
 ### `foldkit-agent`
 
