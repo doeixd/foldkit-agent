@@ -29,6 +29,9 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 
 ### `foldkit-sync`
 
+- **Standalone projection removed.** `pick`/`Projection` (the #59 spike) are gone;
+  they are superseded by the shared Surface `ModelRef`/`Projection`. The
+  Surface-based `Sync.project`/`Sync.define` replacement ships separately.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.
