@@ -1,4 +1,4 @@
-import { Effect, Schema, Stream } from 'effect'
+import { Context, Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
 import { Entity, Mutation, Query, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
@@ -339,5 +339,42 @@ describe('RemoteServer', () => {
     )
 
     expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { id: 'u1' } }])
+  })
+
+  it('threads a source service requirement into the handlers', async () => {
+    class Tick extends Context.Service<Tick, { readonly value: number }>()('test/Tick') {}
+
+    const source = RemoteServer.entity<string, Tick>(User, {
+      read: ({ ids, fields }) =>
+        Effect.gen(function* () {
+          const tick = yield* Tick
+          return ids.map(id => ({
+            id,
+            values: Object.fromEntries(fields.map(field => [field, `${field}:${tick.value}`])),
+          }))
+        }),
+    })
+    const withTick = RemoteServer.make({}, { entities: [source] })
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteRead({
+            requests: [{ entity: 'User', id: 'u1', fields: ['name'] }],
+          })
+        }),
+      ).pipe(
+        Effect.provide(
+          RemoteRpc.toLayer({
+            ...RemoteServer.handlers(withTick, 'user'),
+            FoldkitRemoteLive: () => Stream.empty,
+          }),
+        ),
+        Effect.provideService(Tick, { value: 7 }),
+      ),
+    )
+
+    expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { name: 'name:7' } }])
   })
 })

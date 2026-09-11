@@ -46,11 +46,11 @@ export interface EntitySourceContext<P> {
   readonly principal: P
 }
 
-export interface EntitySource<P> {
+export interface EntitySource<P, R = never> {
   readonly entity: string
   readonly read: (
     context: EntitySourceContext<P>,
-  ) => Effect.Effect<ReadonlyArray<EntityRecord>, RemoteServerError>
+  ) => Effect.Effect<ReadonlyArray<EntityRecord>, RemoteServerError, R>
   /** Returns the fields this principal may read; omitted means all requested. */
   readonly authorize?: (principal: P, fields: readonly string[]) => readonly string[]
 }
@@ -60,7 +60,7 @@ export interface MutationOutcome<Output> {
   readonly entities?: ReadonlyArray<NormalizedPatch>
 }
 
-export interface MutationSource<P> {
+export interface MutationSource<P, R = never> {
   readonly mutation: string
   readonly Input: Schema.Codec<unknown>
   readonly Output: Schema.Codec<unknown>
@@ -69,7 +69,8 @@ export interface MutationSource<P> {
     readonly principal: P
   }) => Effect.Effect<
     { readonly output: unknown; readonly entities: ReadonlyArray<NormalizedPatch> },
-    RemoteServerError
+    RemoteServerError,
+    R
   >
 }
 
@@ -83,42 +84,48 @@ export interface QueryPage {
   readonly end: Boundary
 }
 
-export interface QuerySource<P> {
+export interface QuerySource<P, R = never> {
   readonly query: string
   readonly Input: Schema.Codec<unknown>
   readonly run: (context: {
     readonly input: unknown
     readonly window: QueryWindow
     readonly principal: P
-  }) => Effect.Effect<QueryPage, RemoteServerError>
+  }) => Effect.Effect<QueryPage, RemoteServerError, R>
 }
 
-export interface ServerDefinition<P> {
-  readonly entities: ReadonlyMap<string, EntitySource<P>>
-  readonly mutations: ReadonlyMap<string, MutationSource<P>>
-  readonly queries: ReadonlyMap<string, QuerySource<P>>
+export interface ServerDefinition<P, R = never> {
+  readonly entities: ReadonlyMap<string, EntitySource<P, R>>
+  readonly mutations: ReadonlyMap<string, MutationSource<P, R>>
+  readonly queries: ReadonlyMap<string, QuerySource<P, R>>
 }
 
 export const RemoteServer = {
-  entity: <P = unknown>(
+  entity: <P = unknown, R = never>(
     entity: EntityDescriptor<any, any>,
     options: {
-      readonly read: EntitySource<P>['read']
-      readonly authorize?: EntitySource<P>['authorize']
+      readonly read: EntitySource<P, R>['read']
+      readonly authorize?: EntitySource<P, R>['authorize']
     },
-  ): EntitySource<P> => ({
+  ): EntitySource<P, R> => ({
     entity: entity.name,
     read: options.read,
     ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
   }),
 
-  mutation: <P = unknown, Name extends string = string, Input = unknown, Output = unknown>(
+  mutation: <
+    P = unknown,
+    R = never,
+    Name extends string = string,
+    Input = unknown,
+    Output = unknown,
+  >(
     mutation: MutationDescriptor<Name, Input, Output>,
     run: (context: {
       readonly input: Input
       readonly principal: P
-    }) => Effect.Effect<MutationOutcome<Output>, RemoteServerError>,
-  ): MutationSource<P> => ({
+    }) => Effect.Effect<MutationOutcome<Output>, RemoteServerError, R>,
+  ): MutationSource<P, R> => ({
     mutation: mutation.name,
     Input: mutation.Input,
     Output: mutation.Output,
@@ -128,28 +135,28 @@ export const RemoteServer = {
       ),
   }),
 
-  query: <P = unknown, Input = unknown>(
+  query: <P = unknown, R = never, Input = unknown>(
     query: QueryDescriptor<string, Input, unknown>,
     run: (context: {
       readonly input: Input
       readonly window: QueryWindow
       readonly principal: P
-    }) => Effect.Effect<QueryPage, RemoteServerError>,
-  ): QuerySource<P> => ({
+    }) => Effect.Effect<QueryPage, RemoteServerError, R>,
+  ): QuerySource<P, R> => ({
     query: query.name,
     Input: query.Input,
     run: context =>
       run({ input: context.input as Input, window: context.window, principal: context.principal }),
   }),
 
-  make: <P = unknown>(
+  make: <P = unknown, R = never>(
     _data: unknown,
     config: {
-      readonly entities: readonly EntitySource<P>[]
-      readonly mutations?: readonly MutationSource<P>[]
-      readonly queries?: readonly QuerySource<P>[]
+      readonly entities: readonly EntitySource<P, R>[]
+      readonly mutations?: readonly MutationSource<P, R>[]
+      readonly queries?: readonly QuerySource<P, R>[]
     },
-  ): ServerDefinition<P> => ({
+  ): ServerDefinition<P, R> => ({
     entities: new Map(config.entities.map(source => [source.entity, source])),
     mutations: new Map((config.mutations ?? []).map(source => [source.mutation, source])),
     queries: new Map((config.queries ?? []).map(source => [source.query, source])),
@@ -161,21 +168,21 @@ export const RemoteServer = {
    * entities, entities with no allowed fields, and unknown mutations return an
    * error or nothing rather than leaking existence.
    */
-  handlers: <P>(
-    server: ServerDefinition<P>,
+  handlers: <P, R>(
+    server: ServerDefinition<P, R>,
     principal: P,
   ): {
     readonly FoldkitRemoteRead: (
       payload: Schema.Schema.Type<typeof ReadBatch>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError>
+    ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError, R>
     readonly FoldkitRemoteMutate: (payload: {
       readonly requestId: string
       readonly mutation: string
       readonly input: unknown
-    }) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
+    }) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError, R>
     readonly FoldkitRemoteQuery: (
       payload: Schema.Schema.Type<typeof QueryRequest>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
+    ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
   } => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
       const grouped = new Map<
