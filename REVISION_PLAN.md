@@ -2212,16 +2212,23 @@ Fixed in `b3c86e3`: `Projection.struct` requires all entries to share one Root,
 so mixing ModelRefs/Projections from different applications is a compile error
 (negative type case, mutation-verified).
 
+Fixed in `e3b5309`: `refreshConnection` clears a connection's stale mark, so
+`live.invalidateConnection` is no longer a one-way flag. The refetching caller
+invokes it when it adopts the fresh page.
+
 Still open (all lower severity):
 
-- **`live.invalidateConnection` never clears `stale`.** A later successful merge
-  does not mark the connection fresh; the clearing path is unspecified.
 - **remote-drizzle does not check that the table-derived Schema agrees with the
   Remote Entity's `id` schema** (it now requires the `id` column to exist).
 - **`handlers(server, principal)` binds one principal per handler set**, not per
   request; authentication middleware integration is deferred (§8.10).
-- **`ModelRef.fromOptic` throws** via `Result.getOrThrow` on a non-focusing optic;
-  the alternative is returning `Option`.
+
+Deliberate, not open:
+
+- **`ModelRef.fromOptic` throws** when the optic does not focus. It is a
+  total-focus escape hatch; absence is expressed by `.at`/`.index`, which return
+  `Option`. Returning `Option` from every `ModelRef.get` would push absence into
+  every projection read and every tree node.
 
 **Open questions to resolve during or before Phase 1:**
 
