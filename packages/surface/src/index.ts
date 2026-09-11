@@ -567,6 +567,22 @@ type PickFields<Refs extends readonly FieldRef<any, any, string>[]> = {
   readonly [R in Refs[number] as R['key']]: R['Schema']
 }
 
+type ProjectionModel<P> = P extends WritableProjection<infer M, any> ? M : never
+
+type ProjectionFields<P> = P extends WritableProjection<any, infer F> ? F : never
+
+type Merge2<A, B> = {
+  readonly [K in keyof A | keyof B]: K extends keyof A ? A[K] : K extends keyof B ? B[K] : never
+}
+
+/** Merges the fields of several projections; an overlapping key is rejected at runtime. */
+type MergeFields<Ps extends readonly WritableProjection<any, any>[]> = Ps extends readonly [
+  infer Head extends WritableProjection<any, any>,
+  ...infer Tail extends readonly WritableProjection<any, any>[],
+]
+  ? Merge2<ProjectionFields<Head>, MergeFields<Tail>>
+  : {}
+
 /**
  * An application definition: the Model and Message schemas, the initial Model,
  * the transition function, and the generated field references. It is data, not a
@@ -748,6 +764,44 @@ export const Surface = {
         let next = model
         for (const ref of selected)
           next = ref.set(next as never, (shared as Record<string, unknown>)[ref.key] as never)
+        return next
+      },
+    }
+  },
+
+  /**
+   * Merges disjoint writable projections into one: `Surface.compose(Todos,
+   * Selection)`. Every projection must own the same Model; a field defined twice
+   * with a different codec throws, while an identical definition deduplicates.
+   * `set` installs each part, so composed fields keep their own write behaviour.
+   */
+  compose: <const Ps extends readonly WritableProjection<any, any>[]>(
+    ...projections: Ps & (IsUnion<ProjectionModel<Ps[number]>> extends true ? never : unknown)
+  ): WritableProjection<ProjectionModel<Ps[number]>, MergeFields<Ps>> => {
+    const parts = [...projections]
+    const fields: Record<string, AnySchema> = {}
+    for (const part of parts) {
+      for (const [key, codec] of Object.entries(part.schema.fields)) {
+        const existing = fields[key]
+        if (existing !== undefined) {
+          if (existing === codec) continue
+          throw new Error(`Surface.compose: conflicting definitions for "${key}"`)
+        }
+        fields[key] = codec as AnySchema
+      }
+    }
+    return {
+      schema: objectSchema(fields) as never,
+      dependencies: mergeDependencies(parts.flatMap(part => [...part.dependencies])),
+      get: model => {
+        const out: Record<string, unknown> = {}
+        for (const part of parts) Object.assign(out, part.get(model as never))
+        return out as never
+      },
+      set: (model, shared) => {
+        let next = model
+        // Each part reads only its own fields from the merged value.
+        for (const part of parts) next = part.set(next as never, shared as never)
         return next
       },
     }
