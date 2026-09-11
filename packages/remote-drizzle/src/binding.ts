@@ -8,6 +8,7 @@ import { createSelectSchema } from 'drizzle-orm/effect-schema'
 import { getTableColumns, type AnyColumn } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import type { Schema } from 'effect'
+import type { OrderTerm } from './cursor.js'
 
 export interface RelationTarget {
   readonly entity: EntityBinding<any, any>
@@ -24,6 +25,8 @@ export interface ManyRelation extends RelationTarget {
   readonly kind: 'many'
   readonly foreignKey: AnyColumn
   readonly localKey: AnyColumn
+  /** Natural order of the loaded refs; defaults to the target id. */
+  readonly orderBy?: readonly OrderTerm[] | undefined
 }
 
 /**
@@ -35,6 +38,8 @@ export interface ManyToManyRelation extends RelationTarget {
   readonly through: PgTable
   readonly localColumn: AnyColumn
   readonly foreignColumn: AnyColumn
+  /** Natural order of the loaded refs; defaults to the target id. */
+  readonly orderBy?: readonly OrderTerm[] | undefined
 }
 
 export type RelationBinding = OneRelation | ManyRelation | ManyToManyRelation
@@ -50,6 +55,7 @@ export type RelationConfig =
       readonly entity: EntityBinding<any, any>
       readonly foreignKey: AnyColumn
       readonly localKey: AnyColumn
+      readonly orderBy?: readonly OrderTerm[] | undefined
     }
   | {
       readonly kind: 'manyToMany'
@@ -57,6 +63,7 @@ export type RelationConfig =
       readonly through: PgTable
       readonly localColumn: AnyColumn
       readonly foreignColumn: AnyColumn
+      readonly orderBy?: readonly OrderTerm[] | undefined
     }
 
 export const one = (
@@ -66,12 +73,17 @@ export const one = (
 
 export const many = (
   entity: EntityBinding<any, any>,
-  options: { readonly foreignKey: AnyColumn; readonly localKey: AnyColumn },
+  options: {
+    readonly foreignKey: AnyColumn
+    readonly localKey: AnyColumn
+    readonly orderBy?: readonly OrderTerm[] | undefined
+  },
 ): ManyRelation => ({
   kind: 'many',
   entity,
   foreignKey: options.foreignKey,
   localKey: options.localKey,
+  ...(options.orderBy === undefined ? {} : { orderBy: options.orderBy }),
 })
 
 export const manyToMany = (
@@ -80,6 +92,7 @@ export const manyToMany = (
     readonly through: PgTable
     readonly localColumn: AnyColumn
     readonly foreignColumn: AnyColumn
+    readonly orderBy?: readonly OrderTerm[] | undefined
   },
 ): ManyToManyRelation => ({
   kind: 'manyToMany',
@@ -87,6 +100,7 @@ export const manyToMany = (
   through: options.through,
   localColumn: options.localColumn,
   foreignColumn: options.foreignColumn,
+  ...(options.orderBy === undefined ? {} : { orderBy: options.orderBy }),
 })
 
 const normalizeRelation = (config: RelationConfig): RelationBinding => {
@@ -97,6 +111,7 @@ const normalizeRelation = (config: RelationConfig): RelationBinding => {
         entity: config.entity,
         foreignKey: config.foreignKey,
         localKey: config.localKey,
+        ...(config.orderBy === undefined ? {} : { orderBy: config.orderBy }),
       }
     case 'manyToMany':
       return {
@@ -105,6 +120,7 @@ const normalizeRelation = (config: RelationConfig): RelationBinding => {
         through: config.through,
         localColumn: config.localColumn,
         foreignColumn: config.foreignColumn,
+        ...(config.orderBy === undefined ? {} : { orderBy: config.orderBy }),
       }
     default:
       return { kind: 'one', entity: config.entity, field: config.field }

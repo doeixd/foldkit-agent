@@ -1,4 +1,5 @@
-import { pgTable, text, uuid } from 'drizzle-orm/pg-core'
+import { type SQL } from 'drizzle-orm'
+import { pgTable, PgDialect, text, uuid } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
 import { Entity, Selection } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
@@ -85,7 +86,11 @@ const PostEntity = Entity.make(
 
 const PostBinding = entity('Post', posts, {
   relations: {
-    comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+    comments: many(CommentBinding, {
+      foreignKey: comments.postId,
+      localKey: posts.id,
+      orderBy: [{ column: comments.body, direction: 'desc' }],
+    }),
     tags: manyToMany(TagBinding, {
       through: postTags,
       localColumn: postTags.postId,
@@ -99,14 +104,20 @@ const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<string, un
   const calls: Array<{
     selection: Record<string, unknown>
     where: unknown
-    innerJoin?: unknown
+    innerJoin: unknown
+    orderBy: ReadonlyArray<unknown> | undefined
   }> = []
   let index = 0
   const database: DrizzleDatabaseService = {
     select: selection => {
       const rows = rowsAt(index)
       index += 1
-      const call = { selection, where: undefined as unknown, innerJoin: undefined as unknown }
+      const call = {
+        selection,
+        where: undefined as unknown,
+        innerJoin: undefined as unknown,
+        orderBy: undefined as ReadonlyArray<unknown> | undefined,
+      }
       calls.push(call)
       const promise = Promise.resolve(
         rows.map(row => Object.fromEntries(Object.keys(selection).map(key => [key, row[key]]))),
@@ -120,7 +131,10 @@ const makeDatabase = (rowsAt: (index: number) => ReadonlyArray<Record<string, un
           call.innerJoin = { table, on }
           return statement
         },
-        orderBy: () => statement,
+        orderBy: (...order: ReadonlyArray<unknown>) => {
+          call.orderBy = order
+          return statement
+        },
         limit: () => statement,
         then: promise.then.bind(promise),
       } as unknown as DrizzleStatement
@@ -278,6 +292,9 @@ describe('RemoteDrizzle execution', () => {
     })
     expect(calls).toHaveLength(2)
     expect(Object.keys(calls[1]!.selection)).toEqual(['id', 'parent'])
+
+    const dialect = new PgDialect()
+    expect(dialect.sqlToQuery(calls[1]!.orderBy![0] as SQL).sql).toContain('"comments"."body" desc')
   })
 
   it('emits an empty array when a many relation has no children', async () => {

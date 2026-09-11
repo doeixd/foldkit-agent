@@ -217,6 +217,10 @@ export const source = <P = unknown>(
         const byParent = new Map<string, string[]>()
         if (parentKeys.length > 0) {
           const targetId = idColumn(relation.entity)
+          const naturalOrder =
+            relation.orderBy === undefined || relation.orderBy.length === 0
+              ? [asc(targetId)]
+              : orderByTerms(relation.orderBy, 'forward')
           if (relation.kind === 'many') {
             const childRows = yield* selectRows(
               database,
@@ -224,7 +228,7 @@ export const source = <P = unknown>(
               { id: targetId, parent: relation.foreignKey },
               {
                 where: inArray(relation.foreignKey, parentKeys),
-                orderBy: [asc(targetId)],
+                orderBy: naturalOrder,
               },
             )
             for (const child of childRows) {
@@ -243,7 +247,7 @@ export const source = <P = unknown>(
                   table: relation.entity.table,
                   on: eq(relation.foreignColumn, targetId),
                 },
-                orderBy: [asc(targetId)],
+                orderBy: naturalOrder,
               },
             )
             for (const through of throughRows) {
