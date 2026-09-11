@@ -5,9 +5,6 @@
  * `requestId`**, so a transport retry cannot apply the same change twice. An
  * unknown or already-applied result is a no-op.
  */
-import { Effect, Schema } from 'effect'
-import { RemoteClient, type MutationDescriptor } from './index.js'
-import { RemoteMutationError } from './wire.js'
 import { entityKey, writeEntity, type EntityStore } from './store.js'
 
 export interface NormalizedPatch {
@@ -15,26 +12,6 @@ export interface NormalizedPatch {
   readonly id: string
   readonly values: Readonly<Record<string, unknown>>
 }
-
-/**
- * Runs a mutation through `RemoteClient`, decoding its typed Output. The
- * `requestId` is stable across transport retries so the server can dedupe and
- * `reconcileMutation` can apply the result at most once.
- */
-export const mutate = <Name extends string, Input, Output>(
-  mutation: MutationDescriptor<Name, Input, Output>,
-  input: Input,
-  requestId: string,
-): Effect.Effect<Output, RemoteMutationError, RemoteClient> =>
-  Effect.gen(function* () {
-    const client = yield* RemoteClient
-    const result = yield* client.mutate({
-      requestId,
-      mutation: mutation.name,
-      input: Schema.encodeSync(mutation.Input)(input),
-    })
-    return Schema.decodeUnknownSync(mutation.Output)(result.output)
-  })
 
 export interface MutationState {
   readonly pending: ReadonlySet<string>

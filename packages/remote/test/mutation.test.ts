@@ -3,20 +3,18 @@ import { describe, expect, it } from 'vitest'
 import {
   Entity,
   Mutation,
+  Remote,
   RemoteClient,
-  emptyStore,
-  entityKey,
-  readField,
-  writeEntity,
-} from '../src/index.js'
-import {
   beginMutation,
   emptyMutationState,
+  emptyStore,
+  entityKey,
   failMutation,
-  mutate,
+  readField,
   reconcileMutation,
+  writeEntity,
   type NormalizedPatch,
-} from '../src/mutation.js'
+} from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 const RenameUser = Mutation.make('RenameUser', {
@@ -43,7 +41,9 @@ describe('Remote mutations', () => {
   it('runs a mutation and decodes its typed Output', async () => {
     requests.length = 0
     const output = await Effect.runPromise(
-      mutate(RenameUser, { id: 'u1', name: 'ada' }, 'req-1').pipe(Effect.provide(FakeClient)),
+      Remote.mutate(RenameUser, { id: 'u1', name: 'ada' }, 'req-1').pipe(
+        Effect.provide(FakeClient),
+      ),
     )
     expect(output).toEqual({ id: 'u1' })
     expect(requests).toEqual([
