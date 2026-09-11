@@ -2,7 +2,7 @@ import { Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
 import { Entity, Mutation, Query, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
-import { RemoteServer } from '../src/index.js'
+import { RemoteServer, RemoteServerError } from '../src/index.js'
 
 const User = Entity.make(
   'User',
@@ -163,5 +163,38 @@ describe('RemoteServer', () => {
 
   it('rejects an unknown query', async () => {
     await expect(query('Nope', {}, {})).rejects.toThrow()
+  })
+
+  it('remaps a source RemoteServerError onto the wire error', async () => {
+    const failing = RemoteServer.make(
+      {},
+      {
+        entities: [
+          RemoteServer.entity<string>(User, {
+            read: () => Effect.fail(new RemoteServerError({ message: 'source refused the read' })),
+          }),
+        ],
+      },
+    )
+    const failingLayer = RemoteRpc.toLayer({
+      ...RemoteServer.handlers(failing, 'user'),
+      FoldkitRemoteLive: () => Stream.empty,
+    })
+    const result = await Effect.runPromise(
+      Effect.result(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const client = yield* RpcTest.makeClient(RemoteRpc)
+            return yield* client.FoldkitRemoteRead({
+              requests: [{ entity: 'User', id: 'u1', fields: ['id'] }],
+            })
+          }),
+        ).pipe(Effect.provide(failingLayer)),
+      ),
+    )
+    expect(result._tag).toBe('Failure')
+    if (result._tag !== 'Failure') return
+    expect(result.failure._tag).toBe('RemoteReadError')
+    expect(result.failure.message).toBe('source refused the read')
   })
 })

@@ -177,94 +177,111 @@ export const RemoteServer = {
       payload: Schema.Schema.Type<typeof QueryRequest>,
     ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
   } => ({
-    FoldkitRemoteRead: payload =>
-      Effect.gen(function* () {
-        const grouped = new Map<string, { ids: string[]; fields: Set<string> }>()
-        for (const request of payload.requests) {
-          let group = grouped.get(request.entity)
-          if (group === undefined) {
-            group = { ids: [], fields: new Set() }
-            grouped.set(request.entity, group)
+    FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
+      const grouped = new Map<string, { ids: string[]; fields: Set<string> }>()
+      for (const request of payload.requests) {
+        let group = grouped.get(request.entity)
+        if (group === undefined) {
+          group = { ids: [], fields: new Set() }
+          grouped.set(request.entity, group)
+        }
+        if (!group.ids.includes(request.id)) group.ids.push(request.id)
+        for (const field of request.fields) group.fields.add(field)
+      }
+
+      const entities: Array<{
+        readonly entity: string
+        readonly id: string
+        readonly values: Record<string, unknown>
+      }> = []
+
+      for (const [name, group] of grouped) {
+        const source = server.entities.get(name)
+        if (source === undefined) continue
+        const requested = [...group.fields]
+        const allowed =
+          source.authorize === undefined ? requested : source.authorize(principal, requested)
+        if (allowed.length === 0) continue
+
+        const records = yield* source
+          .read({ ids: group.ids, fields: allowed, principal })
+          .pipe(
+            Effect.catchTag('RemoteServerError', error =>
+              Effect.fail(new RemoteReadError({ message: error.message })),
+            ),
+          )
+
+        for (const record of records) {
+          const values: Record<string, unknown> = {}
+          for (const field of allowed) {
+            if (field in record.values) values[field] = record.values[field]
           }
-          if (!group.ids.includes(request.id)) group.ids.push(request.id)
-          for (const field of request.fields) group.fields.add(field)
+          entities.push({ entity: name, id: record.id, values })
         }
+      }
 
-        const entities: Array<{
-          readonly entity: string
-          readonly id: string
-          readonly values: Record<string, unknown>
-        }> = []
+      return { entities }
+    }),
 
-        for (const [name, group] of grouped) {
-          const source = server.entities.get(name)
-          if (source === undefined) continue
-          const requested = [...group.fields]
-          const allowed =
-            source.authorize === undefined ? requested : source.authorize(principal, requested)
-          if (allowed.length === 0) continue
-
-          const records = yield* source
-            .read({ ids: group.ids, fields: allowed, principal })
-            .pipe(Effect.mapError(error => new RemoteReadError({ message: error.message })))
-
-          for (const record of records) {
-            const values: Record<string, unknown> = {}
-            for (const field of allowed) {
-              if (field in record.values) values[field] = record.values[field]
-            }
-            entities.push({ entity: name, id: record.id, values })
-          }
-        }
-
-        return { entities }
-      }),
-
-    FoldkitRemoteMutate: payload =>
-      Effect.gen(function* () {
-        const source = server.mutations.get(payload.mutation)
-        if (source === undefined) {
-          return yield* new RemoteMutationError({
-            message: `Unknown mutation: ${payload.mutation}`,
-          })
-        }
-
-        const input = yield* Effect.try({
-          try: () => Schema.decodeUnknownSync(source.Input)(payload.input),
-          catch: () => new RemoteMutationError({ message: 'Invalid mutation input' }),
+    FoldkitRemoteMutate: Effect.fn('RemoteServer.FoldkitRemoteMutate')(function* (payload) {
+      const source = server.mutations.get(payload.mutation)
+      if (source === undefined) {
+        return yield* new RemoteMutationError({
+          message: `Unknown mutation: ${payload.mutation}`,
         })
+      }
 
-        const outcome = yield* source
-          .run({ input, principal })
-          .pipe(Effect.mapError(error => new RemoteMutationError({ message: error.message })))
+      const input = yield* Schema.decodeUnknownEffect(source.Input)(payload.input).pipe(
+        Effect.catchTag('SchemaError', () =>
+          Effect.fail(new RemoteMutationError({ message: 'Invalid mutation input' })),
+        ),
+      )
 
-        return {
-          output: Schema.encodeSync(source.Output)(outcome.output),
-          entities: outcome.entities.map(patch => ({
-            entity: patch.entity,
-            id: patch.id,
-            values: patch.values,
-          })),
-        }
-      }),
+      const outcome = yield* source
+        .run({ input, principal })
+        .pipe(
+          Effect.catchTag('RemoteServerError', error =>
+            Effect.fail(new RemoteMutationError({ message: error.message })),
+          ),
+        )
 
-    FoldkitRemoteQuery: payload =>
-      Effect.gen(function* () {
-        const source = server.queries.get(payload.query)
-        if (source === undefined) {
-          return yield* new RemoteQueryError({ message: `Unknown query: ${payload.query}` })
-        }
+      const output = yield* Schema.encodeUnknownEffect(source.Output)(outcome.output).pipe(
+        Effect.catchTag('SchemaError', () =>
+          Effect.fail(new RemoteMutationError({ message: 'Invalid mutation output' })),
+        ),
+      )
 
-        const input = yield* Effect.try({
-          try: () => Schema.decodeUnknownSync(source.Input)(payload.input),
-          catch: () => new RemoteQueryError({ message: 'Invalid query input' }),
-        })
+      return {
+        output,
+        entities: outcome.entities.map(patch => ({
+          entity: patch.entity,
+          id: patch.id,
+          values: patch.values,
+        })),
+      }
+    }),
 
-        const page = yield* source
-          .run({ input, window: payload.window, principal })
-          .pipe(Effect.mapError(error => new RemoteQueryError({ message: error.message })))
+    FoldkitRemoteQuery: Effect.fn('RemoteServer.FoldkitRemoteQuery')(function* (payload) {
+      const source = server.queries.get(payload.query)
+      if (source === undefined) {
+        return yield* new RemoteQueryError({ message: `Unknown query: ${payload.query}` })
+      }
 
-        return { edges: page.edges, start: page.start, end: page.end }
-      }),
+      const input = yield* Schema.decodeUnknownEffect(source.Input)(payload.input).pipe(
+        Effect.catchTag('SchemaError', () =>
+          Effect.fail(new RemoteQueryError({ message: 'Invalid query input' })),
+        ),
+      )
+
+      const page = yield* source
+        .run({ input, window: payload.window, principal })
+        .pipe(
+          Effect.catchTag('RemoteServerError', error =>
+            Effect.fail(new RemoteQueryError({ message: error.message })),
+          ),
+        )
+
+      return { edges: page.edges, start: page.start, end: page.end }
+    }),
   }),
 }
