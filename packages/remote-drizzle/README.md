@@ -187,6 +187,20 @@ const Post = entity('Post', posts, {
 The read joins the target table (`innerJoin` on the foreign key) so dangling
 through rows are dropped, then emits refs ordered by target id.
 
+A collection relation can be filtered per principal at the source, e.g. to expose
+only rows the caller may see:
+
+```ts
+const ProjectSource = source(ProjectBinding, {
+  relations: {
+    comments: principal => eq(comments.visibleTo, principal.id),
+  },
+})
+```
+
+The policy is applied to `many`/`manyToMany` child queries alongside any static
+`where` on the binding; a policy on a singular relation is ignored.
+
 A relation can be paginated. Declare the field as a page of refs and select it
 with a window:
 

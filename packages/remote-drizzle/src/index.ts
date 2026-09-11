@@ -195,15 +195,26 @@ const selectRows = (
   )
 }
 
+const withFilters = (base: SQL, ...filters: ReadonlyArray<SQL | undefined>): SQL => {
+  const conditions: SQL[] = [base]
+  for (const filter of filters) if (filter !== undefined) conditions.push(filter)
+  return conditions.length === 1 ? base : and(...conditions)!
+}
+
 /**
  * A `RemoteServer.entity` source backed by the `DrizzleDatabase` service. It
  * selects the requested columns in one batch, then resolves each selected
  * relation: a `one` relation becomes a ref key, and a `many` relation loads the
- * target ids in one `IN (...)` and emits an array of ref keys.
+ * target ids in one `IN (...)`. `options.relations` adds a principal-scoped
+ * filter to a collection relation (e.g. only rows this principal may see).
  */
 export const source = <P = unknown>(
   binding: EntityBinding<any, any>,
-  options?: { readonly authorize?: EntitySource<P, DrizzleDatabase>['authorize'] | undefined },
+  options?: {
+    readonly authorize?: EntitySource<P, DrizzleDatabase>['authorize'] | undefined
+    readonly relations?:
+      Readonly<Record<string, ((principal: P) => SQL | undefined) | undefined>> | undefined
+  },
 ): EntitySource<P, DrizzleDatabase> => ({
   entity: binding.name,
   read: context =>
@@ -222,6 +233,8 @@ export const source = <P = unknown>(
         const relation = binding.relations[field]
         if (relation === undefined) continue
 
+        // A principal-scoped filter applies only to collection relations.
+        const policyWhere = options?.relations?.[field]?.(context.principal)
         const window = context.windows?.[field]
         if (relation.kind === 'one') {
           if (window !== undefined) {
@@ -286,12 +299,7 @@ export const source = <P = unknown>(
                   relation.kind === 'many'
                     ? eq(relation.foreignKey, parentKey)
                     : eq(relation.localColumn, parentKey)
-                const conditions = [
-                  parentWhere,
-                  ...(relation.where === undefined ? [] : [relation.where]),
-                  ...(keyset === undefined ? [] : [keyset]),
-                ]
-                const where = conditions.length === 1 ? parentWhere : and(...conditions)
+                const where = withFilters(parentWhere, relation.where, policyWhere, keyset)
 
                 const childRows =
                   relation.kind === 'many'
@@ -359,10 +367,11 @@ export const source = <P = unknown>(
               relation.entity.table,
               { child: targetId, parent: relation.foreignKey },
               {
-                where:
-                  relation.where === undefined
-                    ? inArray(relation.foreignKey, parentKeys)
-                    : and(inArray(relation.foreignKey, parentKeys), relation.where),
+                where: withFilters(
+                  inArray(relation.foreignKey, parentKeys),
+                  relation.where,
+                  policyWhere,
+                ),
                 orderBy: naturalOrder,
               },
             )
@@ -377,10 +386,11 @@ export const source = <P = unknown>(
               relation.through,
               { child: targetId, parent: relation.localColumn },
               {
-                where:
-                  relation.where === undefined
-                    ? inArray(relation.localColumn, parentKeys)
-                    : and(inArray(relation.localColumn, parentKeys), relation.where),
+                where: withFilters(
+                  inArray(relation.localColumn, parentKeys),
+                  relation.where,
+                  policyWhere,
+                ),
                 innerJoin: {
                   table: relation.entity.table,
                   on: eq(relation.foreignColumn, targetId),
