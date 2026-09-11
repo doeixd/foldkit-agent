@@ -9,6 +9,7 @@
     { "path": "./packages/durable" },
     { "path": "./packages/sync" },
     { "path": "./packages/surface" },
+    { "path": "./packages/remote" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" }
   ]

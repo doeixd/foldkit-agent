@@ -1,9 +1,9 @@
 import { Optic, Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { describe, expect, it } from 'vitest'
-import { Entity, ModelRef, Projection, Remote, Selection, Surface } from '../src/index.js'
+import { ModelRef, Projection, Surface } from '../src/index.js'
 
-const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
+const UserSchema = Schema.Struct({ id: Schema.String, name: Schema.String })
 
 const Model = Schema.Struct({
   session: Schema.Struct({ user: Schema.Struct({ name: Schema.String }) }),
@@ -63,7 +63,7 @@ describe('Surface runtime', () => {
   })
 
   it('reads a Projection.of selection', () => {
-    const projection = Projection.of(User.schema)({ id: true, name: true })
+    const projection = Projection.of(UserSchema)({ id: true, name: true })
     expect(Projection.read(projection, { id: 'u1', name: 'ada' })).toEqual({
       id: 'u1',
       name: 'ada',
@@ -77,7 +77,7 @@ describe('Surface runtime', () => {
 
   it('merges and de-duplicates projection dependencies', () => {
     // A raw-Schema projection is not a Model projection: no dependencies.
-    expect(Projection.of(User.schema)({ id: true, name: true }).dependencies).toEqual([])
+    expect(Projection.of(UserSchema)({ id: true, name: true }).dependencies).toEqual([])
 
     const once = Projection.struct({ a: App.model.session, b: App.model.session })
     expect(once.dependencies).toEqual([['session']])
@@ -98,7 +98,7 @@ describe('Surface runtime', () => {
   })
 
   it('maps a Projection over an array and an Option', () => {
-    const summary = Projection.of(User.schema)({ name: true })
+    const summary = Projection.of(UserSchema)({ name: true })
 
     const many = Projection.array(summary)
     expect(many.read([{ id: 'u1', name: 'ada' }])).toEqual([{ name: 'ada' }])
@@ -143,7 +143,7 @@ describe('Surface runtime', () => {
     const decode = (schema: Schema.Schema<unknown>, input: unknown) =>
       Schema.decodeUnknownSync(schema as unknown as Schema.ConstraintDecoder<unknown>)(input)
 
-    const empty = Projection.of(User.schema)({})
+    const empty = Projection.of(UserSchema)({})
     expect(empty.read({ id: 'u1', name: 'ada' })).toEqual({})
     expect(decode(empty.Model, {})).toEqual({})
     expect(() => decode(empty.Model, { id: 'u1' })).toThrow()
@@ -152,12 +152,5 @@ describe('Surface runtime', () => {
   it('rejects a Model field whose name collides with a ModelRef member', () => {
     const Bad = Schema.Struct({ at: Schema.String })
     expect(() => Surface.make({ Model: Bad, Message })).toThrow('reserved by ModelRef')
-  })
-
-  it('starts a Remote selection as Initial', () => {
-    const Data = Remote.make({ entities: [User] })
-    const selection = Selection.make(User, { id: true, name: true })
-    expect(Remote.select(Data, selection)).toEqual({ _tag: 'Initial' })
-    expect(selection.entity).toBe('User')
   })
 })

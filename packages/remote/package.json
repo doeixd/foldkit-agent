@@ -1,0 +1,46 @@
+{
+  "name": "foldkit-remote",
+  "version": "0.0.0",
+  "description": "Normalized application-facing server state for Foldkit: entities, selections, and the pure remote core.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Patrick Glenn <doeixd@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doeixd/foldkit-plus.git",
+    "directory": "packages/remote"
+  },
+  "homepage": "https://github.com/doeixd/foldkit-plus/tree/main/packages/remote#readme",
+  "bugs": {
+    "url": "https://github.com/doeixd/foldkit-plus/issues"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "foldkit-surface": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.7.2"
+  }
+}

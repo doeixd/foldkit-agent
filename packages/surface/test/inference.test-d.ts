@@ -1,5 +1,5 @@
 /**
- * Phase 0 inference contract. These assertions run under `pnpm typecheck`
+ * Surface inference contract. These assertions run under `pnpm typecheck`
  * (`*.test-d.ts` is type-checked but not executed). Every `@ts-expect-error`
  * must fail `tsc` when the rejected expression is made legal.
  */
@@ -7,35 +7,25 @@ import { Optic, Schema } from 'effect'
 import type { Option } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import { defineMessageUnion } from 'foldkit/message'
-import {
-  Entity,
-  ModelRef,
-  Projection,
-  Remote,
-  Selection,
-  Surface,
-  type RemoteData,
-} from '../src/index.js'
+import { ModelRef, Projection, Surface } from '../src/index.js'
 
 // --- fixtures --------------------------------------------------------------
 
-const User = Entity.make(
-  'User',
-  Schema.Struct({ id: Schema.String, name: Schema.String, avatarUrl: Schema.String }),
-)
-const Project = Entity.make(
-  'Project',
-  Schema.Struct({
-    id: Schema.String,
-    name: Schema.String,
-    status: Schema.String,
-    owner: User.schema,
-  }),
-)
+const UserSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  avatarUrl: Schema.String,
+})
+const ProjectSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  status: Schema.String,
+  owner: UserSchema,
+})
 
 const Model = Schema.Struct({
   session: Schema.Struct({ user: Schema.Struct({ name: Schema.String }) }),
-  projects: Schema.Record(Schema.String, Project.schema),
+  projects: Schema.Record(Schema.String, ProjectSchema),
   todos: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
 })
 type ModelValue = Schema.Schema.Type<typeof Model>
@@ -63,7 +53,7 @@ const _todos: ModelRef<
 
 const _project: ModelRef<
   ModelValue,
-  Option.Option<Schema.Schema.Type<typeof Project.schema>>
+  Option.Option<Schema.Schema.Type<typeof ProjectSchema>>
 > = App.model.projects.at('p1')
 const _todo: ModelRef<
   ModelValue,
@@ -75,22 +65,18 @@ App.model.nope
 
 // --- case 2: Projection.of checks keys and nested Projection roots ---------
 
-const UserSummary = Projection.of(User.schema)({ id: true, name: true })
+const UserSummary = Projection.of(UserSchema)({ id: true, name: true })
 const _userSummary: Projection<
-  Schema.Schema.Type<typeof User.schema>,
+  Schema.Schema.Type<typeof UserSchema>,
   { readonly id: string; readonly name: string }
 > = UserSummary
 
-const emptySelection = Projection.of(User.schema)({})
-const _emptySelection: Projection<Schema.Schema.Type<typeof User.schema>, {}> = emptySelection
+const emptySelection = Projection.of(UserSchema)({})
+const _emptySelection: Projection<Schema.Schema.Type<typeof UserSchema>, {}> = emptySelection
 
-const ProjectSummary = Projection.of(Project.schema)({
-  id: true,
-  name: true,
-  owner: UserSummary,
-})
+const ProjectSummary = Projection.of(ProjectSchema)({ id: true, name: true, owner: UserSummary })
 const _projectSummary: Projection<
-  Schema.Schema.Type<typeof Project.schema>,
+  Schema.Schema.Type<typeof ProjectSchema>,
   {
     readonly id: string
     readonly name: string
@@ -99,10 +85,10 @@ const _projectSummary: Projection<
 > = ProjectSummary
 
 // @ts-expect-error `nope` is not a field of User
-Projection.of(User.schema)({ nope: true })
+Projection.of(UserSchema)({ nope: true })
 
 // @ts-expect-error the nested Projection must focus the field's own Schema (User), not Project
-Projection.of(Project.schema)({ owner: Projection.of(Project.schema)({ id: true }) })
+Projection.of(ProjectSchema)({ owner: Projection.of(ProjectSchema)({ id: true }) })
 
 const listProjection = Projection.struct({
   todos: App.model.todos,
@@ -118,7 +104,7 @@ const _listProjection: Projection<
 
 const projectCards = Projection.array(ProjectSummary)
 const _projectCards: Projection<
-  ReadonlyArray<Schema.Schema.Type<typeof Project.schema>>,
+  ReadonlyArray<Schema.Schema.Type<typeof ProjectSchema>>,
   ReadonlyArray<{
     readonly id: string
     readonly name: string
@@ -128,7 +114,7 @@ const _projectCards: Projection<
 
 const maybeUser = Projection.option(UserSummary)
 const _maybeUser: Projection<
-  Option.Option<Schema.Schema.Type<typeof User.schema>>,
+  Option.Option<Schema.Schema.Type<typeof UserSchema>>,
   Option.Option<{ readonly id: string; readonly name: string }>
 > = maybeUser
 
@@ -183,22 +169,7 @@ const _appView: (model: ModelValue, h: HtmlBuilder<AppMessage>) => Html = Surfac
   cardView,
 )
 
-// --- case 4: Remote.make embeds without `any`; Remote.select is RemoteData --
-
-const Data = Remote.make({ entities: [User, Project] })
-const SelectedUser = Selection.make(User, { id: true, name: true })
-const selectedUser: RemoteData<{ readonly id: string; readonly name: string }> = Remote.select(
-  Data,
-  SelectedUser,
-)
-void selectedUser
-
-const RemoteModel = Schema.Struct({ remote: Data.Model, route: Schema.String })
-const RemoteMessage = defineMessageUnion({ Ping: {} })
-const RemoteApp = Surface.make({ Model: RemoteModel, Message: RemoteMessage })
-const _entities = RemoteApp.model.remote.entities
-// @ts-expect-error `nope` is not a field of the Remote store
-RemoteApp.model.remote.nope
+// --- registry: explicit collection, duplicate and cross-App rejection ------
 
 const CardA = Surface.define(App, 'CardA', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
@@ -206,24 +177,18 @@ const CardA = Surface.define(App, 'CardA', {
 })
 const _registry = Surface.registry(App, [ProjectCard, CardA])
 
-const RemoteCard = Surface.define(RemoteApp, 'RemoteCard', {
+const OtherModel = Schema.Struct({ route: Schema.String })
+const OtherMessage = defineMessageUnion({ Ping: {} })
+const OtherApp = Surface.make({ Model: OtherModel, Message: OtherMessage })
+const OtherCard = Surface.define(OtherApp, 'OtherCard', {
   model: ({ model }) => Projection.struct({ route: model.route }),
-  messages: [RemoteMessage.Ping],
+  messages: [OtherMessage.Ping],
 })
-// @ts-expect-error `RemoteCard` belongs to a different App Root
-Surface.registry(App, [RemoteCard])
+// @ts-expect-error `OtherCard` belongs to a different App Root
+Surface.registry(App, [OtherCard])
 
 Surface.define(App, 'BadCard', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
-  // @ts-expect-error `RemoteMessage.Ping` is not part of App.Message
-  messages: [RemoteMessage.Ping],
+  // @ts-expect-error `OtherMessage.Ping` is not part of App.Message
+  messages: [OtherMessage.Ping],
 })
-
-// --- case 5: Entity.patch rejects unknown and mistyped fields --------------
-
-Entity.patch(Project.ref('p1'), { name: 'Renamed' })
-Entity.patch(Project.ref('p1'), { status: 'archived' })
-// @ts-expect-error `banana` is not a field of Project
-Entity.patch(Project.ref('p1'), { banana: 1 })
-// @ts-expect-error `status` is a string, not a number
-Entity.patch(Project.ref('p1'), { status: 123 })
