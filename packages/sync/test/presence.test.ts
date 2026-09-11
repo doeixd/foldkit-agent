@@ -168,8 +168,8 @@ describe('presence', () => {
         const hub = createPresenceHub<Cursor>()
         const a = socketPair()
         const b = socketPair()
-        servePresence(a.server, hub)
-        servePresence(b.server, hub)
+        servePresence(a.server, hub, { peerId: 'a' })
+        servePresence(b.server, hub, { peerId: 'b' })
 
         const presenceA = yield* make({
           id: 'a',
@@ -200,12 +200,25 @@ describe('presence', () => {
     const { client, server } = socketPair()
     const seen: Array<unknown> = []
     hub.join(update => seen.push(update))
-    servePresence(server, hub)
+    servePresence(server, hub, { peerId: 'a' })
 
     client.send('not json')
     client.send(JSON.stringify({ id: 'x', cursor: 0, pending: [] }))
 
     expect(seen).toEqual([])
+  })
+
+  it('stamps the connection identity, ignoring a client-supplied id', () => {
+    const hub = createPresenceHub<Cursor>()
+    const { client, server } = socketPair()
+    const seen: Array<{ id: string; value: Cursor | null }> = []
+    hub.join(update => seen.push(update))
+    servePresence(server, hub, { peerId: 'a' })
+
+    // A client claims to be "b"; the server must attribute the update to "a".
+    client.send(JSON.stringify({ presence: { id: 'b', value: { cursor: 9 } } }))
+
+    expect(seen).toEqual([{ id: 'a', value: { cursor: 9 } }])
   })
 
   it('delivers to every peer when one send throws', () => {

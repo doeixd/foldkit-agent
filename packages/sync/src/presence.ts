@@ -216,22 +216,30 @@ export const createPresenceHub = <Update>(): PresenceHub<Update> => {
 
 const frameType = 'presence'
 
+/** A presence frame. `id` is set by the server that owns the identity. */
+interface PresenceFrame<Update> {
+  readonly id: string | undefined
+  readonly value: Update | null
+}
+
 /** Decodes a presence frame, ignoring anything else a socket may carry. */
-const decodePresence = <Update>(data: string): PresenceUpdate<Update> | undefined => {
+const decodePresence = <Update>(data: string): PresenceFrame<Update> | undefined => {
   let frame: Record<string, unknown>
   try {
     frame = JSON.parse(data) as Record<string, unknown>
   } catch {
     return undefined
   }
-  const value = frame[frameType]
-  if (typeof value !== 'object' || value === null) return undefined
-  const { id, value: payload } = value as { id?: unknown; value?: unknown }
-  if (typeof id !== 'string') return undefined
-  return { id, value: (payload ?? null) as Update | null }
+  const payload = frame[frameType]
+  if (typeof payload !== 'object' || payload === null) return undefined
+  const { id, value } = payload as { id?: unknown; value?: unknown }
+  return { id: typeof id === 'string' ? id : undefined, value: (value ?? null) as Update | null }
 }
 
-/** A presence channel fed by frames arriving on a socket, sent back over it. */
+/**
+ * A presence channel fed by stamped frames from the server, sent back without an
+ * id: the server owns peer identity, so a client cannot assert another's.
+ */
 export const socketPresenceChannel = <Update>(
   socket: SocketLike,
 ): Effect.Effect<PresenceChannel<Update>, never, Scope.Scope> =>
@@ -240,29 +248,34 @@ export const socketPresenceChannel = <Update>(
     yield* Effect.acquireRelease(
       Effect.sync(() =>
         socket.onMessage(data => {
-          const update = decodePresence<Update>(data)
-          if (update !== undefined) PubSub.publishUnsafe(updates, update)
+          const frame = decodePresence<Update>(data)
+          // An unstamped frame is not from the server and carries no identity.
+          if (frame === undefined || frame.id === undefined) return
+          PubSub.publishUnsafe(updates, { id: frame.id, value: frame.value })
         }),
       ),
       off => Effect.sync(off),
     )
     return {
       updates,
-      publish: update => Effect.sync(() => socket.send(JSON.stringify({ [frameType]: update }))),
+      publish: update =>
+        Effect.sync(() => socket.send(JSON.stringify({ [frameType]: { value: update.value } }))),
     }
   })
 
-/** Serves presence frames on an accepted socket, fanning them through the hub. */
+/** Serves presence frames on an accepted socket, stamping the connection's identity. */
 export const servePresence = <Update>(
   socket: SocketLike,
   hub: PresenceHub<Update>,
+  options: { readonly peerId: string },
 ): (() => void) => {
   const send = (update: PresenceUpdate<Update>): void =>
-    socket.send(JSON.stringify({ [frameType]: update }))
+    socket.send(JSON.stringify({ [frameType]: { id: update.id, value: update.value } }))
   const leave = hub.join(send)
   const off = socket.onMessage(data => {
-    const update = decodePresence<Update>(data)
-    if (update !== undefined) hub.publish(update)
+    const frame = decodePresence<Update>(data)
+    // The connection owns the identity; a client-supplied id is ignored.
+    if (frame !== undefined) hub.publish({ id: options.peerId, value: frame.value })
   })
   return () => {
     off()

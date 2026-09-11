@@ -76,7 +76,7 @@ export const startSyncServer = async <Presence = unknown>(options: {
       }),
     ]
     if (options.presence !== undefined)
-      stops.push(servePresence(socketLike(socket), options.presence))
+      stops.push(servePresence(socketLike(socket), options.presence, { peerId: principal.actorId }))
     socket.on('close', () => {
       if (expiry !== undefined) clearTimeout(expiry)
       for (const stop of stops) stop()
