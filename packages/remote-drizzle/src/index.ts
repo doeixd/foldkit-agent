@@ -10,7 +10,7 @@
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
 import { and, gt, inArray, lt, type Column, getTableColumns, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import type { Selection } from 'foldkit-remote'
 
 export interface RelationBinding {
@@ -101,3 +101,54 @@ export const queryPlan = (
         : and(options.where, options.cursor),
   limit: options.limit,
 })
+
+export interface EntityRecord {
+  readonly id: string
+  readonly values: Readonly<Record<string, unknown>>
+}
+
+export interface ReadContext {
+  readonly ids: readonly string[]
+  readonly fields: readonly string[]
+  readonly principal: unknown
+}
+
+export interface SourceQuery {
+  readonly columns: Readonly<Record<string, Column>>
+  readonly where: SQL
+}
+
+/** The pruned column map for the allowed/requested scalar fields. */
+export const selectColumns = (
+  binding: EntityBinding<any, any>,
+  fields: readonly string[],
+): Readonly<Record<string, Column>> => {
+  const columns: Record<string, Column> = {}
+  for (const field of fields) {
+    const column = binding.columns[field]
+    if (column !== undefined) columns[field] = column
+  }
+  return columns
+}
+
+/**
+ * Builds a `RemoteServer.entity` reader from a binding and a Drizzle executor.
+ * The executor is the one Drizzle-specific line,
+ * `(query) => db.select(query.columns).from(table).where(query.where)`.
+ *
+ * Field authorization still holds: only `context.fields` (already intersected
+ * with the principal's allowed fields by `RemoteServer`) become columns.
+ */
+export const source =
+  <E>(
+    binding: EntityBinding<any, any>,
+    run: (query: SourceQuery) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E>,
+  ) =>
+  (context: ReadContext): Effect.Effect<ReadonlyArray<EntityRecord>, E> =>
+    Effect.gen(function* () {
+      if (context.ids.length === 0) return []
+      const columns = selectColumns(binding, context.fields)
+      if (Object.keys(columns).length === 0) return []
+      const rows = yield* run({ columns, where: whereIds(binding, context.ids) })
+      return rows.map(row => ({ id: String(row.id), values: row }))
+    })

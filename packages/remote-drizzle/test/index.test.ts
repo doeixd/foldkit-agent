@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { text, uuid, pgTable, PgDialect } from 'drizzle-orm/pg-core'
-import { Schema } from 'effect'
+import { Effect, Schema } from 'effect'
 import { Entity, Selection } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import {
@@ -9,7 +9,9 @@ import {
   entity,
   queryPlan,
   relationsFor,
+  source,
   whereIds,
+  type SourceQuery,
 } from '../src/index.js'
 
 const users = pgTable('users', {
@@ -83,5 +85,33 @@ describe('RemoteDrizzle', () => {
     })
     expect(plan.limit).toBe(25)
     expect(dialect.sqlToQuery(plan.where as NonNullable<typeof plan.where>).sql).toContain('and')
+  })
+
+  it('prunes to allowed fields, batches ids, and normalizes records', async () => {
+    const calls: SourceQuery[] = []
+    const read = source(UserBinding, query => {
+      calls.push(query)
+      return Effect.succeed([{ id: 'a', name: 'A', email: 'a@b.c' }])
+    })
+
+    const records = await Effect.runPromise(
+      read({ ids: ['a', 'b'], fields: ['id', 'name'], principal: null }),
+    )
+    expect(records).toEqual([{ id: 'a', values: { id: 'a', name: 'A', email: 'a@b.c' } }])
+    expect(Object.keys(calls[0]!.columns)).toEqual(['id', 'name'])
+  })
+
+  it('does no work for empty ids or an all-relation selection', async () => {
+    let called = false
+    const read = source(UserBinding, () => {
+      called = true
+      return Effect.succeed([])
+    })
+
+    expect(await Effect.runPromise(read({ ids: [], fields: ['id'], principal: null }))).toEqual([])
+    expect(
+      await Effect.runPromise(read({ ids: ['a'], fields: ['owner'], principal: null })),
+    ).toEqual([])
+    expect(called).toBe(false)
   })
 })
