@@ -4,9 +4,21 @@
  * Phase 3 is the **pure core**: entity identity, selections, and `RemoteData`.
  * The store, planner, and wire land in later phases. Nothing here performs I/O.
  */
-import { Option, Schema, SchemaGetter } from 'effect'
-import type { ModelRef, Projection, Requirement } from 'foldkit-surface'
-import { entityKey, isTombstone, readField, type EntityStore } from './store.js'
+import { Context, Effect, Option, Schema, SchemaGetter } from 'effect'
+import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
+import { entityKey, isTombstone, readField, writeEntity, type EntityStore } from './store.js'
+import { plan } from './plan.js'
+import {
+  MutationRequest,
+  MutationResult,
+  QueryRequest,
+  QueryResult,
+  ReadBatch,
+  ReadBatchResult,
+  RemoteMutationError,
+  RemoteQueryError,
+  RemoteReadError,
+} from './wire.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -250,6 +262,33 @@ export interface BoundRemote<AppModel, Store> {
   readonly store: ModelRef<AppModel, Store>
 }
 
+const storeOf = <AppModel, Store>(
+  bound: BoundRemote<AppModel, Store>,
+  model: AppModel,
+): EntityStore => {
+  const remote = bound.store.get(model) as unknown as { readonly entities?: EntityStore }
+  return remote.entities ?? {}
+}
+
+/**
+ * The transport boundary. `foldkit-remote` never talks to a transport directly;
+ * it depends on this Effect service, which a later phase wires to Effect RPC.
+ */
+export class RemoteClient extends Context.Service<
+  RemoteClient,
+  {
+    readonly read: (
+      batch: Schema.Schema.Type<typeof ReadBatch>,
+    ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError>
+    readonly query: (
+      request: Schema.Schema.Type<typeof QueryRequest>,
+    ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
+    readonly mutate: (
+      request: Schema.Schema.Type<typeof MutationRequest>,
+    ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
+  }
+>()('foldkit-remote/RemoteClient') {}
+
 export const Remote = {
   make: <const Entities extends readonly EntityDescriptor<any, any>[]>(config: {
     readonly entities: Entities
@@ -294,4 +333,48 @@ export const Remote = {
   /** The remote requirements a Projection contributes. */
   requirements: <Root, Value>(projection: Projection<Root, Value>): readonly Requirement[] =>
     projection.requirements,
+
+  /** The pure plan for a projection against a store. */
+  planProjection: <Root, Value>(
+    store: EntityStore,
+    projection: Projection<Root, Value>,
+  ): ReadonlyArray<Requirement> => plan(store, projection.requirements),
+
+  /** The pure plan for a projection against a Model, reading its remote store. */
+  observeProjection: <AppModel, Store, Value>(
+    bound: BoundRemote<AppModel, Store>,
+    model: AppModel,
+    projection: Projection<AppModel, Value>,
+  ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements),
+
+  /** The pure plan for a Surface's projection. */
+  observe: <AppModel, Store, Model, Message, Params>(
+    bound: BoundRemote<AppModel, Store>,
+    model: AppModel,
+    surface: Surface<AppModel, Model, Message, Params>,
+    params: Params,
+  ): ReadonlyArray<Requirement> =>
+    plan(storeOf(bound, model), surface.projection(params).requirements),
+
+  /**
+   * Executes the plan against the `RemoteClient` and returns a new store. Used
+   * for SSR route prefetch, hover prefetch, and tests. Never called during render.
+   */
+  prefetch: <AppModel, Store, Value>(
+    bound: BoundRemote<AppModel, Store>,
+    model: AppModel,
+    projection: Projection<AppModel, Value>,
+  ) =>
+    Effect.gen(function* () {
+      const store = storeOf(bound, model)
+      const missing = plan(store, projection.requirements)
+      if (missing.length === 0) return store
+      const client = yield* RemoteClient
+      const result = yield* client.read({ requests: missing })
+      return result.entities.reduce(
+        (current, entity) =>
+          writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
+        store,
+      )
+    }),
 }
