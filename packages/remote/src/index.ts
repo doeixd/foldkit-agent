@@ -69,6 +69,12 @@ const refCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema
     }),
   ) as unknown as Schema.Codec<EntityRef<Name, F>, string>
 
+export interface EntityPatch<Name extends string, F extends Schema.Struct.Fields> {
+  readonly entity: Name
+  readonly id: string
+  readonly values: Partial<Schema.Struct.Type<F>>
+}
+
 export const Entity = {
   make: <
     const Name extends string,
@@ -93,9 +99,9 @@ export const Entity = {
     refCodec<Name, Schema.Struct.Fields>(),
 
   patch: <Name extends string, F extends Schema.Struct.Fields>(
-    _ref: EntityRef<Name, F>,
+    ref: EntityRef<Name, F>,
     patch: Partial<Schema.Struct.Type<F>>,
-  ): Partial<Schema.Struct.Type<F>> => patch,
+  ): EntityPatch<Name, F> => ({ entity: ref.entity, id: ref.id, values: patch }),
 }
 
 // ===========================================================================
@@ -143,6 +149,23 @@ export const Selection = {
 // ===========================================================================
 // RemoteData and the Remote scope
 // ===========================================================================
+
+export interface MutationDescriptor<Name extends string, Input, Output> {
+  readonly name: Name
+  readonly Input: Schema.Codec<Input>
+  readonly Output: Schema.Codec<Output>
+}
+
+export const Mutation = {
+  make: <const Name extends string, Input, Output>(
+    name: Name,
+    config: { readonly Input: Schema.Codec<Input>; readonly Output: Schema.Codec<Output> },
+  ): MutationDescriptor<Name, Input, Output> => ({
+    name,
+    Input: config.Input,
+    Output: config.Output,
+  }),
+}
 
 export interface RemoteError {
   readonly _tag: string
