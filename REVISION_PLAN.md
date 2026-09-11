@@ -1708,6 +1708,10 @@ directory (a probe from the repo root may resolve a different `effect`).
   `F`**, so a `readonly EntityDescriptor<string, Fields>[]` constraint rejects
   concrete entities. Use `readonly EntityDescriptor<any, any>[]` at collection
   boundaries.
+- A conditional type **distributes over a union**: `Value extends
+  Option.Option<infer Inner> ? …` with `Value = None<A> | Some<A>` yields a union
+  over `None`/`Some`, not one type. Wrap in a tuple (`[Value] extends [ … ]`) when
+  the focus must stay whole; this broke `ModelRef.at('p1')` in Phase 1.
 - A mutation that survives usually means redundancy, not missing coverage; remove
   the redundant guard rather than testing a window that does not exist.
 - Vite 5 does not know `node:sqlite` as a builtin and rewrites a static import to

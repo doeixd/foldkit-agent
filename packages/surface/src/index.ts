@@ -28,6 +28,9 @@ export type RefTree<Root, F extends Schema.Struct.Fields> = {
   readonly [K in keyof F]: RefNode<Root, F[K]>
 }
 
+// Tuple-wrapped so the conditional is *non-distributive*: without it,
+// `Value = Option<V>` distributes over `None | Some<V>` and `.at()` would return
+// a union of two unrelated `ModelRef`s.
 type Selectable<Root, Value> = [Value] extends [Option.Option<infer Inner>]
   ? ModelRef<Root, Value> & {
       readonly select: <P>(projection: Projection<Inner, P>) => Projection<Root, Option.Option<P>>
