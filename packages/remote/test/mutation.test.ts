@@ -96,4 +96,39 @@ describe('Remote mutations', () => {
     expect(second.state.pending.has('req-1')).toBe(false)
     expect(readField(second.store, entityKey('User', 'u1'), 'name')).toEqual(Option.some('ada'))
   })
+
+  it('maps an input encode failure onto RemoteMutationError', async () => {
+    const result = await Effect.runPromise(
+      Effect.result(
+        Remote.mutate(RenameUser, { id: 1 as unknown as string, name: 'ada' }, 'req-1').pipe(
+          Effect.provide(FakeClient),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag !== 'Failure') return
+    expect(result.failure._tag).toBe('RemoteMutationError')
+  })
+
+  it('maps an output decode failure onto RemoteMutationError', async () => {
+    const badOutput = Layer.succeed(RemoteClient, {
+      read: () => Effect.die('unused'),
+      query: () => Effect.die('unused'),
+      mutate: () => Effect.succeed({ output: { id: 123 }, entities: [] }),
+      live: () => Stream.empty,
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        Remote.mutate(RenameUser, { id: 'u1', name: 'ada' }, 'req-1').pipe(
+          Effect.provide(badOutput),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag !== 'Failure') return
+    expect(result.failure._tag).toBe('RemoteMutationError')
+  })
 })
