@@ -84,6 +84,18 @@ const run = (
       .pipe(Effect.provideService(DrizzleDatabase, database)),
   )
 
+const runResult = (
+  database: DrizzleDatabaseService,
+  window: Parameters<typeof source.run>[0]['window'],
+) =>
+  Effect.runPromise(
+    Effect.result(
+      source
+        .run({ input: { ownerId: 'u1' }, window, principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    ),
+  )
+
 describe('RemoteDrizzle.query', () => {
   it('returns a page and a cursor boundary, limiting to pageSize + 1', async () => {
     const { database, calls } = fakeDatabase([
@@ -153,5 +165,30 @@ describe('RemoteDrizzle.query', () => {
 
     const dialect = new PgDialect()
     expect(dialect.sqlToQuery(calls[0]!.orderBy![0] as SQL).sql).toContain('asc')
+  })
+
+  it('rejects an empty orderBy at definition time', () => {
+    expect(() => query(ProjectsByOwner, { entity: ProjectBinding, orderBy: [] })).toThrow(
+      /stable orderBy/,
+    )
+  })
+
+  it('fails a window that combines after and before', async () => {
+    const { database } = fakeDatabase([])
+
+    const result = await runResult(database, { after: 'a', before: 'b' })
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag === 'Failure') expect(result.failure.message).toMatch(/cannot combine/)
+  })
+
+  it('fails when a requested cursor row no longer exists', async () => {
+    const { database } = fakeDatabase([[]])
+
+    const result = await runResult(database, { first: 2, after: 'gone' })
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag === 'Failure')
+      expect(result.failure.message).toMatch(/cursor no longer resolves/)
   })
 })

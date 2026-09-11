@@ -131,9 +131,6 @@ export const reader =
       return rows.map(row => ({ id: String(row.id), values: row }))
     })
 
-const failDrizzle = (error: unknown): RemoteServerError =>
-  new RemoteServerError({ message: error instanceof Error ? error.message : String(error) })
-
 const selectRows = (
   database: DrizzleDatabaseService,
   table: PgTable,
@@ -148,7 +145,16 @@ const selectRows = (
   if (options.where !== undefined) statement = statement.where(options.where)
   if (options.orderBy !== undefined) statement = statement.orderBy(...options.orderBy)
   if (options.limit !== undefined) statement = statement.limit(options.limit)
-  return Effect.tryPromise({ try: () => Promise.resolve(statement), catch: failDrizzle })
+  return Effect.tryPromise({
+    try: () => Promise.resolve(statement),
+    catch: (error: unknown) => error,
+  }).pipe(
+    // The driver detail is for operators; the client gets no schema or SQL.
+    Effect.tapError(error =>
+      Effect.logError('[foldkit-remote-drizzle] database query failed', error),
+    ),
+    Effect.mapError(() => new RemoteServerError({ message: 'Database query failed' })),
+  )
 }
 
 const runDrizzle =
@@ -181,30 +187,53 @@ export const query = <P = unknown, Input = unknown>(
     readonly orderBy: readonly OrderTerm[]
     readonly where?: ((input: Input, principal: P) => SQL | undefined) | undefined
     readonly defaultPageSize?: number | undefined
+    readonly maxPageSize?: number | undefined
   },
-): QuerySource<P, DrizzleDatabase> => ({
-  query: descriptor.name,
-  Input: descriptor.Input,
-  run: ({ input, window, principal }) =>
-    Effect.gen(function* () {
-      const binding = options.entity
-      const shape = shapeWindow(window, options.defaultPageSize ?? 20)
-      const database = yield* DrizzleDatabase
-      const id = idColumn(binding)
-      const baseWhere = options.where?.(input as Input, principal)
-      let where = baseWhere
+): QuerySource<P, DrizzleDatabase> => {
+  if (options.orderBy.length === 0) {
+    throw new Error(
+      `[foldkit-remote-drizzle] query "${descriptor.name}" needs a non-empty, stable orderBy; add a unique tie-breaker column`,
+    )
+  }
+  return {
+    query: descriptor.name,
+    Input: descriptor.Input,
+    run: ({ input, window, principal }) =>
+      Effect.gen(function* () {
+        if (
+          (window.after !== undefined && window.before !== undefined) ||
+          (window.first !== undefined && window.last !== undefined)
+        ) {
+          return yield* new RemoteServerError({
+            message: 'A query window cannot combine after with before, or first with last',
+          })
+        }
 
-      if (shape.cursor !== undefined) {
-        const cursorSelection = Object.fromEntries(
-          options.orderBy.map(term => [term.column.name, term.column]),
-        )
-        const cursorRows = yield* selectRows(database, binding.table, cursorSelection, {
-          where:
-            baseWhere === undefined ? eq(id, shape.cursor) : and(baseWhere, eq(id, shape.cursor)),
-          limit: 1,
+        const binding = options.entity
+        const shape = shapeWindow(window, {
+          defaultSize: options.defaultPageSize,
+          maxSize: options.maxPageSize,
         })
-        const cursorRow = cursorRows[0]
-        if (cursorRow !== undefined) {
+        const database = yield* DrizzleDatabase
+        const id = idColumn(binding)
+        const baseWhere = options.where?.(input as Input, principal)
+        let where = baseWhere
+
+        if (shape.cursor !== undefined) {
+          const cursorSelection = Object.fromEntries(
+            options.orderBy.map(term => [term.column.name, term.column]),
+          )
+          const cursorRows = yield* selectRows(database, binding.table, cursorSelection, {
+            where:
+              baseWhere === undefined ? eq(id, shape.cursor) : and(baseWhere, eq(id, shape.cursor)),
+            limit: 1,
+          })
+          const cursorRow = cursorRows[0]
+          if (cursorRow === undefined) {
+            return yield* new RemoteServerError({
+              message: 'The query cursor no longer resolves to a row',
+            })
+          }
           const values = options.orderBy.map(term => cursorRow[term.column.name])
           const predicate = keysetWhere(options.orderBy, values, shape.traversal)
           where =
@@ -214,24 +243,24 @@ export const query = <P = unknown, Input = unknown>(
                 ? where
                 : and(where, predicate)
         }
-      }
 
-      const columns: Record<string, AnyColumn> = { id }
-      for (const term of options.orderBy) {
-        if (!Object.values(columns).includes(term.column)) columns[term.column.name] = term.column
-      }
-      const rows = yield* selectRows(database, binding.table, columns, {
-        where,
-        orderBy: orderByTerms(options.orderBy, shape.traversal),
-        limit: shape.pageSize + 1,
-      })
-      return toQueryPage({
-        entity: binding.name,
-        rows,
-        pageSize: shape.pageSize,
-        traversal: shape.traversal,
-        cursor: shape.cursor,
-        cursorOf: row => String(row.id),
-      })
-    }),
-})
+        const columns: Record<string, AnyColumn> = { id }
+        for (const term of options.orderBy) {
+          if (!Object.values(columns).includes(term.column)) columns[term.column.name] = term.column
+        }
+        const rows = yield* selectRows(database, binding.table, columns, {
+          where,
+          orderBy: orderByTerms(options.orderBy, shape.traversal),
+          limit: shape.pageSize + 1,
+        })
+        return toQueryPage({
+          entity: binding.name,
+          rows,
+          pageSize: shape.pageSize,
+          traversal: shape.traversal,
+          cursor: shape.cursor,
+          cursorOf: row => String(row.id),
+        })
+      }),
+  }
+}

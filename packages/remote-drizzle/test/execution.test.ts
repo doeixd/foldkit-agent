@@ -85,4 +85,39 @@ describe('RemoteDrizzle execution', () => {
     expect(records).toEqual([])
     expect(calls).toEqual([])
   })
+
+  it('does not leak a database error to the client', async () => {
+    const failing: DrizzleDatabaseService = {
+      select: () => {
+        const statement = {
+          where: () => statement,
+          orderBy: () => statement,
+          limit: () => statement,
+          then: (
+            resolve: (value: ReadonlyArray<Record<string, unknown>>) => unknown,
+            reject: (reason: unknown) => unknown,
+          ) =>
+            Promise.reject(new Error('relation "secret_table" does not exist')).then(
+              resolve,
+              reject,
+            ),
+        } as unknown as DrizzleStatement
+        return { from: () => statement }
+      },
+    }
+    const server = RemoteServer.make({}, { entities: [source(UserBinding)] })
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        RemoteServer.handlers(server, null)
+          .FoldkitRemoteRead({ requests: [{ entity: 'User', id: 'a', fields: ['name'] }] })
+          .pipe(Effect.provideService(DrizzleDatabase, failing)),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag !== 'Failure') return
+    expect(result.failure._tag).toBe('RemoteReadError')
+    expect(result.failure.message).toBe('Database query failed')
+  })
 })

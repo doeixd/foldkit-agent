@@ -9,7 +9,10 @@ under the MIT License.
   `packages/fate/src/server/connection.ts`
 - Adapted here: `src/cursor.ts` (lexicographic keyset predicates and
   direction-aware ordering), `src/columns.ts` (required-column projection),
-  `src/pagination.ts` (page-size-plus-one page boundaries).
+  `src/pagination.ts` (page-size-plus-one page boundaries), `src/window.ts`
+  (forward/backward direction and page size from connection args), and
+  `src/page.ts` (connection item + pagination metadata, re-expressed as Remote
+  `QueryPage` boundaries).
 
 ## fate license
 
