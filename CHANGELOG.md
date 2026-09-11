@@ -64,11 +64,15 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   `foldkit/test`'s `Scene`, so real ChildAttributes exercise the resolver,
   including the owned close/trigger `click`, `focus` or `pointerdown`.
   `Event.Cancel` was added for the dialog's Escape handler.
+- **Nested Submodels.** Tabs and RadioGroup publish per-item groups
+  (`tabs[i].tab`/`panel`, `options[i].option`/`label`/`description`). Their
+  adapters call `SlotView.buildersFor` directly and map each item, so one slot
+  contribution applies to every item while each item's base keeps its own event
+  ownership. Tested through `Scene` with identity, Style and conflict assertions.
 - **Out of reach with this seam.** `Menu`, `Listbox`, `ComboBox` and `DatePicker`
   own their markup and expose no `toView`/attribute bundles, so there is nothing
-  to resolve against. `Tabs`, `RadioGroup` and `Calendar` publish nested per-item
-  bundles the flat resolver cannot address; they wait on a nested/keyed resolver.
-  The Surface adapter is also not in this slice.
+  to resolve against. Calendar's week/cell groups still need the nested resolver
+  applied to its own shape. The Surface adapter is also not in this slice.
 
 ### `foldkit-agent`
 
