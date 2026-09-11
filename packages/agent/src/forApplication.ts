@@ -57,21 +57,7 @@ export interface ApplicationAgent<Model, Principal> extends Omit<
   }) => Definition<Model, ProjectionValue<R>, Principal, ByName, ByTag>
 }
 
-/**
- * Binds the agent constructors to a `Surface.application`. The Model is inferred
- * from the application, and a `Surface.pick`/`Surface.compose` projection is
- * accepted directly as `context`.
- *
- * @example
- * ```ts
- * const TodoAgent = Agent.forApplication(App)
- * const AppAgent = TodoAgent.define({
- *   context: Surface.pick(App.fields.todos),
- *   messages: TodoAgent.expose(Message, { RequestedDeleteTodo: 'Delete a todo' }),
- * })
- * ```
- */
-export const forApplication = <Model, Principal = unknown>(
+const buildAgent = <Model, Principal>(
   _app: Application<Model, any, any>,
 ): ApplicationAgent<Model, Principal> => {
   const agentDefine = <
@@ -97,4 +83,40 @@ export const forApplication = <Model, Principal = unknown>(
     bind,
     define: agentDefine,
   }
+}
+
+/**
+ * Binds the agent constructors to a `Surface.application`. The Model is inferred
+ * from the application, and a `Surface.pick`/`Surface.compose` projection is
+ * accepted directly as `context`.
+ *
+ * A `Principal` cannot be a positional type argument beside an inferred Model, so
+ * it is supplied by the curried form: `Agent.forApplication<Principal>()(App)`.
+ *
+ * @example
+ * ```ts
+ * const TodoAgent = Agent.forApplication(App) // no principal
+ * const AdminAgent = Agent.forApplication<Principal>()(App)
+ * const AppAgent = TodoAgent.define({
+ *   context: Surface.pick(App.fields.todos),
+ *   messages: TodoAgent.expose(Message, { RequestedDeleteTodo: 'Delete a todo' }),
+ * })
+ * ```
+ */
+export function forApplication<
+  Model,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+>(app: Application<Model, F, Cases>): ApplicationAgent<Model, unknown>
+export function forApplication<Principal = unknown>(): <
+  Model,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+>(
+  app: Application<Model, F, Cases>,
+) => ApplicationAgent<Model, Principal>
+export function forApplication(app?: unknown): unknown {
+  return app === undefined
+    ? (next: unknown) => buildAgent(next as Application<any, any, any>)
+    : buildAgent(app as Application<any, any, any>)
 }

@@ -7,9 +7,9 @@ import { Schema } from 'effect'
 import {
   Surface,
   type AppScope,
-  type Application,
   type MessageSubset,
   type Projection,
+  type RunnableApplication,
 } from 'foldkit-surface'
 import type { DocumentId } from './ids.js'
 import type { WritableProjection } from './project.js'
@@ -171,7 +171,7 @@ export const forApplication = <
     Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>
   >[],
 >(
-  app: Application<AppModel, F, Cases>,
+  app: RunnableApplication<AppModel, F, Cases, any>,
   config: ForApplicationConfig<AppModel, Fields, Subset, Ms>,
 ): DefinedSync<
   AppModel,

@@ -70,17 +70,30 @@ type Selectable<Root, Value, Key extends string> = [Value] extends [Option.Optio
       readonly select: <P>(projection: Projection<Value, P>) => Projection<Root, P>
     }
 
+/**
+ * A dynamic focus from `.at`/`.index`. Deliberately not a `FieldRef`: its key is
+ * a record key or index, not a Model field, so a static `Surface.pick` cannot
+ * infer a field name from it.
+ */
+type OptionalRef<Root, Value> = [Value] extends [Option.Option<infer Inner>]
+  ? ModelRef<Root, Value> & {
+      readonly select: <P>(projection: Projection<Inner, P>) => Projection<Root, Option.Option<P>>
+    }
+  : ModelRef<Root, Value> & {
+      readonly select: <P>(projection: Projection<Value, P>) => Projection<Root, P>
+    }
+
 type RefNode<Root, S, Key extends string> =
   S extends Schema.Struct<infer F>
     ? Selectable<Root, Schema.Struct.Type<F>, Key> & RefTree<Root, F>
     : S extends Schema.Schema<infer A>
       ? A extends ReadonlyArray<infer E>
         ? Selectable<Root, ReadonlyArray<E>, Key> & {
-            readonly index: (index: number) => Selectable<Root, Option.Option<E>, string>
+            readonly index: (index: number) => OptionalRef<Root, Option.Option<E>>
           }
         : A extends Readonly<Record<infer K extends string, infer V>>
           ? Selectable<Root, A, Key> & {
-              readonly at: (key: K) => Selectable<Root, Option.Option<V>, K>
+              readonly at: (key: K) => OptionalRef<Root, Option.Option<V>>
             }
           : Selectable<Root, A, Key>
       : never
@@ -584,22 +597,36 @@ type MergeFields<Ps extends readonly WritableProjection<any, any>[]> = Ps extend
   : {}
 
 /**
- * An application definition: the Model and Message schemas, the initial Model,
- * the transition function, and the generated field references. It is data, not a
- * running instance, so it can be inspected and tested without mounting anything.
+ * An application definition: the Model and Message schemas and the generated
+ * field references. It is data, not a running instance, so it can be inspected
+ * without mounting anything. Context, replication, and validation all read the
+ * same `App.fields` references.
  */
 export interface Application<
   Root,
   F extends Schema.Struct.Fields,
   Cases extends Record<string, Schema.Struct.Fields>,
 > extends AppScope<Root, F, Cases> {
-  readonly initial: Root
   /** Reference-based field selection: `App.fields.todos`. */
   readonly fields: RefTree<Root, F>
+}
+
+/**
+ * An `Application` that also carries the initial Model and the transition
+ * function, so a replicator can derive the initial shared value and replay.
+ * `Resources` is whatever `update`'s Commands need.
+ */
+export interface RunnableApplication<
+  Root,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+  Resources = never,
+> extends Application<Root, F, Cases> {
+  readonly initial: Root
   readonly update: (
     model: Root,
     message: Schema.Schema.Type<MessageUnion<Cases>>,
-  ) => Update.Return<Root, Schema.Schema.Type<MessageUnion<Cases>>>
+  ) => Update.Return<Root, Schema.Schema.Type<MessageUnion<Cases>>, Resources>
 }
 
 declare const messageSubsetRoot: unique symbol
@@ -649,6 +676,42 @@ const makeScope = <
   }
 }
 
+/**
+ * Captures an application's pure references once. `initial` and `update` are
+ * optional: an agent needs only the Model, Message, and field references, while
+ * a replicator needs them to derive the initial shared value and replay. A
+ * `RunnableApplication` is returned when both are supplied.
+ */
+function application<
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+  Resources = never,
+  ManagedResourceServices = never,
+>(config: {
+  readonly Model: Schema.Struct<F>
+  readonly Message: MessageUnion<Cases>
+  readonly initial: Schema.Struct.Type<F>
+  readonly update: (
+    model: Schema.Struct.Type<F>,
+    message: Schema.Schema.Type<MessageUnion<Cases>>,
+  ) => Update.Return<
+    Schema.Struct.Type<F>,
+    Schema.Schema.Type<MessageUnion<Cases>>,
+    Resources | ManagedResourceServices
+  >
+}): RunnableApplication<Schema.Struct.Type<F>, F, Cases, Resources | ManagedResourceServices>
+function application<
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+>(config: {
+  readonly Model: Schema.Struct<F>
+  readonly Message: MessageUnion<Cases>
+}): Application<Schema.Struct.Type<F>, F, Cases>
+function application(config: any): any {
+  const scope = makeScope(config)
+  return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
+}
+
 export const Surface = {
   make: <
     F extends Schema.Struct.Fields,
@@ -658,26 +721,7 @@ export const Surface = {
     readonly Message: MessageUnion<Cases>
   }): AppScope<Schema.Struct.Type<F>, F, Cases> => makeScope(config),
 
-  /**
-   * Captures an application's pure references once: the Model and Message
-   * schemas, the initial Model, the transition function, and the field
-   * references (`App.fields`). `Sync` and `Agent` interpret the same value.
-   */
-  application: <
-    F extends Schema.Struct.Fields,
-    Cases extends Record<string, Schema.Struct.Fields>,
-  >(config: {
-    readonly Model: Schema.Struct<F>
-    readonly Message: MessageUnion<Cases>
-    readonly initial: Schema.Struct.Type<F>
-    readonly update: (
-      model: Schema.Struct.Type<F>,
-      message: Schema.Schema.Type<MessageUnion<Cases>>,
-    ) => Update.Return<Schema.Struct.Type<F>, Schema.Schema.Type<MessageUnion<Cases>>>
-  }): Application<Schema.Struct.Type<F>, F, Cases> => {
-    const scope = makeScope(config)
-    return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
-  },
+  application,
 
   /**
    * Selects a typed Message subset by constructor reference:
