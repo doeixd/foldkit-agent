@@ -52,6 +52,7 @@ const FakeClient = Layer.succeed(RemoteClient, {
     }),
   query: () => Effect.die('unused'),
   mutate: () => Effect.die('unused'),
+  live: () => Stream.empty,
 })
 
 const root = (store = emptyStore) => ({

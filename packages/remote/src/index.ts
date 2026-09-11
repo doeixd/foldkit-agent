@@ -16,10 +16,13 @@ import {
   QueryResult,
   ReadBatch,
   ReadBatchResult,
+  RemoteLiveError,
   RemoteMutationError,
   RemoteQueryError,
   RemoteReadError,
 } from './wire.js'
+import type { LiveCursor, LiveEvent } from './live.js'
+import type { LivePolicy } from './query.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -290,6 +293,10 @@ export class RemoteClient extends Context.Service<
     readonly mutate: (
       request: Schema.Schema.Type<typeof MutationRequest>,
     ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
+    readonly live: (request: {
+      readonly requirements: ReadonlyArray<Requirement>
+      readonly after: LiveCursor
+    }) => Stream.Stream<LiveEvent, RemoteLiveError>
   }
 >()('foldkit-remote/RemoteClient') {}
 
@@ -443,5 +450,58 @@ export const Remote = {
               return yield* client.read({ requests: requirements })
             })(),
           ).pipe(Stream.map(toMessage), Stream.orDie),
+  }),
+
+  /**
+   * A Foldkit Subscription entry that consumes the live stream for a Surface's
+   * requirements. On any stream failure (including `ResumeUnavailable`) it emits
+   * `onResumeUnavailable`, so the app invalidates and refetches rather than
+   * silently missing events.
+   */
+  live: <AppModel, Store, Model, SurfaceMessage, Params, Message>(
+    bound: BoundRemote<AppModel, Store>,
+    surface: Surface<AppModel, Model, SurfaceMessage, Params>,
+    params: Params,
+    options: {
+      readonly cursor: (model: AppModel) => LiveCursor
+      readonly policy?: LivePolicy
+    },
+    toMessage: (event: LiveEvent) => Message,
+    onResumeUnavailable: (error: RemoteLiveError) => Message,
+  ): EntryWithoutKeepAlive<
+    AppModel,
+    Message,
+    { readonly requirements: ReadonlyArray<Requirement>; readonly cursor: LiveCursor },
+    RemoteClient
+  > => ({
+    dependenciesSchema: Schema.Struct({
+      requirements: Schema.Array(
+        Schema.Struct({
+          entity: Schema.String,
+          id: Schema.String,
+          fields: Schema.Array(Schema.String),
+        }),
+      ),
+      cursor: Schema.Number,
+    }),
+    modelToDependencies: model => ({
+      requirements: surface.projection(params).requirements,
+      cursor: options.cursor(model),
+    }),
+    dependenciesToStream: ({ requirements, cursor }) =>
+      requirements.length === 0
+        ? Stream.empty
+        : Stream.unwrap(
+            Effect.fn('Remote.live.subscribe')(function* () {
+              const client = yield* RemoteClient
+              return client.live({ requirements, after: cursor })
+            })(),
+          ).pipe(
+            Stream.map(toMessage),
+            Stream.catchIf(
+              (_error): _error is RemoteLiveError => true,
+              error => Stream.succeed(onResumeUnavailable(error)),
+            ),
+          ),
   }),
 }

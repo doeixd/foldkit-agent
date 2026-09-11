@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema } from 'effect'
+import { Effect, Layer, Option, Schema, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
@@ -35,6 +35,7 @@ const FakeClient = Layer.succeed(RemoteClient, {
         entities: [{ entity: 'User', id: input.id, values: { name: input.name } }],
       }
     }),
+  live: () => Stream.empty,
 })
 
 describe('Remote mutations', () => {
