@@ -19,10 +19,19 @@ export class RemoteLiveError extends Schema.TaggedError<RemoteLiveError>()('Remo
   message: Schema.String,
 }) {}
 
+export const WindowSchema = Schema.Struct({
+  first: Schema.optional(Schema.Number),
+  last: Schema.optional(Schema.Number),
+  after: Schema.optional(Schema.String),
+  before: Schema.optional(Schema.String),
+})
+
 export const ReadRequest = Schema.Struct({
   entity: Schema.String,
   id: Schema.String,
   fields: Schema.Array(Schema.String),
+  /** Pagination window per relation field. */
+  windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
 })
 
 export const ReadBatch = Schema.Struct({ requests: Schema.Array(ReadRequest) })

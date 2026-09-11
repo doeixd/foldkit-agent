@@ -13,6 +13,22 @@ describe('Remote wire', () => {
     expect(Schema.decodeUnknownSync(ReadBatchResult)(result)).toEqual(result)
   })
 
+  it('round-trips a relation window on a read request', () => {
+    const batch = {
+      requests: [
+        {
+          entity: 'Project',
+          id: 'p1',
+          fields: ['id', 'comments'],
+          windows: { comments: { first: 10 } },
+        },
+      ],
+    }
+
+    expect(Schema.decodeUnknownSync(ReadBatch)(batch)).toEqual(batch)
+    expect(Schema.encodeSync(ReadBatch)(batch)).toEqual(batch)
+  })
+
   it('serves reads and mutations over the in-process RPC layer, in order', async () => {
     const order: string[] = []
 

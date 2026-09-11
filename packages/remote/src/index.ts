@@ -16,12 +16,14 @@ import {
   QueryResult,
   ReadBatch,
   ReadBatchResult,
+  ReadRequest,
   RemoteLiveError,
   RemoteMutationError,
   RemoteQueryError,
   RemoteReadError,
 } from './wire.js'
 import type { LiveCursor, LiveEvent } from './live.js'
+import type { QueryWindow } from './query.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -94,6 +96,41 @@ export interface EntityPatch<Name extends string, F extends Schema.Struct.Fields
   readonly values: Partial<Schema.Struct.Type<F>>
 }
 
+/**
+ * One authoritative page of a paginated relation: refs (never inline entities)
+ * plus whether more exist. The adapter does not hold segmentation state; the
+ * client merges pages.
+ */
+export interface RefPage<
+  Name extends string,
+  F extends Schema.Struct.Fields = Schema.Struct.Fields,
+> {
+  readonly refs: ReadonlyArray<EntityRef<Name, F>>
+  readonly hasNext: boolean
+  readonly hasPrevious: boolean
+}
+
+const refPageCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema.Codec<
+  RefPage<Name, F>,
+  {
+    readonly refs: ReadonlyArray<string>
+    readonly hasNext: boolean
+    readonly hasPrevious: boolean
+  }
+> =>
+  Schema.Struct({
+    refs: Schema.Array(refCodec<Name, F>()),
+    hasNext: Schema.Boolean,
+    hasPrevious: Schema.Boolean,
+  }) as unknown as Schema.Codec<
+    RefPage<Name, F>,
+    {
+      readonly refs: ReadonlyArray<string>
+      readonly hasNext: boolean
+      readonly hasPrevious: boolean
+    }
+  >
+
 export const Entity = {
   make: <
     const Name extends string,
@@ -123,6 +160,18 @@ export const Entity = {
    */
   refKey: (ref: { readonly entity: string; readonly id: string }): string => encodeRef(ref),
 
+  /** A relation value of one authoritative page of refs. */
+  refPage: <Name extends string, F extends Schema.Struct.Fields>(
+    _entity: EntityDescriptor<Name, F>,
+  ): Schema.Codec<
+    RefPage<Name, F>,
+    {
+      readonly refs: ReadonlyArray<string>
+      readonly hasNext: boolean
+      readonly hasPrevious: boolean
+    }
+  > => refPageCodec<Name, F>(),
+
   patch: <Name extends string, F extends Schema.Struct.Fields>(
     ref: EntityRef<Name, F>,
     patch: Partial<Schema.Struct.Type<F>>,
@@ -137,6 +186,10 @@ export interface Selection<Value> {
   readonly entity: string
   readonly fields: readonly string[]
   readonly schema: Schema.Schema<Value>
+  /** Pagination windows for nested relation fields, keyed by field name. */
+  readonly connections?: Readonly<Record<string, QueryWindow>> | undefined
+  /** Present when this selection is itself a paginated relation. */
+  readonly window?: QueryWindow | undefined
 }
 
 type SelectionOf<F extends Schema.Struct.Fields> = {
@@ -157,18 +210,35 @@ export const Selection = {
     selection: Sel,
   ): Selection<SelectionValue<F, Sel>> => {
     const picked: Record<string, AnySchema> = {}
+    const connections: Record<string, QueryWindow> = {}
     for (const key of Object.keys(selection)) {
       const choice = (selection as Record<string, unknown>)[key]
-      picked[key] = (
-        choice === true ? entity.fields[key] : (choice as Selection<unknown>).schema
-      ) as AnySchema
+      if (choice === true) {
+        picked[key] = entity.fields[key] as AnySchema
+        continue
+      }
+      const nested = choice as Selection<unknown>
+      picked[key] = nested.schema as AnySchema
+      if (nested.window !== undefined) connections[key] = nested.window
     }
     return {
       entity: entity.name,
       fields: Object.keys(selection),
       schema: Schema.Struct(picked) as unknown as Schema.Schema<SelectionValue<F, Sel>>,
+      ...(Object.keys(connections).length === 0 ? {} : { connections }),
     }
   },
+
+  /** A paginated relation: one page of refs to `entity`, with a window. */
+  connection: <Name extends string, F extends Schema.Struct.Fields>(
+    entity: EntityDescriptor<Name, F>,
+    window: QueryWindow,
+  ): Selection<RefPage<Name, F>> => ({
+    entity: entity.name,
+    fields: [],
+    schema: Entity.refPage(entity) as unknown as Schema.Schema<RefPage<Name, F>>,
+    window,
+  }),
 }
 
 // ===========================================================================
@@ -365,7 +435,14 @@ export const Remote = {
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
       Model: remoteDataSchema(selection.schema),
       dependencies: [],
-      requirements: [{ entity: selection.entity, id, fields: selection.fields }],
+      requirements: [
+        {
+          entity: selection.entity,
+          id,
+          fields: selection.fields,
+          ...(selection.connections === undefined ? {} : { windows: selection.connections }),
+        },
+      ],
       read: (root: AppModel): RemoteData<Value> => {
         const store = storeOf(bound, root)
         const key = entityKey(selection.entity, id)
@@ -475,13 +552,7 @@ export const Remote = {
     RemoteClient
   > => ({
     dependenciesSchema: Schema.Struct({
-      requirements: Schema.Array(
-        Schema.Struct({
-          entity: Schema.String,
-          id: Schema.String,
-          fields: Schema.Array(Schema.String),
-        }),
-      ),
+      requirements: Schema.Array(ReadRequest),
     }),
     modelToDependencies: model => ({
       requirements: plan(storeOf(bound, model), surface.projection(params).requirements),
@@ -525,13 +596,7 @@ export const Remote = {
     RemoteClient
   > => ({
     dependenciesSchema: Schema.Struct({
-      requirements: Schema.Array(
-        Schema.Struct({
-          entity: Schema.String,
-          id: Schema.String,
-          fields: Schema.Array(Schema.String),
-        }),
-      ),
+      requirements: Schema.Array(ReadRequest),
       cursor: Schema.Number,
     }),
     modelToDependencies: model => ({

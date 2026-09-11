@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Entity, Selection } from '../src/index.js'
+import { Entity, Remote, Selection, type BoundRemote, type RemoteModel } from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 
@@ -86,5 +86,52 @@ describe('Remote core', () => {
       owner: { id: 'o1', name: 'A' },
     })
     expect(decoded).toEqual({ name: 'ada', owner: { id: 'o1', name: 'A' } })
+  })
+
+  it('builds a paginated relation selection that decodes a page of refs', () => {
+    const Comment = Entity.make('Comment', Schema.Struct({ id: Schema.String }))
+    const Project = Entity.make(
+      'Project',
+      Schema.Struct({ id: Schema.String, comments: Entity.refPage(Comment) }),
+    )
+    const selection = Selection.make(Project, {
+      id: true,
+      comments: Selection.connection(Comment, { first: 10 }),
+    })
+
+    expect(selection.connections).toEqual({ comments: { first: 10 } })
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)({
+        id: 'p1',
+        comments: { refs: ['Comment:c1'], hasNext: true, hasPrevious: false },
+      }),
+    ).toEqual({
+      id: 'p1',
+      comments: { refs: [{ entity: 'Comment', id: 'c1' }], hasNext: true, hasPrevious: false },
+    })
+  })
+
+  it('puts a relation window on the requirement', () => {
+    const Comment = Entity.make('Comment', Schema.Struct({ id: Schema.String }))
+    const Project = Entity.make(
+      'Project',
+      Schema.Struct({ id: Schema.String, comments: Entity.refPage(Comment) }),
+    )
+    const selection = Selection.make(Project, {
+      id: true,
+      comments: Selection.connection(Comment, { first: 5 }),
+    })
+    const bound = {
+      store: { get: () => ({ entities: {}, connections: {}, requests: {}, mutations: {} }) },
+    } as unknown as BoundRemote<unknown, RemoteModel>
+
+    expect(Remote.select(bound, selection)('p1').requirements).toEqual([
+      {
+        entity: 'Project',
+        id: 'p1',
+        fields: ['id', 'comments'],
+        windows: { comments: { first: 5 } },
+      },
+    ])
   })
 })

@@ -11,6 +11,8 @@ import { entityKey, missingFields, type EntityStore } from './store.js'
 
 export type { Requirement } from 'foldkit-surface'
 
+type Window = NonNullable<Requirement['windows']>[string]
+
 export interface PlanFreshness {
   readonly now: number
   /** A present entry older than this many milliseconds is refreshed whole. */
@@ -24,20 +26,35 @@ export const plan = (
 ): ReadonlyArray<Requirement> => {
   const grouped = new Map<
     string,
-    { entity: string; id: string; fields: string[]; seen: Set<string> }
+    {
+      entity: string
+      id: string
+      fields: string[]
+      seen: Set<string>
+      windows: Map<string, Window>
+    }
   >()
 
   for (const requirement of requirements) {
     const key = entityKey(requirement.entity, requirement.id)
     let group = grouped.get(key)
     if (group === undefined) {
-      group = { entity: requirement.entity, id: requirement.id, fields: [], seen: new Set() }
+      group = {
+        entity: requirement.entity,
+        id: requirement.id,
+        fields: [],
+        seen: new Set(),
+        windows: new Map(),
+      }
       grouped.set(key, group)
     }
     for (const field of requirement.fields) {
       if (group.seen.has(field)) continue
       group.seen.add(field)
       group.fields.push(field)
+    }
+    for (const [field, window] of Object.entries(requirement.windows ?? {})) {
+      group.windows.set(field, window)
     }
   }
 
@@ -51,9 +68,18 @@ export const plan = (
       !entry.tombstone &&
       freshness.now - entry.updatedAt > freshness.freshness
     const missing = expired ? group.fields : missingFields(store, key, group.fields)
-    if (missing.length > 0) {
-      planned.push({ entity: group.entity, id: group.id, fields: missing })
-    }
+    if (missing.length === 0) continue
+    // Only a field being fetched carries its window.
+    const missingSet = new Set(missing)
+    const windows = Object.fromEntries(
+      [...group.windows].filter(([field]) => missingSet.has(field)),
+    )
+    planned.push({
+      entity: group.entity,
+      id: group.id,
+      fields: missing,
+      ...(Object.keys(windows).length === 0 ? {} : { windows }),
+    })
   }
   return planned
 }

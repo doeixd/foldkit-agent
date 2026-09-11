@@ -50,6 +50,36 @@ describe('Remote.plan', () => {
     expect(plan(emptyStore, [])).toEqual([])
   })
 
+  it('carries a window only for the missing relation field', () => {
+    const store = writeEntity(emptyStore, entityKey('Project', 'p1'), { title: 'T', comments: [] })
+    const planned = plan(store, [
+      {
+        entity: 'Project',
+        id: 'p1',
+        fields: ['title', 'comments', 'tags'],
+        windows: { comments: { first: 10 }, tags: { first: 2 } },
+      },
+    ])
+
+    expect(planned).toEqual([
+      { entity: 'Project', id: 'p1', fields: ['tags'], windows: { tags: { first: 2 } } },
+    ])
+  })
+
+  it('plans nothing when every field with a window is present', () => {
+    const store = writeEntity(emptyStore, entityKey('Project', 'p1'), { comments: [] })
+    const planned = plan(store, [
+      {
+        entity: 'Project',
+        id: 'p1',
+        fields: ['comments'],
+        windows: { comments: { first: 10 } },
+      },
+    ])
+
+    expect(planned).toEqual([])
+  })
+
   it('does not treat an entry as expired at exactly the freshness bound', () => {
     const store = writeEntity(emptyStore, entityKey('User', 'u1'), { name: 'ada' }, 0)
     const requirements = [{ entity: 'User', id: 'u1', fields: ['name'] }]
