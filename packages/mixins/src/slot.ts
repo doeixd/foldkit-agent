@@ -102,7 +102,7 @@ export type Public<T> = HiddenOf<T> extends true ? never : T
 export type Hidden<T> = HiddenOf<T> extends true ? T : never
 
 export const is = (value: unknown): value is Any | UnnamedSlot =>
-  typeof value === 'object' && value !== null && SlotTypeId in value
+  typeof value === 'object' && value !== null && Object.hasOwn(value, SlotTypeId)
 
 const emptyProtection: SlotProtection = Object.freeze({
   events: Object.freeze([]) as ReadonlyArray<EventName>,

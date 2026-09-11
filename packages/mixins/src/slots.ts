@@ -54,7 +54,7 @@ const toUnnamed = (value: unknown, key: string): UnnamedSlot => {
   if (Slot.is(value)) {
     return value as UnnamedSlot
   }
-  if (typeof value === 'object' && value !== null && 'capability' in value) {
+  if (typeof value === 'object' && value !== null && Object.hasOwn(value, 'capability')) {
     return Slot.make(value as MakeOptions)
   }
   throw new Error(`Slots.define: "${key}" is not a Slot or slot options object`)

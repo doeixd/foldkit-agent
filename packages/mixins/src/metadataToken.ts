@@ -41,6 +41,6 @@ export const make = <const Kind extends string, const Name extends string>(
 }
 
 export const is = (value: unknown): value is Any =>
-  typeof value === 'object' && value !== null && MetadataTokenTypeId in value
+  typeof value === 'object' && value !== null && Object.hasOwn(value, MetadataTokenTypeId)
 
 export const nameOf = (value: string | Any): string => (is(value) ? value.name : value)

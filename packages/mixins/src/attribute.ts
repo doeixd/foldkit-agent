@@ -11,7 +11,7 @@ import type { MountAction } from 'foldkit/mount'
 const CHILD_ATTRIBUTE_BRAND = '__childAttribute'
 
 export const isChildAttribute = (value: unknown): value is ChildAttribute =>
-  typeof value === 'object' && value !== null && CHILD_ATTRIBUTE_BRAND in value
+  typeof value === 'object' && value !== null && Object.hasOwn(value, CHILD_ATTRIBUTE_BRAND)
 
 interface Tagged {
   readonly _tag: string
@@ -20,7 +20,7 @@ interface Tagged {
 export const isTagged = (value: unknown): value is Tagged =>
   typeof value === 'object' &&
   value !== null &&
-  '_tag' in value &&
+  Object.hasOwn(value, '_tag') &&
   typeof (value as { readonly _tag?: unknown })._tag === 'string'
 
 /** `Class` carries no Message, so the inert builder is the honest constructor. */

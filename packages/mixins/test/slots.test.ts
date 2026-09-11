@@ -58,6 +58,11 @@ describe('Slot and Slots', () => {
     ).toThrow(/not a Slot/)
   })
 
+  it('does not treat an inherited capability as slot options', () => {
+    const inherited = Object.create({ capability: Capability.Base })
+    expect(() => Slots.define({ root: inherited } as never)).toThrow(/not a Slot/)
+  })
+
   it('filters slots by capability the way AF-UI withCapability does', () => {
     const textInputs = Slots.withCapability(FieldSlots, Capability.TextInput)
     expect(Object.getOwnPropertyNames(textInputs)).toEqual(['input'])
