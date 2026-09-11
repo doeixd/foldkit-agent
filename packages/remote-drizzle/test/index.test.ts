@@ -1,16 +1,14 @@
-import { eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { text, uuid, pgTable, PgDialect } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
 import { Entity, Selection } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import {
   entity,
-  keysetWhere,
   orderByTerms,
-  queryPlan,
   reader,
   relationsFor,
-  requiredColumns,
+  selectColumns,
   whereIds,
   type SourceQuery,
 } from '../src/index.js'
@@ -49,26 +47,9 @@ describe('RemoteDrizzle', () => {
   })
 
   it('always projects the primary key, selected fields, and relation keys', () => {
-    expect(requiredColumns(UserBinding, ['name']).map(column => column.name)).toEqual([
-      'id',
-      'name',
-    ])
-    expect(requiredColumns(ProjectBinding, ['id', 'owner']).map(column => column.name)).toEqual([
-      'id',
-      'owner_id',
-    ])
-    expect(requiredColumns(UserBinding, ['id', 'name']).map(column => column.name)).toEqual([
-      'id',
-      'name',
-    ])
-  })
-
-  it('folds ordering columns into the projection', () => {
-    const columns = requiredColumns(ProjectBinding, ['id'], {
-      order: [{ column: projects.createdAt, direction: 'desc' }],
-    }).map(column => column.name)
-
-    expect(columns).toEqual(['id', 'created_at'])
+    expect(Object.keys(selectColumns(UserBinding, ['name']))).toEqual(['id', 'name'])
+    expect(Object.keys(selectColumns(ProjectBinding, ['id', 'owner']))).toEqual(['id', 'owner_id'])
+    expect(Object.keys(selectColumns(UserBinding, ['id', 'name']))).toEqual(['id', 'name'])
   })
 
   it('separates relation fields from scalar columns', () => {
@@ -77,10 +58,7 @@ describe('RemoteDrizzle', () => {
       owner: Selection.make(User, { id: true, name: true }),
     })
 
-    expect(requiredColumns(ProjectBinding, selection.fields).map(column => column.name)).toEqual([
-      'id',
-      'owner_id',
-    ])
+    expect(Object.keys(selectColumns(ProjectBinding, selection.fields))).toEqual(['id', 'owner_id'])
     expect(relationsFor(ProjectBinding, selection).map(relation => relation.entity.name)).toEqual([
       'User',
     ])
@@ -92,29 +70,7 @@ describe('RemoteDrizzle', () => {
 
     expect(predicate.sql).toContain('"users"."id" in')
     expect(predicate.params).toEqual(['a', 'b'])
-    expect(
-      queryPlan(UserBinding, Selection.make(User, { id: true, name: true })).columns.map(
-        column => column.name,
-      ),
-    ).toEqual(['id', 'name'])
-  })
-
-  it('combines a filter, a keyset cursor, and the ordering columns', () => {
-    const dialect = new PgDialect()
-    const order = [
-      { column: projects.createdAt, direction: 'desc' as const },
-      { column: projects.id, direction: 'desc' as const },
-    ]
-    const plan = queryPlan(ProjectBinding, Selection.make(Project, { id: true }), {
-      where: eq(projects.name, 'x'),
-      cursor: keysetWhere(order, ['t1', 'p1'], 'forward'),
-      order,
-      limit: 25,
-    })
-
-    expect(plan.limit).toBe(25)
-    expect(plan.columns.map(column => column.name)).toEqual(['id', 'created_at'])
-    expect(dialect.sqlToQuery(plan.where as NonNullable<typeof plan.where>).sql).toContain('and')
+    expect(Object.keys(selectColumns(UserBinding, ['id', 'name']))).toEqual(['id', 'name'])
   })
 
   it('prunes to allowed fields, batches ids, and normalizes records', async () => {
@@ -157,18 +113,11 @@ describe('RemoteDrizzle', () => {
     expect(called).toBe(false)
   })
 
-  it('queryPlan with no options has no where and no limit', () => {
-    const plan = queryPlan(UserBinding, Selection.make(User, { id: true }))
-    expect(plan.where).toBeUndefined()
-    expect(plan.limit).toBeUndefined()
-    expect(plan.columns.map(column => column.name)).toEqual(['id'])
-  })
-
   it('throws a clear error when the table has no id column', () => {
     const legs = pgTable('legs', { key: text('key').primaryKey() })
     const Leg = entity('Leg', legs)
 
-    expect(() => requiredColumns(Leg, ['key'])).toThrow(/no "id" column/)
+    expect(() => selectColumns(Leg, ['key'])).toThrow(/no "id" column/)
     expect(() => whereIds(Leg, ['a'])).toThrow(/no "id" column/)
   })
 

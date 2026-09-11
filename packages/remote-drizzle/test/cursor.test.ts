@@ -1,6 +1,6 @@
 import { integer, pgTable, PgDialect, text } from 'drizzle-orm/pg-core'
 import { describe, expect, it } from 'vitest'
-import { cursorColumns, keysetWhere, type OrderTerm } from '../src/index.js'
+import { cursorSelection, keysetWhere, type OrderTerm } from '../src/index.js'
 
 const events = pgTable('events', {
   id: text('id').primaryKey(),
@@ -71,10 +71,10 @@ describe('keysetWhere', () => {
 
   it('reads the ordering columns to reconstruct a cursor tuple', () => {
     expect(
-      cursorColumns([
+      cursorSelection([
         { column: events.createdAt, direction: 'desc' },
         { column: events.id, direction: 'asc' },
       ]),
-    ).toEqual([events.createdAt, events.id])
+    ).toEqual({ created_at: events.createdAt, id: events.id })
   })
 })

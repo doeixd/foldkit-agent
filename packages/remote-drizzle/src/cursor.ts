@@ -50,6 +50,6 @@ export const orderByTerms = (
     (term.direction === 'asc') === (traversal === 'forward') ? asc(term.column) : desc(term.column),
   )
 
-/** The columns the executor reads to reconstruct a cursor's ordering tuple. */
-export const cursorColumns = (terms: readonly OrderTerm[]): ReadonlyArray<AnyColumn> =>
-  terms.map(term => term.column)
+/** The tuple columns to re-read for a cursor, keyed as Drizzle select aliases. */
+export const cursorSelection = (terms: readonly OrderTerm[]): Record<string, AnyColumn> =>
+  Object.fromEntries(terms.map(term => [term.column.name, term.column]))

@@ -16,8 +16,8 @@ import { Effect } from 'effect'
 import type { QueryDescriptor, Selection } from 'foldkit-remote'
 import { RemoteServerError, type EntitySource, type QuerySource } from 'foldkit-remote-server'
 import type { EntityBinding, RelationBinding } from './binding.js'
-import { idColumn, projectsAny, requiredColumns } from './columns.js'
-import { keysetWhere, orderByTerms, type OrderTerm } from './cursor.js'
+import { idColumn, projectsAny } from './columns.js'
+import { cursorSelection, keysetWhere, orderByTerms, type OrderTerm } from './cursor.js'
 import { DrizzleDatabase, type DrizzleDatabaseService } from './database.js'
 import { toQueryPage } from './page.js'
 import { shapeWindow } from './window.js'
@@ -46,31 +46,6 @@ export const relationsFor = (
 /** A whole id batch as one `IN (...)` — the normalized-store advantage. */
 export const whereIds = (binding: EntityBinding<any, any>, ids: ReadonlyArray<string>): SQL =>
   inArray(idColumn(binding), ids)
-
-export interface QueryPlan {
-  readonly columns: ReadonlyArray<AnyColumn>
-  readonly where: SQL | undefined
-  readonly limit: number | undefined
-}
-
-const combineWhere = (where?: SQL, cursor?: SQL): SQL | undefined =>
-  where === undefined ? cursor : cursor === undefined ? where : and(where, cursor)
-
-/** Compiles a Query's Selection + window into pruned columns and a `where`. */
-export const queryPlan = (
-  binding: EntityBinding<any, any>,
-  selection: Selection<unknown>,
-  options: {
-    readonly where?: SQL | undefined
-    readonly cursor?: SQL | undefined
-    readonly order?: readonly OrderTerm[] | undefined
-    readonly limit?: number | undefined
-  } = {},
-): QueryPlan => ({
-  columns: requiredColumns(binding, selection.fields, { order: options.order }),
-  where: combineWhere(options.where, options.cursor),
-  limit: options.limit,
-})
 
 export interface EntityRecord {
   readonly id: string
@@ -170,9 +145,11 @@ const runDrizzle =
 /** A `RemoteServer.entity` source backed by the `DrizzleDatabase` service. */
 export const source = <P = unknown>(
   binding: EntityBinding<any, any>,
+  options?: { readonly authorize?: EntitySource<P, DrizzleDatabase>['authorize'] | undefined },
 ): EntitySource<P, DrizzleDatabase> => ({
   entity: binding.name,
   read: reader(binding, runDrizzle(binding)),
+  ...(options?.authorize === undefined ? {} : { authorize: options.authorize }),
 })
 
 /**
@@ -220,10 +197,8 @@ export const query = <P = unknown, Input = unknown>(
         let where = baseWhere
 
         if (shape.cursor !== undefined) {
-          const cursorSelection = Object.fromEntries(
-            options.orderBy.map(term => [term.column.name, term.column]),
-          )
-          const cursorRows = yield* selectRows(database, binding.table, cursorSelection, {
+          const cursorColumns = cursorSelection(options.orderBy)
+          const cursorRows = yield* selectRows(database, binding.table, cursorColumns, {
             where:
               baseWhere === undefined ? eq(id, shape.cursor) : and(baseWhere, eq(id, shape.cursor)),
             limit: 1,
