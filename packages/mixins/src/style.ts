@@ -9,12 +9,16 @@ import { DiagnosticError } from './diagnostics.js'
 import * as Mixin from './mixin.js'
 import type { Mixin as MixinValue } from './mixin.js'
 import * as SlotView from './slotView.js'
+import * as Rules from './styleRules.js'
+import type { StyleRule } from './styleRules.js'
 
 export interface StyleValue {
   readonly classes: ReadonlyArray<string>
   readonly style: Readonly<Record<string, string>>
   /** Input-driven pieces resolved at render time; empty for a static style. */
   readonly conditions?: ReadonlyArray<StyleCondition>
+  /** Rule-based appearance compiled to a deterministic class plus CSS. */
+  readonly rules?: ReadonlyArray<StyleRule>
 }
 
 export interface StyleCondition {
@@ -30,6 +34,8 @@ export interface NamedStyle<Slots> {
   readonly name?: string
   readonly pieces: StylePieces<Slots>
   readonly mixin: MixinValue<never>
+  /** Concatenated rule CSS for every static piece; identical rules share a class. */
+  readonly css: string
 }
 
 const tokens = (value: string): ReadonlyArray<string> =>
@@ -49,12 +55,33 @@ export const inline = (value: Readonly<Record<string, string>>): StyleValue =>
 /** Concatenate classes; later inline declarations win per property. */
 export const compose = (...pieces: ReadonlyArray<StyleValue>): StyleValue => {
   const conditions = pieces.flatMap(piece => piece.conditions ?? [])
+  const rules = pieces.flatMap(piece => piece.rules ?? [])
   return Object.freeze({
     classes: Object.freeze(pieces.flatMap(piece => piece.classes)),
     style: Object.freeze(Object.assign(Object.create(null), ...pieces.map(piece => piece.style))),
     ...(conditions.length === 0 ? {} : { conditions: Object.freeze(conditions) }),
+    ...(rules.length === 0 ? {} : { rules: Object.freeze(rules) }),
   })
 }
+
+/** A pseudo-class/element rule, e.g. `Style.pseudo(':hover', { color: 'red' })`. */
+export const pseudo = (
+  suffix: string,
+  declarations: Readonly<Record<string, string>>,
+): StyleValue =>
+  Object.freeze({
+    classes: empty.classes,
+    style: empty.style,
+    rules: Object.freeze([Rules.pseudo(suffix, declarations)]),
+  })
+
+/** An at-rule, e.g. `Style.media('(min-width: 40rem)', { color: 'red' })`. */
+export const media = (query: string, declarations: Readonly<Record<string, string>>): StyleValue =>
+  Object.freeze({
+    classes: empty.classes,
+    style: empty.style,
+    rules: Object.freeze([Rules.media(query, declarations)]),
+  })
 
 /** A boolean known at authoring time. */
 export const when = (condition: boolean, piece: StyleValue): StyleValue =>
@@ -87,17 +114,58 @@ const resolveStyle = (style: StyleValue, input: unknown): StyleValue => {
   })
 }
 
+const hasConditionalRules = (style: StyleValue): boolean =>
+  (style.conditions ?? []).some(
+    condition => (condition.piece.rules ?? []).length > 0 || hasConditionalRules(condition.piece),
+  )
+
+interface CompiledStyle {
+  readonly classes: ReadonlyArray<string>
+  readonly style: Readonly<Record<string, string>>
+  readonly css?: string
+}
+
+/** A rule-bearing style gets one deterministic class and its CSS text. */
+const compileStyle = (style: StyleValue): CompiledStyle => {
+  const rules = style.rules ?? []
+  if (rules.length === 0) return { classes: style.classes, style: style.style }
+  const generated = Rules.className(rules)
+  return {
+    classes: Object.freeze([...style.classes, generated]),
+    style: style.style,
+    css: Rules.css(generated, rules),
+  }
+}
+
 /**
  * A static style stays static data. A style with input conditions compiles to a
- * message-free `InputContribution`, so it still attaches to any view.
+ * message-free `InputContribution`, so it still attaches to any view. Rules
+ * inside a condition are rejected: the class is static while the condition is
+ * not.
  */
 export const toContribution = (style: StyleValue): SlotContribution<never> => {
-  if ((style.conditions ?? []).length === 0) {
-    return Object.freeze({ classes: style.classes, style: style.style })
+  if (hasConditionalRules(style)) {
+    throw new DiagnosticError({
+      source: 'mixins',
+      code: 'style:conditional-rules-unsupported',
+      severity: 'error',
+      message: 'Style.pseudo/media may not appear inside Style.whenInput',
+    })
   }
+  const compiled = compileStyle(style)
+  const base = {
+    classes: compiled.classes,
+    style: compiled.style,
+    ...(compiled.css === undefined ? {} : { css: compiled.css }),
+  }
+  if ((style.conditions ?? []).length === 0) return Object.freeze(base)
   const contribution: InputContribution<never> = context => {
-    const resolved = resolveStyle(style, context.input)
-    return Object.freeze({ classes: resolved.classes, style: resolved.style })
+    const resolved = resolveStyle({ ...style, classes: compiled.classes }, context.input)
+    return Object.freeze({
+      classes: resolved.classes,
+      style: resolved.style,
+      ...(compiled.css === undefined ? {} : { css: compiled.css }),
+    })
   }
   return contribution
 }
@@ -107,6 +175,7 @@ export const forSlots =
   (pieces: StylePieces<Slots>, options?: { readonly name?: string }): NamedStyle<Slots> => {
     const known = slots as unknown as Record<string, unknown>
     const contributions: Record<string, SlotContribution<never>> = Object.create(null)
+    let css = ''
     for (const [key, piece] of Object.entries(pieces as Record<string, StyleValue | undefined>)) {
       if (!Object.hasOwn(known, key)) {
         throw new DiagnosticError({
@@ -117,14 +186,25 @@ export const forSlots =
           slot: key,
         })
       }
-      if (piece !== undefined) contributions[key] = toContribution(piece)
+      if (piece !== undefined) {
+        const contribution = toContribution(piece)
+        contributions[key] = contribution
+        if (typeof contribution !== 'function' && contribution.css !== undefined) {
+          css += contribution.css
+        }
+      }
     }
     return Object.freeze({
       ...(options?.name === undefined ? {} : { name: options.name }),
       pieces,
       mixin: Mixin.dynamic<never>(options?.name ?? 'Style', contributions),
+      css,
     })
   }
+
+/** Concatenate the rule CSS of several styles for one `<style>` block. */
+export const stylesheet = (...styles: ReadonlyArray<{ readonly css: string }>): string =>
+  styles.map(style => style.css).join('')
 
 export const attach =
   <Slots>(style: NamedStyle<Slots>) =>
@@ -170,9 +250,12 @@ export const Style = {
   compose,
   when,
   whenInput,
+  pseudo,
+  media,
   empty,
   toContribution,
   forSlots,
   attach,
   recipe,
+  stylesheet,
 } as const

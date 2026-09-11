@@ -308,6 +308,31 @@ override even when a later attachment would otherwise win.
   Surface + Mixins trace (asserted line by line). A remote-backed example
   (Phase 11) remains.
 
+### Advanced Style compiler (Phase 12)
+
+Status: started. v1 compiles rule-based Style to a deterministic class plus CSS
+text; collection stays caller-owned.
+
+- A `StyleRule` is `{ selector, at?, declarations }`. `selector` is relative to
+  the generated class and uses `&` (`&:hover`, `&[data-open]`).
+- `Style.pseudo(pseudo, declarations)` and `Style.media(query, declarations)`
+  produce a StyleValue carrying rules; `Style.compose` concatenates them.
+- Compilation is deterministic: declarations are sorted, rules keep authored
+  order, and the class name is an FNV-1a base36 hash of the canonical rule text.
+  Equal rules share a class; different rules differ.
+- **No render-time collection and no import-time DOM mutation.** The CSS text is
+  data (`NamedStyle.css`), so SSR and the browser derive the same class and the
+  same rules, and the application decides where to inject it. This is the honest
+  reading of "SSR collection": `Style.stylesheet([...styles])` concatenates
+  deduplicated rule text at build/list time, not from inside a render.
+- Rules under `Style.whenInput` are **rejected** in v1, because the class is
+  static while the condition is not. The diagnostic is
+  `style:conditional-rules-unsupported`.
+- Not in v1: keyframes, layers, container queries, global rules, nested
+  selectors beyond `&`, animations. Style stays in `foldkit-mixins` for now;
+  extract `foldkit-style` only if the compiler grows a real AST and rule
+  registry.
+
 ## Phase plan (this package)
 
 0. Probes — this file. Done.
@@ -325,9 +350,12 @@ override even when a later attachment would otherwise win.
 10. Surface adapter (separate package). `foldkit-mixins-surface` bridges a
     Surface's projected Model and Message subset to a SlotView. Started, not
     complete.
+11. Remote-backed example. Deferred while `foldkit-remote` is in flux.
+12. Advanced Style compiler. Started: pseudo/media, deterministic class + CSS.
+13. DevTools/agent metadata. Started: `SurfaceView.describe`/`toMarkdown`.
 
-Style CSS compiler, DevTools, and agent metadata wait until the core
-survives real views.
+The CSS compiler's remaining constructs (keyframes, layers, container queries,
+nested selectors) wait until a real view needs them.
 
 ## Non-goals
 

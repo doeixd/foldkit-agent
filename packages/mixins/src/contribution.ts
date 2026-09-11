@@ -15,6 +15,8 @@ export interface StaticContribution<Message> {
   readonly style?: Readonly<Record<string, string>>
   readonly attributes?: ReadonlyArray<Attribute<Message> | ChildAttribute>
   readonly mounts?: ReadonlyArray<MountAction<Message, any>>
+  /** Compiled rule CSS for a class this contribution introduces. */
+  readonly css?: string
 }
 
 export interface ContributionContext<Message> {

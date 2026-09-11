@@ -46,13 +46,16 @@ export const evaluate = <Message>(
 const mergeStatic = <Message>(
   left: StaticContribution<Message>,
   right: StaticContribution<Message>,
-): StaticContribution<Message> =>
-  Object.freeze({
+): StaticContribution<Message> => {
+  const css = `${left.css ?? ''}${right.css ?? ''}`
+  return Object.freeze({
     classes: Object.freeze([...(left.classes ?? []), ...(right.classes ?? [])]),
     style: Object.freeze({ ...(left.style ?? {}), ...(right.style ?? {}) }),
     attributes: Object.freeze([...(left.attributes ?? []), ...(right.attributes ?? [])]),
     mounts: Object.freeze([...(left.mounts ?? []), ...(right.mounts ?? [])]),
+    ...(css === '' ? {} : { css }),
   })
+}
 
 const mergeSlot = <Message>(
   left: SlotContribution<Message>,

@@ -61,4 +61,5 @@ export type {
 } from './slotView.js'
 export type { Contract as SlotsContract } from './slots.js'
 export type { NamedStyle, StyleCondition, StylePieces, StyleValue } from './style.js'
+export type { StyleRule } from './styleRules.js'
 export type { Theme as ThemeValue, ThemeTokens } from './theme.js'
