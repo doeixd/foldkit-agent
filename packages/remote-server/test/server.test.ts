@@ -239,4 +239,105 @@ describe('RemoteServer', () => {
     expect(result.failure._tag).toBe('RemoteReadError')
     expect(result.failure.message).toBe('source refused the read')
   })
+
+  it('groups requests per entity, unions fields, and dedupes ids', async () => {
+    const calls: Array<{ ids: readonly string[]; fields: readonly string[] }> = []
+    const recording = RemoteServer.make(
+      {},
+      {
+        entities: [
+          RemoteServer.entity<string>(User, {
+            read: ({ ids, fields }) => {
+              calls.push({ ids, fields })
+              return Effect.succeed(
+                ids.map(id => ({
+                  id,
+                  values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
+                })),
+              )
+            },
+          }),
+        ],
+      },
+    )
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteRead({
+            requests: [
+              { entity: 'User', id: 'u1', fields: ['id', 'name'] },
+              { entity: 'User', id: 'u1', fields: ['name', 'admin'] },
+              { entity: 'User', id: 'u2', fields: ['id'] },
+            ],
+          })
+        }),
+      ).pipe(
+        Effect.provide(
+          RemoteRpc.toLayer({
+            ...RemoteServer.handlers(recording, 'admin'),
+            FoldkitRemoteLive: () => Stream.empty,
+          }),
+        ),
+      ),
+    )
+
+    expect(calls).toEqual([{ ids: ['u1', 'u2'], fields: ['id', 'name', 'admin'] }])
+    expect(result.entities).toEqual([
+      { entity: 'User', id: 'u1', values: { id: 'id:u1', name: 'name:u1', admin: 'admin:u1' } },
+      { entity: 'User', id: 'u2', values: { id: 'id:u2', name: 'name:u2', admin: 'admin:u2' } },
+    ])
+  })
+
+  it('skips an unknown entity without failing the batch', async () => {
+    const result = await read('user', [
+      { entity: 'Ghost', id: 'g1', fields: ['x'] },
+      { entity: 'User', id: 'u1', fields: ['id'] },
+    ])
+    expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { id: 'id:u1' } }])
+  })
+
+  it('returns nothing for an empty request batch', async () => {
+    expect((await read('user', [])).entities).toEqual([])
+  })
+
+  it('ignores inherited properties for a crafted field name', async () => {
+    const crafted = RemoteServer.make(
+      {},
+      {
+        entities: [
+          RemoteServer.entity<string>(User, {
+            read: ({ ids }) =>
+              Effect.succeed(
+                ids.map(id => ({
+                  id,
+                  values: Object.assign(Object.create({ toString: 'leaked' }), { id }),
+                })),
+              ),
+          }),
+        ],
+      },
+    )
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteRead({
+            requests: [{ entity: 'User', id: 'u1', fields: ['id', 'toString'] }],
+          })
+        }),
+      ).pipe(
+        Effect.provide(
+          RemoteRpc.toLayer({
+            ...RemoteServer.handlers(crafted, 'admin'),
+            FoldkitRemoteLive: () => Stream.empty,
+          }),
+        ),
+      ),
+    )
+
+    expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { id: 'u1' } }])
+  })
 })

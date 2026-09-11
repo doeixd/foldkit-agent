@@ -215,9 +215,11 @@ export const RemoteServer = {
           )
 
         for (const record of records) {
-          const values: Record<string, unknown> = {}
+          // Null-prototype so a crafted field name (`__proto__`) cannot reach
+          // the prototype, and `Object.hasOwn` so inherited names are ignored.
+          const values: Record<string, unknown> = Object.create(null)
           for (const field of allowed) {
-            if (field in record.values) values[field] = record.values[field]
+            if (Object.hasOwn(record.values, field)) values[field] = record.values[field]
           }
           entities.push({ entity: name, id: record.id, values })
         }
