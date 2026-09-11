@@ -179,6 +179,24 @@ override even when a later attachment would otherwise win.
   is a `mixins:duplicate-mount-name` error.
 - Conflicts throw `DiagnosticError` with a stable `code`; see `diagnostics.ts`.
 
+### Behavior and the Mixin algebra
+
+- `StaticMixin` holds only static contributions, so it stays assignable to any
+  Message universe; `Style` produces one. `Mixin` may hold deferred
+  contributions typed with one Message universe; `Behavior` produces one.
+- A deferred contribution is `(context: { input; h }) => StaticContribution`.
+  The context's `input` is `unknown` at the container level; the Behavior
+  authoring helper re-narrows it. This keeps `StaticMixin<never>` usable in any
+  `buildersFor` call while Message safety stays with the view's `h`.
+- `buildersFor` evaluates deferred contributions lazily inside `attrs`, per
+  render, so a Behavior sees the view's `input` and `h`.
+- Behavior validates its `requires` against the target Slot at definition time
+  (`mixins:unknown-slot`, `mixins:capability-mismatch`,
+  `mixins:unsupported-event`, `mixins:unsupported-attribute`).
+- Behavior owns no state. Stateful widgets stay `@foldkit/ui` Submodels; a
+  continuous element listener is a Mount; a network call is Message -> update ->
+  Command.
+
 ## Phase plan (this package)
 
 0. Probes — this file. Done.

@@ -25,6 +25,11 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 - **Style v1.** Pure `Style.class`/`inline`/`compose`/`when`/`forSlots`, compiling
   to a contribution; `Style.attach` is `SlotView.attach` for a style. Input-driven
   conditional style and the CSS compiler are not in this slice.
+- **Behavior v1.** `Behavior.slot`/`forSlots` build attributes from the view's
+  `input` and `h` at resolve time, so the view's Message universe governs them.
+  Definition-time validation rejects an unknown slot, an unsatisfied capability,
+  and an unpublished event or attribute; a Behavior owns no state. Theme/recipes,
+  A11y, and the UI/Surface adapters are not in this slice.
 
 ### `foldkit-agent`
 

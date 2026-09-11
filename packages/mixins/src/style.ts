@@ -4,10 +4,10 @@
  * `forSlots` validates piece keys against the published contract at definition
  * time, so a typo fails loudly.
  */
-import type { SlotContribution } from './contribution.js'
+import type { StaticContribution } from './contribution.js'
 import { DiagnosticError } from './diagnostics.js'
 import * as Mixin from './mixin.js'
-import type { Mixin as MixinValue } from './mixin.js'
+import type { StaticMixin } from './mixin.js'
 import * as SlotView from './slotView.js'
 
 export interface StyleValue {
@@ -22,7 +22,7 @@ export type StylePieces<Slots> = {
 export interface NamedStyle<Slots> {
   readonly name?: string
   readonly pieces: StylePieces<Slots>
-  readonly mixin: MixinValue<never>
+  readonly mixin: StaticMixin<never>
 }
 
 const tokens = (value: string): ReadonlyArray<string> =>
@@ -49,14 +49,14 @@ export const compose = (...pieces: ReadonlyArray<StyleValue>): StyleValue =>
 export const when = (condition: boolean, piece: StyleValue): StyleValue =>
   condition ? piece : empty
 
-export const toContribution = (style: StyleValue): SlotContribution<never> =>
+export const toContribution = (style: StyleValue): StaticContribution<never> =>
   Object.freeze({ classes: style.classes, style: style.style })
 
 export const forSlots =
   <Slots>(slots: Slots) =>
   (pieces: StylePieces<Slots>, options?: { readonly name?: string }): NamedStyle<Slots> => {
     const known = slots as unknown as Record<string, unknown>
-    const contributions: Record<string, SlotContribution<never>> = {}
+    const contributions: Record<string, StaticContribution<never>> = {}
     for (const [key, piece] of Object.entries(pieces as Record<string, StyleValue | undefined>)) {
       if (!(key in known)) {
         throw new DiagnosticError({
@@ -72,7 +72,7 @@ export const forSlots =
     return Object.freeze({
       ...(options?.name === undefined ? {} : { name: options.name }),
       pieces,
-      mixin: Mixin.make(options?.name ?? 'Style', contributions),
+      mixin: Mixin.make<never>(options?.name ?? 'Style', contributions),
     })
   }
 

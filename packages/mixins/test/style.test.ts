@@ -44,9 +44,9 @@ describe('Style', () => {
       { name: 'FieldStyle' },
     )
     expect(FieldStyle.mixin.name).toBe('FieldStyle')
-    expect(FieldStyle.mixin.contributions.root?.classes).toEqual(['field'])
-    expect(FieldStyle.mixin.contributions.input?.classes).toEqual(['field-input'])
-    expect(FieldStyle.mixin.contributions.label).toBeUndefined()
+    expect(FieldStyle.pieces.root?.classes).toEqual(['field'])
+    expect(FieldStyle.pieces.input?.classes).toEqual(['field-input'])
+    expect(FieldStyle.pieces.label).toBeUndefined()
   })
 
   it('forSlots rejects an unknown slot at runtime', () => {

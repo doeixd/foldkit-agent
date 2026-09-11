@@ -1,13 +1,14 @@
 /**
  * `SlotView` is the structural equivalent of a Surface: a pure Foldkit view
  * that publishes typed Slots and lets Mixins attach without forking it. It
- * owns no state and runs no Effects; the attached Mixins are resolved into
- * ordinary Foldkit attributes per slot.
+ * owns no state and runs no Effects. Attached Mixins are resolved into
+ * ordinary Foldkit attributes per slot, using the view's own `h` so Message
+ * capability masking is preserved.
  */
 import type { Html, HtmlBuilder } from 'foldkit/html'
-import type { Mixin } from './mixin.js'
+import { evaluate, type AnyMixin, type Mixin, type StaticMixin } from './mixin.js'
 import { pipeSelf, type Pipeable } from './pipe.js'
-import { resolveSlot, type SlotAttributes } from './resolver.js'
+import { resolve, type SlotAttributes } from './resolver.js'
 import type { Any as AnySlot, SlotProtection } from './slot.js'
 
 export type SlotBuilder<Message> = {
@@ -28,14 +29,15 @@ export interface SlotView<Slots, Input, Message> extends Pipeable<SlotView<Slots
   (input: Input, h: HtmlBuilder<Message>): Html
   readonly name?: string
   readonly slots: Slots
-  readonly mixins: ReadonlyArray<Mixin<Message>>
+  readonly mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>
   readonly render: SlotViewRender<Slots, Input, Message>
 }
 
-/** Build one `attrs` resolver per published slot, folding the view's Mixins. */
-export const buildersFor = <Slots, Message>(
+/** Build one `attrs` resolver per published slot, evaluating Mixins lazily. */
+export const buildersFor = <Slots, Message, Input>(
   slots: Slots,
-  mixins: ReadonlyArray<Mixin<Message>>,
+  mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>,
+  context: { readonly input: Input; readonly h: HtmlBuilder<Message> },
 ): SlotBuilders<Slots, Message> => {
   const source = slots as unknown as Record<string, AnySlot>
   const builders: Record<string, SlotBuilder<Message>> = {}
@@ -44,8 +46,16 @@ export const buildersFor = <Slots, Message>(
     if (slot === undefined) continue
     const protection: SlotProtection = slot.protected
     builders[name] = {
-      attrs: (base?: SlotAttributes<Message>) =>
-        resolveSlot(base, mixins, name, { protected: protection }),
+      attrs: (base?: SlotAttributes<Message>) => {
+        const contributions = []
+        for (const mixin of mixins) {
+          const contribution = mixin.contributions[name]
+          if (contribution !== undefined) {
+            contributions.push(evaluate(contribution, { input: context.input, h: context.h }))
+          }
+        }
+        return resolve(base, contributions, { slot: name, protected: protection })
+      },
     }
   }
   return builders as SlotBuilders<Slots, Message>
@@ -54,11 +64,11 @@ export const buildersFor = <Slots, Message>(
 const makeView = <Slots, Input, Message>(
   name: string | undefined,
   slots: Slots,
-  mixins: ReadonlyArray<Mixin<Message>>,
+  mixins: ReadonlyArray<Mixin<Message> | StaticMixin<Message>>,
   render: SlotViewRender<Slots, Input, Message>,
 ): SlotView<Slots, Input, Message> => {
-  const builders = buildersFor(slots, mixins)
-  const view = (input: Input, h: HtmlBuilder<Message>): Html => render(input, builders, h)
+  const view = (input: Input, h: HtmlBuilder<Message>): Html =>
+    render(input, buildersFor(slots, mixins, { input, h }), h)
   // A function's own `name` is read-only; define it rather than assigning.
   if (name !== undefined) {
     Object.defineProperty(view, 'name', { value: name, configurable: true })
@@ -77,19 +87,20 @@ export const define = <Slots, Input, Message>(
   options?: { readonly name?: string },
 ): SlotView<Slots, Input, Message> => makeView(options?.name, slots, [], render)
 
-/** A transform on any view, used by Message-free mixins such as Style. */
+/** A transform on any view, used by Message-free static mixins such as Style. */
 export type SlotViewTransform = <Slots, Input, Message>(
   view: SlotView<Slots, Input, Message>,
 ) => SlotView<Slots, Input, Message>
 
-/** A transform restricted to one Message universe, for Message-bearing mixins. */
+/** A transform restricted to one Message universe, for Behavior mixins. */
 export type SlotViewTransformFor<Message> = <Slots, Input>(
   view: SlotView<Slots, Input, Message>,
 ) => SlotView<Slots, Input, Message>
 
 /** Attach one Mixin. Returns a new view; the original is unchanged. */
-export function attach(mixin: Mixin<never>): SlotViewTransform
+export function attach(mixin: StaticMixin<never>): SlotViewTransform
 export function attach<MixinMessage>(mixin: Mixin<MixinMessage>): SlotViewTransformFor<MixinMessage>
-export function attach(mixin: Mixin<any>): SlotViewTransform {
-  return view => makeView(view.name, view.slots, [...view.mixins, mixin], view.render)
+export function attach(mixin: AnyMixin): any {
+  return (view: SlotView<any, any, any>) =>
+    makeView(view.name, view.slots, [...view.mixins, mixin], view.render)
 }

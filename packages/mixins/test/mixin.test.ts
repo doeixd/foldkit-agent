@@ -20,12 +20,12 @@ describe('Mixin.compose', () => {
       },
     })
     const merged = Mixin.compose(a, b)
-    const root = merged.contributions.root
+    const root = Mixin.evaluate(merged.contributions.root ?? {}, { input: undefined, h })
     expect(merged.name).toBe('A+B')
-    expect(root?.classes).toEqual(['a', 'b'])
-    expect(root?.style).toEqual({ color: 'blue', padding: '1px' })
-    expect(root?.attributes).toHaveLength(2)
-    expect(root?.mounts).toHaveLength(1)
+    expect(root.classes).toEqual(['a', 'b'])
+    expect(root.style).toEqual({ color: 'blue', padding: '1px' })
+    expect(root.attributes).toHaveLength(2)
+    expect(root.mounts).toHaveLength(1)
   })
 
   it('is immutable and leaves inputs untouched', () => {

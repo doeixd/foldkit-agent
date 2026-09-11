@@ -2,11 +2,12 @@
  * `foldkit-mixins` — typed slot contracts and inside-out Style/Behavior
  * attachments for Foldkit.
  *
- * Phase 1 is the AF-UI slot contract port: MetadataToken, Capability, Event,
- * Attr, Requirement, Slot, Slots. No Handles, no Atoms. Resolver, SlotView,
- * Style, and Behavior land in later phases.
+ * A view publishes `Slots`; `Style` and `Behavior` attach to those slots and
+ * resolve into ordinary Foldkit attributes. No Handles, no Atoms, no second
+ * runtime: state stays in Model/Submodel, effects in Command/Mount.
  */
 export * as Attr from './attr.js'
+export * as Behavior from './behavior.js'
 export * as Capability from './capability.js'
 export * as Diagnostics from './diagnostics.js'
 export * as Event from './event.js'
@@ -21,13 +22,33 @@ export * as SlotView from './slotView.js'
 export { Style } from './style.js'
 
 export type { AttrToken } from './attr.js'
+export type {
+  BehaviorSlotOptions,
+  BehaviorSpec,
+  NamedBehavior,
+  SlotRequirements,
+} from './behavior.js'
 export type { Any as AnyCapability, Satisfies } from './capability.js'
-export type { Contribution, SlotContribution } from './contribution.js'
+export type {
+  Contribution,
+  ContributionContext,
+  DynamicContribution,
+  SlotContribution,
+  StaticContribution,
+  StaticContributionMap,
+} from './contribution.js'
 export type { Diagnostic, DiagnosticCode } from './diagnostics.js'
 export type { EventToken } from './event.js'
+export type { AnyMixin, Mixin as MixinValue, StaticMixin } from './mixin.js'
 export type { RequirementToken } from './requirement.js'
 export type { ResolveOptions, SlotAttributes } from './resolver.js'
 export type { SlotProtection, UnnamedSlot } from './slot.js'
-export type { SlotBuilder, SlotBuilders, SlotViewRender } from './slotView.js'
+export type {
+  SlotBuilder,
+  SlotBuilders,
+  SlotViewRender,
+  SlotViewTransform,
+  SlotViewTransformFor,
+} from './slotView.js'
 export type { Contract as SlotsContract } from './slots.js'
 export type { NamedStyle, StylePieces, StyleValue } from './style.js'

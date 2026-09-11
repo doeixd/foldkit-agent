@@ -15,10 +15,8 @@ import {
   mountAttribute,
   styleAttribute,
 } from './attribute.js'
-import type { SlotContribution } from './contribution.js'
+import type { StaticContribution } from './contribution.js'
 import { DiagnosticError, type Diagnostic, type DiagnosticCode } from './diagnostics.js'
-import type { Mixin } from './mixin.js'
-import { contributionsFor } from './mixin.js'
 import * as MetadataToken from './metadataToken.js'
 import type { SlotProtection } from './slot.js'
 
@@ -71,7 +69,7 @@ const toDiagnostic = (
 
 export const resolve = <Message>(
   base: SlotAttributes<Message> | undefined,
-  contributions: ReadonlyArray<SlotContribution<Message>>,
+  contributions: ReadonlyArray<StaticContribution<Message>>,
   options: ResolveOptions = {},
 ): SlotAttributes<Message> => {
   const slot = options.slot
@@ -274,19 +272,4 @@ const composeMounts = <Message>(
         { concurrency: 'unbounded' },
       ),
   })
-}
-
-/** Fold the mixins' contributions for one slot, then resolve. */
-export const resolveSlot = <Message>(
-  base: SlotAttributes<Message> | undefined,
-  mixins: ReadonlyArray<Mixin<Message>>,
-  slot: string,
-  options: Omit<ResolveOptions, 'slot'> = {},
-): SlotAttributes<Message> => {
-  const contributions: Array<SlotContribution<Message>> = []
-  for (const mixin of mixins) {
-    const contribution = contributionsFor(mixin, slot)
-    if (contribution !== undefined) contributions.push(contribution)
-  }
-  return resolve(base, contributions, { ...options, slot })
 }

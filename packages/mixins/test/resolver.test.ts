@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Attr, Event, Mixin, Resolver, Slot, type SlotAttributes } from '../src/index.js'
+import { Attr, Event, Resolver, Slot, type SlotAttributes } from '../src/index.js'
 import { DiagnosticError } from '../src/diagnostics.js'
 import { fakeChild, h, mount, type TestMessage } from './resolverFixture.js'
 
@@ -155,17 +155,5 @@ describe('Resolver.resolve', () => {
         ),
       )
     expect(build()).toEqual(build())
-  })
-})
-
-describe('Resolver.resolveSlot', () => {
-  it('folds a Mixin contribution for one slot', () => {
-    const Decoration = Mixin.make('Decoration', {
-      root: { classes: ['decorated'] },
-      label: { classes: ['labelled'] },
-    })
-    expect(classOf(Resolver.resolveSlot([], [Decoration], 'root'))).toBe('decorated')
-    expect(classOf(Resolver.resolveSlot([], [Decoration], 'label'))).toBe('labelled')
-    expect(tags(Resolver.resolveSlot([], [Decoration], 'input'))).toEqual([])
   })
 })

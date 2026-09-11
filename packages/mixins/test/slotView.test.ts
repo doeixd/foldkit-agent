@@ -45,13 +45,15 @@ const hasTag = (attributes: SlotAttributes<TestMessage>, tag: string): boolean =
 const vnodeData = (value: unknown): Record<string, unknown> =>
   (value as { readonly data?: Record<string, unknown> }).data ?? {}
 
+const context = { input: { label: 'x' }, h }
+
 describe('SlotView', () => {
   it('folds a Mixin into the addressed slot only', () => {
     const Decoration = Mixin.make<TestMessage>('Decoration', {
       root: { classes: ['field'] },
       input: { classes: ['field-input'] },
     })
-    const builders = SlotView.buildersFor(FieldSlots, [Decoration])
+    const builders = SlotView.buildersFor(FieldSlots, [Decoration], context)
     expect(classValue(builders.root.attrs())).toBe('field')
     expect(classValue(builders.input.attrs())).toBe('field-input')
     expect(classValue(builders.label.attrs())).toBeUndefined()
@@ -59,7 +61,7 @@ describe('SlotView', () => {
 
   it('extends base attributes rather than replacing them', () => {
     const Decoration = Mixin.make<TestMessage>('Decoration', { root: { classes: ['field'] } })
-    const builders = SlotView.buildersFor(FieldSlots, [Decoration])
+    const builders = SlotView.buildersFor(FieldSlots, [Decoration], context)
     const attributes = builders.root.attrs([h.Class('base'), h.Role('group')])
     expect(classValue(attributes)).toBe('base field')
     expect(hasTag(attributes, 'Role')).toBe(true)
@@ -68,7 +70,7 @@ describe('SlotView', () => {
   it('merges multiple attachments in order', () => {
     const A = Mixin.make<TestMessage>('A', { root: { classes: ['a'] } })
     const B = Mixin.make<TestMessage>('B', { root: { classes: ['b'] } })
-    const builders = SlotView.buildersFor(FieldSlots, [A, B])
+    const builders = SlotView.buildersFor(FieldSlots, [A, B], context)
     expect(classValue(builders.root.attrs())).toBe('a b')
   })
 

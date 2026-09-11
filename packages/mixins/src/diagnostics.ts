@@ -6,6 +6,9 @@
  */
 export type DiagnosticCode =
   | 'mixins:unknown-slot'
+  | 'mixins:capability-mismatch'
+  | 'mixins:unsupported-event'
+  | 'mixins:unsupported-attribute'
   | 'mixins:protected-event'
   | 'mixins:protected-attribute'
   | 'mixins:protected-style-property'
