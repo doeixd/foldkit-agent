@@ -1,9 +1,10 @@
 # Revision Plan — Foldkit Plus reorganization around Surface and Remote
 
 **Status:** authoritative plan and handoff. Supersedes
-`packages/surface/DESIGN_BRAINSTORM.md`, `packages/surface/BACKBONE.md`, and
-`packages/surface/REMOTE.md` wherever they conflict; those remain for provenance.
-This document is written to be executable by someone with **no prior context**.
+`packages/surface/DESIGN_BRAINSTORM.md`, `packages/surface/BACKBONE.md`,
+`packages/surface/REMOTE.md`, and `packages/surface/DRIZZLE.md` wherever they
+conflict; those remain for provenance. This document is written to be executable
+by someone with **no prior context**.
 
 **One-line thesis:**
 
@@ -152,6 +153,9 @@ Surface    = Projection + Message constructor references
 
 Remote     = normalized entity store + requirement planner
              + Effect RPC (wire) + Effect persistence (cache snapshots)
+
+RemoteDrizzle = Remote Selection/Query graph ──▶ Drizzle relational query
+                (fields ──▶ columns, refs ──▶ predicates, relations ──▶ loads)
 ```
 
 ```text
@@ -262,6 +266,21 @@ persistence in the browser is an open dependency (§8.9, §17).
 - **Consequence:** the revision needs no unreleased Effect feature. Risk is
   inference and `unstable/*` churn, not missing primitives.
 
+### 3.5 Drizzle (external — **not installed**)
+
+`packages/surface/DRIZZLE.md` builds on two Drizzle features: an Effect-native
+PostgreSQL driver (`drizzle-orm/effect-postgres`, over `@effect/sql-pg`) and
+Effect Schema derivation from tables (`drizzle-orm/effect-schema`:
+`createSelectSchema` / `createInsertSchema` / `createUpdateSchema`, with per-column
+overrides).
+
+**Verified: none of `drizzle-orm`, `@effect/sql-pg`, or `@effect/sql-drizzle` is
+installed.** The workspace has only `@effect/sql-sqlite-node@4.0.0-rc.112` (for
+`foldkit-durable`). The Drizzle adapter is therefore entirely prospective; verify
+its external API surfaces and versions against a pinned Drizzle release before
+Phase 14 begins. Do not design persistence around Drizzle until it is installed and
+probed.
+
 ---
 
 ## 4. Package architecture
@@ -281,8 +300,10 @@ persistence in the browser is an open dependency (§8.9, §17).
  policy/audit     replication        normalized cache
        │               │                    │
   adapters         foldkit-durable     foldkit-remote-server
-  (webmcp/mcp/     (journal)           (sources/authorization)
-   a2a/native)
+  (webmcp/mcp/     (journal)                │
+   a2a/native)                              ▼
+                                    foldkit-remote-drizzle (provisional)
+                                    Remote Selection/Query ──▶ SQL
                        │
                        ▼
                    Effect v4
@@ -296,6 +317,7 @@ persistence in the browser is an open dependency (§8.9, §17).
 | `foldkit-surface` | `ModelRef`, `Projection`, `Surface`, dependency metadata | `effect`, `foldkit` (peer) |
 | `foldkit-remote` | `Entity`, `Selection`, `Query`, `Mutation`, `RemoteData`, normalized store, planner, RPC defs, cache persistence | `foldkit-surface`, `effect` |
 | `foldkit-remote-server` | `EntitySource`, `QuerySource`, `MutationSource`, selection authorization, handler compilation | `foldkit-remote`, `effect` |
+| `foldkit-remote-drizzle` (provisional) | compiler from Remote `Entity`/`Selection`/`Query` to Drizzle's typed query graph; rows → normalized patches | `foldkit-remote`, `drizzle-orm` (peer), `effect` |
 | `foldkit-agent` | policy: naming, descriptions, availability, authorization, principal, completion, audit, cancellation | `foldkit-surface`, `effect`, `foldkit` (peer) |
 | `foldkit-agent-{webmcp,mcp,a2a,native}` | protocol mapping only | `foldkit-agent` only |
 | `foldkit-sync` | offline replica, replay, reconciliation, presence; writable Surface interpreter | `foldkit-surface`, `effect` |
@@ -309,6 +331,8 @@ The source docs sometimes write `@foldkit/surface` / `foldkit/surface`. **Decisi
 build in-repo under the existing `foldkit-*` convention for now; keep
 `foldkit-surface` designed so it could be proposed upstream later. Do not block the
 revision on an upstream decision. Revisit only after Phase 1 acceptance.
+`foldkit-remote-drizzle` is **provisional**: it earns a package only if it meets
+the value bar in §8.12.
 
 ### 4.4 One shared application scope
 
@@ -966,6 +990,132 @@ const Server = RemoteServer.make(Data, {
 - Pure introspection: `Remote.inspect`, `Remote.inspectEntity`,
   `Remote.inspectQuery`, `Remote.plan`; DevTools must not reach into private layouts.
 
+### 8.12 Drizzle adapter (`foldkit-remote-drizzle`, provisional)
+
+**Thesis:** not a Drizzle driver — a **compiler from Remote's declarative
+entity/selection/query graph into Drizzle's typed relational query graph**, and
+back.
+
+```text
+Remote semantics              Drizzle semantics
+Entity                ←────→  Table
+Selection             ────→   partial SELECT
+EntityRef             ────→   PK predicate
+relation Selection    ────→   join / batched relation load
+QueryRef              ────→   WHERE / ORDER / LIMIT
+Connection            ←────   rows + pagination
+EntityPatch           ←────   selected row
+```
+
+Everything else (connection management, Layers, SQL error wrapping, transactions,
+Schema generation from tables) stays with Drizzle/Effect.
+
+**API sketch**
+
+```ts
+const User = RemoteDrizzle.entity("User", users, {
+  schema: { id: UserId },                       // per-column Schema override (branded id)
+})
+
+const Project = RemoteDrizzle.entity("Project", projects, {
+  schema: { id: ProjectId },
+  relations: { owner: RemoteDrizzle.one(User, { field: projects.ownerId }) },
+})
+
+const ProjectSource = RemoteDrizzle.source(Project)   // handles ids + Selection
+
+const ProjectsByOwnerSource = RemoteDrizzle.query(ProjectsByOwner, {
+  entity: Project,
+  where: ({ ownerId }) => eq(projects.ownerId, ownerId),
+  orderBy: desc(projects.createdAt),
+  cursor: { column: projects.createdAt, direction: "desc" },   // pagination
+})
+```
+
+- `RemoteDrizzle.entity(name, table, { schema?, relations? })` can derive the Entity
+  Schema from the table via `createSelectSchema`, then delegate id/brand overrides
+  to Drizzle's per-column Schema override — no second mapping language.
+- `RemoteDrizzle.source(Entity)` maps a Selection's fields to columns, executes a
+  batched SQL query, and returns normalized patches.
+- `RemoteDrizzle.query(Query, { entity, where, orderBy, cursor })` handles
+  pagination and derives the `Connection`.
+
+**Invariants**
+
+- The adapter captures **no database connection**; generated Sources require the
+  Drizzle Effect service (the Layer model is preserved).
+- Statements are batched by **entity + id list + column set**. The planner already
+  produces exactly that shape (`Remote.plan` output), so the adapter does not
+  re-plan.
+- Relation metadata describes **how entities relate**, not what SQL strategy to run;
+  the adapter may choose a JOIN or two-stage batched loads.
+- Selection is the single source of columns; no hand-written DTO or column mapping.
+- Server selection authorization still applies in the compiler: a Selection cannot
+  cause an unauthorized column to be read (defence in depth with §8.10).
+- The package is **provisional**. Build it only if it makes all of these automatic:
+  field pruning, batched ids, relation fetching, normalization, Selection-aware
+  joins, query pagination, and Schema derivation. If a generic `RemoteServer.entity`
+  Source is nearly as short, do not ship the package.
+
+**Edge cases**
+
+- Column type vs branded/transformed field: id override, dates (`Schema.Date` vs a
+  `timestamp` column), `numeric`/`NumberFromString`, `jsonb`, arrays.
+- SQL `NULL` vs Remote "present null" vs "missing" (§8.3): a `NULL` column maps to a
+  present-null value, not to absence.
+- Soft-deleted rows: map to a tombstone/`NotFound` rather than a value.
+- A relation whose FK is non-null but whose target row is gone (dangling).
+- A relation whose FK is nullable (`owner_id NULL`): absent relation vs present null
+  — define it.
+- The same target id appearing many times in a batch (dedupe the relation load).
+- Cursor pagination requires a **stable total order** (add a tie-breaker column, or
+  a page can repeat/skip rows).
+- A Selection that selects only a relation (no scalar id): the compiler still needs
+  the PK for normalization.
+- Field-level authorization interacting with column selection.
+- Multi-tenant scoping must be added to `where` by the Source, never inferred from
+  client input.
+- Mutations are **not** an adapter DSL initially: use Drizzle's Effect-native `db`
+  directly inside `RemoteServer.mutation` (maybe `RemoteDrizzle.returning` /
+  `columns` / `normalize` helpers later).
+
+### 8.13 Fate parity (framing for acceptance)
+
+The design aims to capture Fate's architectural benefits as native Foldkit + Effect
+primitives, and to add what Fate lacks:
+
+| Fate concept | Foldkit stack |
+| --- | --- |
+| view / fragment | `Selection` + `Projection` |
+| data masking | `Surface` |
+| normalized cache | `Remote.Model` entity store |
+| entity refs | `EntityRef` |
+| field-level fetch planning | `Remote.plan` |
+| batched requests | Remote `ReadBatch` + Effect RPC |
+| transport | Effect RPC protocol Layers |
+| server data views | `RemoteServer.entity/query` |
+| mutations | Message → Command → `Remote.mutate` |
+| optimistic updates | Remote optimistic layers |
+| live views | streaming RPC → normalized patches |
+| persisted cache | Effect Persistence / KV |
+| query composition | Selection + Surface composition |
+
+Beyond Fate: **Message capability masking** (`messages:`), full transition history
+through Foldkit Messages, one contract shared by Agent/Sync/Remote, and no
+React/Suspense render control flow (states stay explicit in `RemoteData`).
+
+What Fate is ahead on — implementation, not architecture: nested relation planning,
+partial-field correctness, query/connection reconciliation, optimistic rebasing,
+live + optimistic interaction, garbage collection, concurrent/racing requests,
+deletion semantics, pagination insertion. These are the hard parts and must be
+earned (see §13, §17).
+
+**Parity goal for acceptance:** data masking, composition, normalized entities,
+field presence, minimal fetching, batching, server field selection, ORM pruning,
+mutation reconciliation, optimistic updates, normalized lists/pagination, live,
+SSR, persistent cache. Deliberately **not** copied: Suspense-style render control
+flow.
+
 ---
 
 ## 9. Agent
@@ -1145,6 +1295,9 @@ const journal = yield* makeJournal({
 | Package names | `foldkit-surface`/`foldkit-remote`/`foldkit-remote-server`, Surface upstreamable | Repo convention; no upstream block. |
 | Durable | Independent; Sync provides the journal contract | Owns ordering/storage, not semantics. |
 | Low-level Sync | `defineSync` retained | Escape hatch for non-Foldkit/unusual consumers. |
+| Drizzle adapter | A compiler from Selection/Query to Drizzle, **not** a driver; provisional | Drizzle is Effect-native and derives Schemas; the adapter earns its place only via the value bar. |
+| Drizzle mutations | Use Drizzle's Effect `db` directly; no mutation DSL initially | Drizzle's Effect API is already good; do not hide it prematurely. |
+| Drizzle relations | Metadata describes relationships; the adapter picks JOIN vs batched load | Do not force JOINs; batching is the normalized-system advantage. |
 
 ---
 
@@ -1196,6 +1349,13 @@ Use this as a checklist when designing tests. Cross-reference the per-section li
 **SSR / persistence**
 - In-process RPC; cache serialization/versioning; hydration mismatch; quota/blocks;
   two-tab concurrency.
+
+**Drizzle adapter**
+- `NULL` vs present-null vs missing; soft-deleted → tombstone; nullable FK (absent
+  vs null); dangling FK; duplicated target ids in a batch; unstable pagination
+  order; a relation-only selection that still needs the PK; field authorization vs
+  column selection; multi-tenant `where`; date/numeric/json/array column mapping;
+  branded id override; mutations via the raw Effect Drizzle API.
 
 ---
 
@@ -1270,6 +1430,13 @@ directory (a probe from the repo root may resolve a different `effect`).
   builder may be covariant. This mixed variance is the `Surface.view` risk.
 - `Refreshable`/`refresh` is AsyncData revalidation, not a shared-state refresh;
   do not reuse it for sync.
+
+**Drizzle / remote adapter**
+- Drizzle's Effect-native integration and `effect-schema` are external packages; none
+  are installed here. Pin and probe them before Phase 14 (§3.5).
+- The adapter captures no connection; generated Sources require the Drizzle service.
+- Keep relation metadata declarative; do not bake a JOIN strategy into it.
+- A `NULL` column is a present value, not absence.
 
 **Process**
 
@@ -1425,7 +1592,22 @@ leaf-only.
 existing Sync/durable invariants (§10.2) still hold; published packages remain
 installable until their replacements ship; migration notes exist.
 
-### Phase 14 — Tooling
+### Phase 14 — `foldkit-remote-drizzle` (provisional)
+
+Only after Phases 7 and 12 are solid, and only if the adapter meets the value bar
+(§8.12): Entity↔Table binding, `Entity` Source compilation from a Selection,
+batched relation loads, Query→Connection with pagination, and Schema derivation.
+Pin and probe Drizzle first (§3.5).
+
+**Acceptance:** `RemoteDrizzle.source(Project)` fetches only the selected columns
+for the requested ids and returns normalized patches; a nested relation selection
+loads correctly (JOIN or batched) without N+1; cursor pagination is stable;
+field-level authorization still holds; no connection is captured; the generated
+Source is materially shorter than the generic `RemoteServer.entity` form (document
+the comparison). **If the value bar is not met, do not ship the package** and record
+why here.
+
+### Phase 15 — Tooling
 
 `Surface.registry`, DevTools Surface inspection, dependency/capability display,
 optional development MCP exposure. No behavior changes.
@@ -1449,6 +1631,8 @@ names are rejected; production exposure remains separately opt-in.
   from the protocol spec.
 - Remote server authorization has explicit tests for field-level denial, hidden
   existence, and partial entities.
+- Remote adapter tests assert field pruning and batched loads against an in-process
+  database; do not build a fake Drizzle query builder.
 - Run the four CI checks plus `pack:check` when manifests/builds change; run them
   before the commit, not after.
 - Negative type tests + runtime tests together; neither alone is sufficient.
@@ -1474,6 +1658,10 @@ installable; CI is green.
 | Scope (5 packages, rewrite Agent+Sync) | High | Phased, independently reversible; keep published packages working. |
 | Concurrent sessions editing the tree | Medium | Stage only owned files; never `git add -A`; coordinate on `packages/surface/`. |
 | Normalized store performance | Medium | Render optimization is a later interpreter; correctness first. |
+| Drizzle external deps uninstalled/unproven | Medium | Pin and probe `drizzle-orm` / `effect-postgres` / `effect-schema` before Phase 14; the adapter is provisional. |
+| ORM coupling / leaking SQL strategy | Medium | Relation metadata stays declarative; the adapter chooses strategy; abort the package if the value bar is not met. |
+| Connection/pagination correctness (races, stable order) | High | Require a stable total order; explicit tests for insert/remove/pagination semantics. |
+| Fate-parity gaps (lists, rebasing, GC, races) | High | Treat as implementation work with dedicated phases/tests (§8.13), not as assumed. |
 
 ---
 
@@ -1537,3 +1725,6 @@ is amended with the architecture changes the failures imply.
 5. Which browser `KeyValueStore` (IndexedDB) will Phase 12 use?
 6. Do `ModelRef.at` on a record and `.index` on an array return `Option`, and where
    does absence flow (Schema vs value)?
+7. Is `foldkit-remote-drizzle` worth shipping, or is a generic `RemoteServer.entity`
+   Source short enough? (Decide after Phase 7, with a real Drizzle probe.)
+8. Which Drizzle version/driver and which database for the first adapter?
