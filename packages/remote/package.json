@@ -35,7 +35,8 @@
     "foldkit-surface": "workspace:*"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-rc.112"
+    "effect": "^4.0.0-rc.112",
+    "foldkit": "^0.158.2"
   },
   "devDependencies": {
     "effect": "4.0.0-rc.112",

@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema } from 'effect'
+import { Effect, Layer, Option, Schema, Stream } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Projection, Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
@@ -101,11 +101,42 @@ describe('Remote observation', () => {
 
   it('derives requirements from the observed Surface', () => {
     const model = root()
-    expect(Remote.observe(AppRemote, model, UserPage, { userId: 'u1' })).toEqual([
+    expect(Remote.planSurface(AppRemote, model, UserPage, { userId: 'u1' })).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
     ])
-    expect(Remote.observe(AppRemote, model, NameCard, { userId: 'u1' })).toEqual([
+    expect(Remote.planSurface(AppRemote, model, NameCard, { userId: 'u1' })).toEqual([
       { entity: 'User', id: 'u1', fields: ['name'] },
     ])
+  })
+
+  it('exposes a Foldkit Subscription entry that fetches the plan', async () => {
+    calls.length = 0
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, result => result)
+    const dependencies = entry.modelToDependencies(root())
+    expect(dependencies.requirements).toEqual([
+      { entity: 'User', id: 'u1', fields: ['id', 'name'] },
+    ])
+
+    const messages = await Effect.runPromise(
+      Stream.runCollect(entry.dependenciesToStream(dependencies)).pipe(Effect.provide(FakeClient)),
+    )
+    expect([...messages]).toEqual([
+      { entities: [{ entity: 'User', id: 'u1', values: { id: 'u1', name: 'ada' } }] },
+    ])
+    expect(calls).toHaveLength(1)
+  })
+
+  it('emits no stream when the Surface is fully known', async () => {
+    calls.length = 0
+    const store = writeEntity(emptyStore, entityKey('User', 'u1'), { id: 'u1', name: 'ada' })
+    const entry = Remote.observe(AppRemote, UserPage, { userId: 'u1' }, result => result)
+    const dependencies = entry.modelToDependencies(root(store))
+    expect(dependencies.requirements).toEqual([])
+
+    const messages = await Effect.runPromise(
+      Stream.runCollect(entry.dependenciesToStream(dependencies)).pipe(Effect.provide(FakeClient)),
+    )
+    expect([...messages]).toEqual([])
+    expect(calls).toHaveLength(0)
   })
 })

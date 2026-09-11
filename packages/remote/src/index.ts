@@ -4,7 +4,8 @@
  * Phase 3 is the **pure core**: entity identity, selections, and `RemoteData`.
  * The store, planner, and wire land in later phases. Nothing here performs I/O.
  */
-import { Context, Effect, Option, Schema, SchemaGetter } from 'effect'
+import { Context, Effect, Option, Schema, SchemaGetter, Stream } from 'effect'
+import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
 import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
 import { entityKey, isTombstone, readField, writeEntity, type EntityStore } from './store.js'
 import { plan } from './plan.js'
@@ -348,7 +349,7 @@ export const Remote = {
   ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements),
 
   /** The pure plan for a Surface's projection. */
-  observe: <AppModel, Store, Model, Message, Params>(
+  planSurface: <AppModel, Store, Model, Message, Params>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     surface: Surface<AppModel, Model, Message, Params>,
@@ -377,4 +378,43 @@ export const Remote = {
         store,
       )
     }),
+
+  /**
+   * A Foldkit Subscription entry that plans a Surface's missing fields from the
+   * Model and fetches them through `RemoteClient`, emitting a Message per batch.
+   * Pass the returned entry into the application's `Subscription.make` record.
+   */
+  observe: <AppModel, Store, Model, SurfaceMessage, Params, Message>(
+    bound: BoundRemote<AppModel, Store>,
+    surface: Surface<AppModel, Model, SurfaceMessage, Params>,
+    params: Params,
+    toMessage: (result: Schema.Schema.Type<typeof ReadBatchResult>) => Message,
+  ): EntryWithoutKeepAlive<
+    AppModel,
+    Message,
+    { readonly requirements: ReadonlyArray<Requirement> },
+    RemoteClient
+  > => ({
+    dependenciesSchema: Schema.Struct({
+      requirements: Schema.Array(
+        Schema.Struct({
+          entity: Schema.String,
+          id: Schema.String,
+          fields: Schema.Array(Schema.String),
+        }),
+      ),
+    }),
+    modelToDependencies: model => ({
+      requirements: plan(storeOf(bound, model), surface.projection(params).requirements),
+    }),
+    dependenciesToStream: ({ requirements }) =>
+      requirements.length === 0
+        ? Stream.empty
+        : Stream.fromEffect(
+            Effect.gen(function* () {
+              const client = yield* RemoteClient
+              return yield* client.read({ requests: requirements })
+            }),
+          ).pipe(Stream.map(toMessage), Stream.orDie),
+  }),
 }
