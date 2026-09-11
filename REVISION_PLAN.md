@@ -2190,10 +2190,12 @@ API was then sharpened after review (`5144264`, `bea8706`): `Surface.application
 takes optional `initial`/`update` and resource-carrying Commands; `Surface.pick`
 rejects dynamic `.at`/`.index` refs; `Surface.unionMessages` and
 `Agent.exposeSubset` compose and expose subsets; `Agent.forApplication` infers the
-Model with a curried `Principal`; `ModelRef` codecs are typed pure. The remaining
-integration work is the Foldkit binding (step 3 onward in
-`packages/agent/DESIGN.md`). Work through the review findings and open questions
-below.
+Model with a curried `Principal`; `ModelRef` codecs are typed pure. Encoded
+types now flow through `ModelRef`/`FieldRef`/`FieldRef`-derived projections and
+`MessageSubset` (`0606e5e`), so `Surface.pick`/`Surface.compose` and the journal
+snapshot codec keep each field's encoded type. The remaining integration work is
+the Foldkit binding (step 3 onward in `packages/agent/DESIGN.md`). Work through
+the review findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
