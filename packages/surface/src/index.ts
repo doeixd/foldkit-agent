@@ -47,9 +47,9 @@ type RefNode<Root, S> =
         ? Selectable<Root, ReadonlyArray<E>> & {
             readonly index: (index: number) => Selectable<Root, Option.Option<E>>
           }
-        : A extends Readonly<Record<string, infer V>>
-          ? Selectable<Root, Readonly<Record<string, V>>> & {
-              readonly at: (key: string) => Selectable<Root, Option.Option<V>>
+        : A extends Readonly<Record<infer K, infer V>>
+          ? Selectable<Root, A> & {
+              readonly at: (key: K) => Selectable<Root, Option.Option<V>>
             }
           : Selectable<Root, A>
       : never

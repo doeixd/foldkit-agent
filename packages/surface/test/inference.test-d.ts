@@ -134,6 +134,25 @@ const _selectedProject: Projection<
   }>
 > = selectedProject
 
+// --- non-string record keys are enforced by `.at` --------------------------
+
+const Keyed = Schema.Struct({
+  byLetter: Schema.Record(Schema.Literal('a'), Schema.Struct({ name: Schema.String })),
+})
+const KeyedApp = Surface.make({ Model: Keyed, Message })
+const _byLetter = KeyedApp.model.byLetter.at('a')
+// @ts-expect-error only the record's literal key `'a'` is valid
+KeyedApp.model.byLetter.at('b')
+
+const ProjectId2 = Schema.String.pipe(Schema.brand('ProjectId2'))
+const ByProject = Schema.Struct({
+  byProject: Schema.Record(ProjectId2, Schema.Struct({ name: Schema.String })),
+})
+const ByProjectApp = Surface.make({ Model: ByProject, Message })
+const _byProject = ByProjectApp.model.byProject.at(Schema.decodeSync(ProjectId2)('p1'))
+// @ts-expect-error a plain string is not a branded ProjectId2
+ByProjectApp.model.byProject.at('p1')
+
 // --- case 3: Surface.view narrows the projected Model and Message set ------
 
 const ProjectCard = Surface.define(App, 'ProjectCard', {
