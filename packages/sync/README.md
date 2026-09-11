@@ -10,16 +10,81 @@ Reach for it when clients must keep working offline and converge later, with
 [guide](https://github.com/doeixd/foldkit-plus/blob/main/docs/replication.md) covers the mental model and when not to use
 it.
 
+## Quick start
+
+`Sync.make` is the Foldkit-facing layer. It compiles the application's `Model`
+and `Message` union, a writable projection, and the durable Message subset into
+the replica contract, and exposes a read-only Surface over the same projection.
+The application's `update` stays the only reducer; the supplied `replay` applies
+one durable Message to the shared slice.
+
+```ts
+import { Schema } from 'effect'
+import { defineMessageUnion } from 'foldkit/message'
+import { Surface } from 'foldkit-surface'
+import { documentId, make, project } from 'foldkit-sync'
+
+const Model = Schema.Struct({
+  todos: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
+  selectedTodoId: Schema.NullOr(Schema.String),
+})
+const Message = defineMessageUnion({
+  CreatedTodo: { id: Schema.String, title: Schema.String },
+  RenamedTodo: { id: Schema.String, title: Schema.String },
+  SelectedTodo: { id: Schema.String },
+})
+const App = Surface.make({ Model, Message })
+
+const TodoSync = make(App, 'TodoSync', {
+  documentId: documentId('todos'),
+  initial: { todos: [], selectedTodoId: null },
+  model: project({ todos: App.model.todos }),
+  messages: [Message.CreatedTodo, Message.RenamedTodo], // the durable subset
+  replay: (shared, message) =>
+    message._tag === 'CreatedTodo'
+      ? { todos: [...shared.todos, { id: message.id, title: message.title }] }
+      : {
+          todos: shared.todos.map(todo =>
+            todo.id === message.id ? { id: message.id, title: message.title } : todo,
+          ),
+        },
+})
+```
+
+Only `todos` is replicated; `selectedTodoId` stays local. The declared Messages
+are the only ones the contract treats as durable, and the pure `replay` function
+is the only reducer durable state sees.
+
+On the server, the same contract produces the journal's codecs and reducer, so
+neither is written twice:
+
+```ts
+import { makeJournal } from 'foldkit-durable'
+
+const journal = yield* makeJournal({
+  ...TodoSync.journalContract(), // operation/snapshot codecs, empty, reduce
+  file: 'todos.sqlite',
+  opId: operation => operation.opId,
+  actorId: principal => principal.actorId,
+})
+```
+
+### Lower level
+
+`defineSync` is the protocol primitive `Sync.make` compiles to. Use it directly
+when there is no Foldkit application to derive the contract from — a non-Foldkit
+client, or a hand-written projection.
+
 ```ts
 import { Effect } from 'effect'
-import { defineSync, indexedDb, layerFromPromise } from 'foldkit-sync'
+import { defineSync, indexedDb, layerFromPromise, replicaId } from 'foldkit-sync'
 
 const Sync = defineSync({ ... })
 
 const replica = await Effect.runPromise(
   Effect.gen(function* () {
     const storage = yield* indexedDb('todos-tab-1')
-    return yield* Sync.openReplica('tab-1', storage)
+    return yield* Sync.openReplica(replicaId('tab-1'), storage)
   }),
 )
 await Effect.runPromise(
@@ -32,6 +97,10 @@ const shared = Effect.runSync(replica.shared)
 
 ## What it owns
 
+- The Foldkit-facing contract (`Sync.make`): derives the shared projection, the
+  durable Message subset, the initial snapshot, and the journal contract from the
+  application, so none is declared twice. `Sync.project` builds the writable
+  projection; `TodoSync.journalContract()` builds the durable codecs and reducer.
 - The operation envelope: `replicaId:localSequence` identity, `baseCursor`, and
   protocol/schema versions.
 - A persisted outbox and optimistic projection: a durable Message is visible

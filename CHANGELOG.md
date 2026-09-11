@@ -90,9 +90,14 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 
 ### `foldkit-sync`
 
-- **Standalone projection removed.** `pick`/`Projection` (the #59 spike) are gone;
-  they are superseded by the shared Surface `ModelRef`/`Projection`. The
-  Surface-based `Sync.project`/`Sync.define` replacement ships separately.
+- **Surface-based contract.** The standalone `pick`/`Projection` (#59 spike) is
+  gone, superseded by the shared Surface `ModelRef`/`Projection`.
+  `Sync.make(App, name, { documentId, initial, model, messages, replay })`
+  compiles a writable projection and the durable Message subset into the
+  low-level `defineSync` contract and returns a read-only `surface`;
+  `TodoSync.journalContract()` derives the durable operation/snapshot codecs,
+  empty snapshot, and reducer. Additive — `defineSync` remains the protocol
+  primitive. `Sync.project` now also carries the projection's dependency paths.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.
