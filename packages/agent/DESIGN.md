@@ -42,7 +42,7 @@ integration layer; it is not a shipped API.
 | [`foldkit-durable`](../durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
 | [`foldkit-sync`](../sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
 | [`foldkit-agent-native`](../agent-native) | A private prototype adapting the contract to Agent Native, with integration tests against the real framework. |
-| `foldkit-surface` (proposed) | A common contract and Foldkit binding for interacting with a running application; no implementation yet. |
+| `foldkit-surface` (proposed) | Shared application/projection primitives and a live runtime contract, with Foldkit bindings; no implementation yet. |
 
 It is deliberately built on Foldkit's existing architecture rather than
 introducing a second application-action system.
@@ -1741,14 +1741,77 @@ That is the entire idea:
 
 # Project cohesion: proposed `foldkit-surface`
 
-The next project-wide improvement is a reusable way to attach packages to a
-running Foldkit application. `foldkit-surface` should provide that integration
-contract and a supported Foldkit binding. Foldkit's Model, Message, `update`, and
+The next project-wide improvement is a shared foundation for projecting a
+Foldkit application and attaching those projections to running instances.
+`foldkit-surface` should own reusable state projections, typed application and
+Message references, and their live integration contract. Agent and sync become
+specialized consumers of this foundation. Foldkit's Model, Message, `update`, and
 Commands remain the application's architecture.
 
 This is an architectural direction, not a finalized API. Establish the runtime
 guarantees and prove the bindings before choosing public constructors or moving
 existing exports.
+
+This direction incorporates [sync API proposal #59](https://github.com/doeixd/foldkit-plus/issues/59)
+and its [design](../../docs/sync-dx.md). Agent already projects Model state through
+`Agent.pick`/`Agent.context`; sync now has an initial `pick` implementation with
+schema/get/set and proposes deriving replay and composing feature fragments.
+Developing those into separate projection systems would duplicate the core
+abstraction. Surface should supply their common primitives, while each package
+retains the meaning it assigns to a projection.
+
+## Shared projection foundation
+
+Surface has a pure definition layer as well as a running-instance layer:
+
+```text
+Foldkit Model + Message + initial state + update
+                       |
+          surface application references
+          state projections / Message subsets
+                  /                \
+      agent interpretation      sync interpretation
+      context / capabilities    shared / durable / presence
+                  \                /
+              compatible live surfaces
+           browser / replica / authority
+```
+
+A state projection carries its output codec and a pure read from the owning
+Model. A writable projection additionally carries installation into an existing
+Model. Agent context only requires the read capability. Sync needs both to
+replace shared state while preserving local state. Writable projections can be
+consumed as read-only views; a computed read-only view must never acquire an
+invented inverse just to fit sync's interface.
+
+For a field selection, derive the codec, read, and write from one immutable field
+list. Preserve both codec sides, field optionality, and exact literal keys. Read
+and write only the declared fields; an excess field in an untrusted input cannot
+overwrite local state through an object spread. Snapshot declarations at
+definition time so mutating a caller-owned key array cannot change exposure.
+
+Custom writable projections must obey the usual round-trip expectations:
+reading after installation returns the supplied projected value, installing a
+Model's current projection preserves that Model, and successive installations
+retain the latest projected value while preserving unrelated state. Schema-aware
+equality and property tests can check these laws for supplied cases; types alone
+cannot prove arbitrary getter/setter functions lawful.
+
+Typed Message subsets are the other common primitive. They preserve the owning
+application, variant constructors, and exact encoded/decoded payloads. Surface
+does not label a subset agent-visible, durable, or presence. Agent attaches
+descriptions, mappings, availability, and authorization; sync attaches delivery,
+replay, and merge policy. Both can refer to the same subset without declaring
+another Message schema or reducer.
+
+Composition should operate on pure values before mounting. Disjoint field picks
+compose with exact inferred codecs and installation behavior. Repeated identical
+members can be deduplicated; conflicting definitions or overlapping writes must
+be rejected rather than silently letting the last fragment win. A computed
+setter's footprint cannot be inferred from its function body: require explicit
+composition or reject an ambiguous combination. Surface owns structural
+compatibility; agent and sync reject their own policy conflicts, such as duplicate
+tool names or a Message classified as both durable and presence.
 
 ## The integration gap
 
@@ -1796,7 +1859,7 @@ an invented default local Model makes those capabilities meaningful server-side.
 
 | Package | Responsibility with surface |
 | --- | --- |
-| `foldkit-surface` | The live application contract, Foldkit binding, readiness, submission and observation semantics, and binding lifecycle. |
+| `foldkit-surface` | Pure application references, read-only/writable state projections, typed Message subsets, structural composition, and the live application contract with Foldkit bindings. |
 | `foldkit-agent` | Agent-visible context, explicit capability exposure, input mapping, availability, authorization, completion matching, and audit. Bind these to a compatible surface. |
 | Protocol adapters | Continue consuming `AgentRuntime`; interpret agent results for MCP, WebMCP, A2A, or Agent Native. |
 | `foldkit-sync` | Outbox persistence, optimistic state, authoritative reconciliation, checkpoints, presence, and replica transport. Its Foldkit integration supplies a compatible surface. |
@@ -1831,6 +1894,11 @@ An agent may select a local item without creating a durable operation. An
 internal result Message may be replicated without being agent-invocable. Shared
 state may contain fields excluded from agent context. Do not infer exposure from
 durability, or treat the shared projection as the agent information boundary.
+
+Independence is about policy, not duplicate definitions. An application may pass
+the very same `Todos` projection to agent context and sync shared state when both
+should contain exactly those fields. It may also compose `Todos` with local
+selection for the browser agent while sync continues consuming `Todos` alone.
 
 The raw surface is a trusted application integration handle. External callers
 still enter through an adapter's validation and agent capability boundary.
@@ -1937,20 +2005,424 @@ whose Models intentionally differ. Prefer small structural contracts to a
 registration framework or an unrestricted middleware chain whose ordering each
 application must rediscover.
 
+## Usage sketches across packages
+
+The examples in this section are **proposed TypeScript API sketches, not runnable
+examples of released packages**. They explore call-site ergonomics without fixing
+the final API. Existing `Agent.define`, protocol adapters, `defineSync`,
+`indexedDb`, and `makeJournal` keep their present responsibilities.
+
+These foundation and integration entry points are proposed here:
+
+| Proposed API | Owner and purpose |
+| --- | --- |
+| `Surface.application({ Model, Message, initial, update })` | Capture existing pure application references once, inferring their types. Accepting an existing Foldkit definition should avoid duplicate configuration. |
+| `Surface.pick(Model, keys)` | Derive a writable projection's codec, get, and set from one field selection. |
+| `Surface.view` / `Surface.state` | Describe a custom read-only projection or a lawful writable projection; their callbacks infer the owning Model through an application-bound form. |
+| `Surface.compose` / `Surface.messages` | Compose compatible projections and select typed Message references without assigning agent or sync policy. |
+| `Agent.forApplication(App)` / `Sync.forApplication(App, options)` | Interpret the same application/projection references for agent access or replication, with Model and Message types inferred. |
+| `FoldkitSurface.mount` from `foldkit-surface/foldkit` | Mount an ordinary Foldkit configuration and return a ready, scoped application surface. |
+| `surface.submit(message)` | Submit a decoded application Message and await its application boundary. The binding retains its typed failure channel. |
+| `Agent.surfaceHost({ surface, principal })` | Adapt a compatible surface to the existing `Agent.bind` host contract, with a caller-specific principal provider when needed. |
+| `mountReplica` from `foldkit-sync/foldkit` | Mount Foldkit with replica admission and shared-state installation, returning a surface and a reconciliation operation. |
+| `bindJournalSurface` from `foldkit-sync/server` | Bind one authenticated producer to an authoritative document using the sync contract and durable journal. |
+
+The split imports keep DOM mounting out of server code and SQLite out of browser
+bundles. These names are candidates to validate during implementation; they do
+not imply a new generic plugin registry or a second application runtime.
+
+### Declare the common projections once
+
+Using the sync example's existing Model, Message, initial state, and update:
+
+```ts
+import { Surface } from 'foldkit-surface' // proposed pure entry point
+import { Agent } from 'foldkit-agent'
+import { documentId } from 'foldkit-sync'
+import { Sync } from 'foldkit-sync/foldkit' // proposed
+
+const App = Surface.application({ Model, Message, initial: initialModel, update })
+const Todos = Surface.pick(Model, ['todos'])
+const Selection = Surface.pick(Model, ['selectedTodoId'])
+const BrowserContext = Surface.compose(Todos, Selection)
+const TodoChanges = Surface.messages(App, [
+  Message.CreatedTodo,
+  Message.RenamedTodo,
+  Message.DeletedTodo,
+])
+
+const TodoAgent = Agent.forApplication(App) // proposed
+const BrowserAgent = TodoAgent.define({
+  context: BrowserContext,
+  messages: TodoAgent.expose(Message, {
+    CreatedTodo: 'Create a todo',
+    RenamedTodo: 'Rename a todo',
+    SelectedTodo: 'Select a todo in this browser',
+  }),
+})
+
+const TodoSync = Sync.forApplication(App, { // proposed
+  documentId: documentId('todos'),
+  shared: Todos,
+  durable: TodoChanges,
+})
+```
+
+Every unclassified Message remains local. The three
+contracts share schema and Message references; opting `DeletedTodo` into
+durability does not expose it to the browser agent. `BrowserContext` contains
+selection, while `Todos` does not, and neither contains `lastError`.
+
+The proposed agent definition accepts the read side of a surface projection.
+Until that integration exists, the same structure can be passed through the
+existing API as `Agent.context({ schema: Todos.schema, select: Todos.get })`.
+Likewise, the low-level sync shared codec is `Todos.schema`, its initial value
+is `Todos.get(initialModel)`, and installation is `Todos.set`. These are adapters
+of one projection, not separately maintained field lists.
+
+Feature modules may export `Todos`, `Selection`, and `TodoChanges` as pure values.
+Agent and sync fragments attach their own policies to those values and compose
+without rebuilding a monolithic application declaration. A read-only computed
+agent summary, such as a todo count, can coexist with these writable field picks;
+it cannot be installed as shared state unless an explicit lawful setter exists.
+
+`Sync.forApplication` derives the low-level `defineSync` inputs, including replay
+through `App.update`, from the projection and Message classification. Ordinary
+supported applications do not write another replay function or an `empty` value.
+This derivation is conditional on the state-only, deterministic subset described
+above; deriving a function does not prove independence from local state. The
+lower-level `defineSync` remains available for custom replay and non-Foldkit apps.
+
+### One application, local UI and browser agents
+
+Reuse the schemas and state-only `update` from the
+[sync example](../../examples/sync/src/app.ts). Its Model contains `todos`,
+`selectedTodoId`, and `lastError`; its Messages include `CreatedTodo`,
+`RenamedTodo`, `DeletedTodo`, and `SelectedTodo`. `view` below is the application's
+ordinary Foldkit view.
+
+```ts
+import { Effect } from 'effect'
+import { AgentWebMcp } from 'foldkit-agent-webmcp'
+import * as FoldkitSurface from 'foldkit-surface/foldkit' // proposed
+
+const page = Effect.gen(function* () {
+  const surface = yield* FoldkitSurface.mount({ application: App, view, container })
+  const agent = TodoAgent.bind({
+    definition: BrowserAgent,
+    host: Agent.surfaceHost({ surface }), // proposed
+  })
+
+  const webmcp = AgentWebMcp.register({ agent })
+  yield* Effect.addFinalizer(() => Effect.sync(() => webmcp.unregister()))
+
+  yield* agent.messages.dispatch(Message.CreatedTodo, {
+    id: crypto.randomUUID(),
+    title: 'Milk',
+  })
+
+  // A trusted in-process caller can submit an application Message directly.
+  yield* surface.submit(Message.SelectedTodo({ id: 'existing-todo' }))
+  yield* Effect.never
+}).pipe(Effect.scoped)
+```
+
+`container` is an existing element with an id. The browser entry point runs
+`page` and retains the ability to interrupt it when the page owner unmounts.
+The final `Effect.never` keeps the scope alive; returning a mounted surface from
+an immediately completed `Effect.scoped` would dispose it before use. Scope
+cleanup unregisters WebMCP before releasing the mount.
+
+The UI still emits Messages through its Foldkit view. In-app agent dispatch and
+WebMCP use `BrowserAgent`, so both enforce the same capability rules. Raw
+`surface.submit` is available to trusted application code and is not an external
+agent endpoint. The application no longer writes a store loop or maintains its
+own `model/dispatch/subscribe/observe` adapter.
+
+`Agent.surfaceHost` must read the binding's current applied Model without hiding
+synchronous execution of database Effects. It forwards submission, state
+notifications, and processed-Message observation. The existing agent runtime
+still owns input decoding, snapshot capture, authorization, completion matching,
+and audit. Mapping a typed admission failure into an agent refusal must preserve
+its meaning and redact internal causes; a failed save cannot become a successful
+tool call. The exact error mapping is part of the proposed integration work.
+
+### Add offline persistence without changing the agent contract
+
+Keep the same `App`, `BrowserAgent`, and `TodoSync` from the common declaration.
+The high-level sync contract compiles to the existing replica primitives and
+retains the shared projection for mounting.
+
+```ts
+import { indexedDb } from 'foldkit-sync'
+import { mountReplica } from 'foldkit-sync/foldkit' // proposed
+
+const offlinePage = Effect.gen(function* () {
+  const storage = yield* indexedDb(storageName)
+  const replica = yield* TodoSync.protocol.openReplica(writerId, storage)
+  yield* Effect.addFinalizer(() => replica.close)
+
+  const mounted = yield* mountReplica({
+    application: App,
+    view,
+    container,
+    sync: TodoSync,
+    replica,
+  })
+  const agent = TodoAgent.bind({
+    definition: BrowserAgent,
+    host: Agent.surfaceHost({ surface: mounted.surface }),
+  })
+
+  yield* agent.messages.dispatch(Message.CreatedTodo, {
+    id: crypto.randomUUID(),
+    title: 'Created offline',
+  })
+  yield* agent.messages.dispatch(Message.SelectedTodo, { id: 'existing-todo' })
+
+  // Resolves locally even without a server; does not await server acceptance.
+  const status = yield* replica.status
+  yield* Effect.logInfo('Pending operations', { pending: status.pending })
+  yield* Effect.never
+}).pipe(Effect.scoped)
+```
+
+The application supplies a persisted, branded `writerId` (created with
+`replicaId`) and the corresponding `storageName`. One active writer owns that
+identity and outbox; generating a new id while reopening another writer's
+storage is invalid. `mountReplica` borrows the replica. The surrounding scope
+closes the mount before closing the replica and its storage.
+
+`CreatedTodo` is durable: its outbox write must finish before the mounted Model
+changes and agent dispatch resolves. `SelectedTodo` stays local and creates no
+outbox entry. An IndexedDB failure leaves the todo absent and the call failed.
+The same rules apply when those Messages originate in the view, not just in the
+two explicit calls above.
+
+The binding uses `TodoSync`'s `Todos.set` against the latest Model, preserving
+selection and errors; no separate `installShared` callback repeats that mapping.
+It validates the result and the shared projection. The initial implementation
+supports the state-only subset described above. Attaching WebMCP uses exactly the
+local example's registration and finalizer, with this new `agent`.
+
+### Connect the mounted replica to the server
+
+Transport remains a sync concern. A socket layer supplies the existing
+`Transport` service; the proposed mount's reconciliation operation performs
+replica synchronization and installs the resulting shared state before it
+returns:
+
+```ts
+import { layerSocket } from 'foldkit-sync'
+
+// Inside the mounted application's lifetime:
+const connection = layerSocket({
+  url: authenticatedSyncUrl,
+  maxRetries: 5,
+  maxQueue: 64,
+})
+
+yield* mounted.synchronize.pipe(Effect.provide(connection))
+```
+
+This illustrates one exchange. A continuously connected application holds the
+transport layer for its connection lifetime and schedules exchanges under that
+scope, rather than opening a new socket for every call. Connection credentials
+and refresh remain application/transport policy.
+
+`mounted.synchronize` replaces the example's manual port refresh. Calling the
+underlying `replica.synchronize` alone does not promise that a mounted UI has
+installed the result. A server rejection removes the rejected optimistic change;
+an accepted operation becomes authoritative; either result preserves local
+selection. A checkpoint updates the shared projection without submitting it back
+to the server or generating a fresh agent completion event.
+
+Presence also stays with sync. Use `createPresence` and its channel for cursor
+or selection sharing when desired; merely exposing `SelectedTodo` to an agent
+does not persist it or broadcast it as presence. Similarly, `openLwwClock`
+allocates a persisted stamp before a Message is submitted, and `lwwRegister`
+merges inside the existing update. Surface neither chooses conflict policy nor
+allocates logical time during replay.
+
+### A server agent backed by the same durable document
+
+The server owns `Shared`, not the browser's full Model. Define its agent contract
+against that schema and expose operations with explicit entity ids:
+
+```ts
+const Shared = Todos.schema
+type Shared = typeof Shared.Type
+const ServerTodoAgent = Agent.forModel<Shared, Principal>()
+const ServerAgent = ServerTodoAgent.define({
+  context: Agent.pick(Shared, ['todos']),
+  messages: ServerTodoAgent.expose(Message, {
+    CreatedTodo: {
+      description: 'Create a todo',
+      authorize: ({ principal }) => principal.canWrite,
+    },
+    RenamedTodo: {
+      description: 'Rename a todo by id',
+      authorize: ({ principal }) => principal.canWrite,
+    },
+  }),
+})
+```
+
+`Principal` is the application's verified identity, including document access
+and write permission. The journal retains its authoritative authorization
+policy even though this agent contract also refuses unauthorized calls.
+
+```ts
+import { Schema } from 'effect'
+import {
+  actorId as durableActorId,
+  makeJournal,
+  opId as durableOpId,
+} from 'foldkit-durable'
+import { bindJournalSurface } from 'foldkit-sync/server' // proposed
+import { AgentMcp } from 'foldkit-agent-mcp'
+
+// Inside a server scope; protocol is TodoSync's proposed compiled low-level view:
+const protocol = TodoSync.protocol
+const decodeMessage = Schema.decodeUnknownSync(App.Message, { onExcessProperty: 'error' })
+const decodeShared = Schema.decodeUnknownSync(Todos.schema, { onExcessProperty: 'error' })
+const encodeShared = Schema.encodeSync(Todos.schema)
+const journal = yield* makeJournal({
+  file: 'todos.sqlite',
+  operation: { encode: operation => operation, decode: protocol.normalizeOperation },
+  snapshot: { encode: encodeShared, decode: decodeShared },
+  empty: () => Todos.get(initialModel),
+  reduce: (shared, operation) => TodoSync.replay(shared, decodeMessage(operation.message)),
+  opId: operation => durableOpId(operation.opId),
+  actorId: (principal: Principal) => durableActorId(principal.actorId),
+  validate: validateDocumentAndCursor,
+  authorize: authorizeDocumentWrite,
+})
+
+// Inside an authenticated caller's child scope:
+const surface = yield* bindJournalSurface({
+  journal,
+  sync: TodoSync,
+  principal,
+  producerId,
+})
+const agent = ServerTodoAgent.bind({
+  definition: ServerAgent,
+  host: Agent.surfaceHost({ surface, principal: () => principal }),
+})
+const mcp = AgentMcp.handler({ agent })
+yield* Effect.addFinalizer(() => Effect.sync(() => mcp.close()))
+```
+
+`validateDocumentAndCursor` and `authorizeDocumentWrite` are application hooks:
+they check the operation's document and cursor and the authenticated caller's
+access against the authoritative snapshot. The caller cannot pick a document
+outside that access. `producerId` labels this server producer separately from
+the authenticated actor; it is not a credential.
+
+`TodoSync.protocol` and `TodoSync.replay` are proposed access to the compiled
+low-level contract and derived transition. `decodeMessage`, `encodeShared`, and
+`decodeShared` are derived from `App.Message` and `Todos.schema`; they introduce
+no new schemas. This expanded journal setup illustrates the existing durable
+extension point. A higher-level server helper can derive those codecs, the
+initial snapshot, and reducer from `TodoSync`, leaving storage and admission
+policy to the application. Both forms must call the same derived transition.
+
+The proposed binding must load its initial snapshot before becoming ready, append
+through the journal, and update its readable snapshot and observers as commits
+arrive. The journal's in-process change stream is a wake-up signal, so the
+binding catches up from a cursor and covers the subscribe/load race. Other
+processes require an explicit catch-up mechanism. Agent reads retain snapshot
+semantics; authoritative validation and authorization occur in the append
+transaction against its current state.
+
+Allocating server operations and mapping the sync and durable envelope/identity
+types belong to this binding. It must provide collision-safe operation identity
+across concurrent producers and restarts, with an explicit retry policy. It must
+not assume that reading the current cursor and adding one reserves an operation
+id. This is required implementation work, not a guarantee supplied by the
+`producerId` option alone.
+
+A successful state-only submission here means the journal committed the
+operation, not merely that the server queued it. Browser replicas receive that
+commit through the existing sync exchange protocol. Surface introduces no
+browser RPC bridge: an agent targeting this server cannot manipulate a particular
+browser's local selection. Closing the caller's binding detaches its observers;
+the server scope continues owning the shared journal.
+
+### Reuse the bound agent across protocols
+
+Once the appropriate surface has produced an `AgentRuntime`, protocol usage
+stays the same:
+
+| Integration | Call site and ownership |
+| --- | --- |
+| In-app agent | `agent.messages.dispatch(Message.RenamedTodo, { id, title })`; names and payloads remain checked. |
+| Browser WebMCP | `AgentWebMcp.register({ agent })`; the page owns registration and disposal. |
+| MCP | `AgentMcp.handler({ agent })` or `AgentMcp.stdio({ agent })`; the server transport owns the handler. |
+| A2A | `AgentA2a.agentCard(ServerAgent, cardOptions)` describes the definition; `AgentA2a.handler({ agent })` operates on a caller-bound instance. |
+| Agent Native | `AgentNative.actions({ definition: ServerAgent, resolveRuntime })`; the application resolves an authenticated runtime for each invocation. |
+
+For HTTP MCP, the existing `createAgent` callback is synchronous. Acquire ready
+document bindings under application-owned scopes before returning a runtime from
+that callback; do not conceal asynchronous journal acquisition with `runSync`.
+A future scoped asynchronous session factory would be a separate MCP adapter
+change. Session authentication and principal isolation remain the transport's
+responsibility. A2A likewise needs an authenticated application route; a Card's
+security declaration does not authenticate requests by itself.
+
+These adapters may share an application instance when they represent the same
+authority and permitted caller. They must not share mutable principal state
+between requests. Agent Native's request context needs application identity
+mapping; a field such as `userEmail` does not by itself establish trust.
+
+### Call-site constraints to prove when implementing the sketches
+
+The proposed helpers must preserve the following errors without caller casts:
+
+```ts
+// Intended rejection cases for the future compile-tested examples:
+agent.messages.dispatch(Message.RenamedTodo, { todoId: 'a', title: 'Milk' })
+// Wrong payload: the existing Message requires id.
+
+agent.messages.dispatch(Message.SelectedTodo, { id: 'a' })
+// ServerAgent never exposed browser-local selection.
+
+TodoAgent.bind({
+  definition: BrowserAgent,
+  host: Agent.surfaceHost({ surface: serverSurface }),
+})
+// A Shared-only server surface cannot supply the browser Model.
+```
+
+These are design obligations, not executable negative tests yet. When the APIs
+exist, add `@ts-expect-error` cases at the actual offending expressions and
+compile the positive examples against the real peer types. Also prove that a
+surface carrying typed admission failures remains usable without widening its
+Model or Message to `any`, and that a transforming codec is decoded exactly at
+its consuming boundary.
+
 ## Incremental implementation and acceptance
 
-1. Specify readiness, submission acknowledgement, event ordering, and ownership
+1. Establish surface's pure projection/application primitives from `Agent.pick`
+   and sync's initial `pick`. Preserve public compatibility while sharing one
+   implementation. Prove codec inference, lawful installation, immutable
+   declarations, and structural composition with runtime and negative type tests.
+2. Make agent and high-level sync consume those primitives. Demonstrate a shared
+   projection reused as context and replicated state, disjoint feature
+   composition, and derived replay without another reducer for supported apps.
+3. Specify readiness, submission acknowledgement, event ordering, and ownership
    against the current examples. Keep public API spelling provisional.
-2. Implement a local Foldkit binding and use it in the todo example. Preserve
+4. Implement a local Foldkit binding and use it in the todo example. Preserve
    direct `Agent.bind` hosts and protocol adapter APIs.
-3. Replace the handwritten sync runtime wrapper for its existing state-only
+5. Replace the handwritten sync runtime wrapper for its existing state-only
    subset. Route UI events, subscriptions, Command result Messages, and agent
    submissions through the intended admission path. Wrapping only external
    dispatch would leave UI Messages able to bypass persistence.
-4. Bind a server document through the same minimal contract with its actual
+6. Bind a server document through the same minimal contract with its actual
    shared Model. Keep journal exchange mapping and recovery policy in their
    owning integrations. Remove example glue only after its behavior is covered.
-5. Compare the application setup before and after. Publish surface when the
+7. Compare the application setup before and after. Publish surface when the
    examples require less wiring, custom integrations still compose, and no
    existing guarantee has been weakened. Broader Command support is separate.
 
@@ -2035,10 +2507,11 @@ From there:
 
 WebMCP is particularly compelling because it can expose these capabilities directly from the page that already owns the Foldkit Runtime — no DOM automation and no external browser-session bridge required.
 
-The proposed surface layer makes the connection to that running application
-reusable across agent access and replication. Its acceptance is concrete: less
-application glue, explicit submission and lifecycle guarantees, preserved type
-inference, and continued independent use of the packages.
+The proposed surface layer provides shared projection primitives and the
+connection to a running application for agent access and replication. Its
+acceptance is concrete: reusable definitions, less application glue, explicit
+submission and lifecycle guarantees, preserved type inference, and continued
+independent use of the packages.
 
 ## References
 

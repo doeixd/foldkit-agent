@@ -213,13 +213,92 @@ no explicit generics, no `as`, no duplicated Message schema or reducer, no strin
 tags, composable fragments, exact payload inference, and browser/server adapters
 over one contract, with negative type tests.
 
-## Open questions
+## Options considered
 
-- Object form vs `.pipe` combinator form for the declaration (recommendation:
-  ship the object form, add combinators for fragments once needed).
-- Where `Sync` lives: a `foldkit-sync` namespace export, or a `foldkit-sync/foldkit`
-  entry point that can take a `foldkit` peer dependency. The protocol core should
-  not import Foldkit.
-- Whether `Sync.forApplication` takes a Foldkit application object (once one
-  exists) or the four pieces (`Model`, `Message`, `initial`, `update`).
+### Where the Foldkit adapter lives
+
+- **Root export with an optional `foldkit` peer.** One import, but the root
+  `.d.ts` would reference `foldkit` types for consumers who never use it, and the
+  protocol core stops being Foldkit-free.
+- **`foldkit-sync/foldkit` subpath with a `foldkit` peer — recommended.** The root
+  keeps `defineSync`, the replica, transport, presence, and the schema-only
+  `pick`; the subpath carries the Foldkit DX and re-exports `pick`. This matches
+  the repo: the `foldkit-agent*` packages peer on `foldkit`, while
+  `foldkit-durable` and `foldkit-sync` peer only on `effect`.
+- **A separate `foldkit-sync-foldkit` package.** Cleanest boundary, but another
+  package to version and publish for little gain over a subpath, and it weakens
+  the "one contract, several adapters" story.
+- **Inside `foldkit-agent`.** No: replication is not agent-specific.
+
+### Declaration shape
+
+- **Object form — recommended.** One inference site for `Model`/`Message`; the
+  remaining fields are checked against it. Large apps compose with
+  `compose(fragmentA, fragmentB)` over partial declaration objects rather than a
+  fluent builder.
+- **Fluent `.pipe` combinators.** Idiomatic, but each combinator must thread an
+  accumulating contract type, and combined with Effect Schema's service generics
+  it tends to need explicit type arguments and reads poorly in errors. Add it
+  only if fragments need it.
+
+### Deriving replay
+
+`foldkit`'s application config already carries `init` and `update`, and `update`
+returns `Update.Return<Model, Message> = { model, commands? }`, so `replay` is
+derivable without the user writing it:
+
+```text
+baseline = projection.set(initial, shared)
+result   = update(baseline, message)
+guard    result.commands is empty          // a durable transition is state-only
+guard    model equals projection.set(initial, projection.get(result.model))
+         // update changed only shared fields: writing the projection back into
+         // the baseline reproduces the result exactly
+return   projection.get(result.model)
+```
+
+The second guard is the general form of the example's destructuring check — if
+`update` touched a local field, the projection written back into the baseline
+differs — so it needs no field enumeration and works for a custom projection.
+`Schema.toEquivalence(Model)` supplies the comparison.
+
+`initial` is an explicit `Model`, not `init()`: a routing app's
+`init(flags, url)` has no single initial model, and the shared baseline must not
+depend on the URL.
+
+### Classification
+
+`Message.CreatedTodo` is a callable `TaggedStruct` carrying `_tag` (a
+`Schema.tag<'CreatedTodo'>`), and `defineMessageUnion` returns `guards`,
+`subset`, and `match`, so reference-based classification reads the tag from the
+constructor. Typing `durable` against the union's constructors rejects a
+reference from another union (a negative type test pins it). Omitted is `local`.
+`presence` is a classification the adapter consumes; `defineSync` still takes
+only the durable predicate, so the protocol layer is unchanged.
+
+### Mounting the runtime
+
+`examples/sync/src/runtime.ts` works by adding `RefreshShared`/`PersistenceFailed`
+to a wrapping `RuntimeMessage` union, persisting a durable Message in a Command,
+and installing the projection when it resolves. Generalizing it needs the app's
+Message union to include those internal variants, or a Foldkit dispatch seam that
+can await persistence before applying the transition.
+
+- **App-declared internal variants — recommended for now.** A `Sync.mount` that
+  takes the app's runtime Message union and documents the two required variants.
+  Works today with no upstream change.
+- **A Foldkit transition driver / admission hook.** The clean answer and the one
+  #42 points at, but it is an upstream change. Propose it separately; do not
+  block the DX on it.
+
+`Sync.browser` only needs `openReplica`/`synchronize`/`close`, so it ships before
+the mount is generalized.
+
+## Remaining questions
+
+- Confirm the subpath name (`foldkit-sync/foldkit`) and that `pick` staying in the
+  root while the DX subpath re-exports it is acceptable.
+- How a durable transition that returns an `OutMessage` (a submodel) is treated:
+  rejected like a Command, or allowed.
 - How `presence` reuses the authenticated peer identity the server already has.
+
