@@ -424,6 +424,13 @@ export interface AppScope<
   readonly model: RefTree<Root, F>
 }
 
+export interface SurfaceInspection {
+  readonly name: string
+  readonly dependencies: DependencyTree
+  readonly requirements: readonly Requirement[]
+  readonly emits: readonly unknown[]
+}
+
 export interface Surface<Root, Model, Message, Params> {
   readonly name: string
   readonly Params: Schema.Schema<Params> | undefined
@@ -585,6 +592,23 @@ export const Surface = {
       seen.add(surface.name)
     }
     return { app, surfaces }
+  },
+
+  /**
+   * Pure introspection for DevTools: what a Surface observes (dependencies,
+   * requirements) and what it may emit. No behavior change, no I/O.
+   */
+  inspect: <Root, Model, Message, Params>(
+    surface: Surface<Root, Model, Message, Params>,
+    params: Params,
+  ): SurfaceInspection => {
+    const projection = surface.projection(params)
+    return {
+      name: surface.name,
+      dependencies: projection.dependencies,
+      requirements: projection.requirements,
+      emits: surface.messages,
+    }
   },
 }
 
