@@ -8,7 +8,9 @@ import {
   RemoteClient,
   RemoteLiveError,
   Selection,
+  emptyLiveState,
   emptyStore,
+  entityKey,
   initialRemoteModel,
   type LiveEvent,
   type RemoteMessage,
@@ -60,11 +62,25 @@ const toMessage = (message: RemoteMessage): LiveMessageType => {
   }
 }
 
-const entry = Remote.live(AppRemote, UserPage, { userId: 'u1' }, { cursor: () => 0 }, toMessage)
+const entry = Remote.live(AppRemote, UserPage, { userId: 'u1' }, toMessage)
 
 const dependencies = entry.modelToDependencies(root)
 
 describe('Remote live subscription', () => {
+  it('reads the resume cursor from the model', () => {
+    const stream = dependencies.requirements
+      .map(
+        requirement =>
+          `${entityKey(requirement.entity, requirement.id)}:${[...requirement.fields].sort().join(',')}`,
+      )
+      .sort()
+      .join('|')
+    const advanced = {
+      remote: { ...initialRemoteModel, live: { [stream]: { ...emptyLiveState, cursor: 7 } } },
+    }
+    expect(entry.modelToDependencies(advanced).cursor).toBe(7)
+  })
+
   it('streams live events for a Surface', async () => {
     const client = Layer.succeed(RemoteClient, {
       read: () => Effect.die('unused'),

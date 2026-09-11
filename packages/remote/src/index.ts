@@ -1042,8 +1042,8 @@ export const Remote = {
   /**
    * A Foldkit Subscription entry that consumes the live stream for a Surface's
    * requirements, emitting a `LiveReceived` per event and a `ReadFailed` when
-   * the stream breaks (including `ResumeUnavailable`). The `RemoteModel.live`
-   * cursor is keyed by the requirement set.
+   * the stream breaks (including `ResumeUnavailable`). The resume cursor is read
+   * from `RemoteModel.live`, so the application tracks no cursor of its own.
    */
   live: <
     AppModel,
@@ -1057,9 +1057,6 @@ export const Remote = {
     bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    options: {
-      readonly cursor: (model: AppModel) => LiveCursor
-    },
     toMessage: (message: RemoteMessage) => Message,
   ): EntryWithoutKeepAlive<
     AppModel,
@@ -1071,10 +1068,14 @@ export const Remote = {
       requirements: Schema.Array(ReadRequest),
       cursor: Schema.Number,
     }),
-    modelToDependencies: model => ({
-      requirements: surface.projection(params).requirements,
-      cursor: options.cursor(model),
-    }),
+    modelToDependencies: model => {
+      const requirements = surface.projection(params).requirements
+      const stream = liveStreamKey(requirements)
+      return {
+        requirements,
+        cursor: bound.store.get(model).live[stream]?.cursor ?? 0,
+      }
+    },
     dependenciesToStream: ({ requirements, cursor }) =>
       requirements.length === 0
         ? Stream.empty
