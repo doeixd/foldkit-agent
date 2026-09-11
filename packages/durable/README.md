@@ -59,7 +59,9 @@ const program = Effect.gen(function* () {
 ## What it owns
 
 - **Atomic, idempotent append.** A repeated `opId` is answered from the log; a
-  reuse with a different payload or actor is an `IdentityConflictError`.
+  reuse with a different payload or actor is an `IdentityConflictError`. Once
+  compaction removes the payload, the append returns `AlreadyCommitted` (the
+  identity, not the content) rather than fabricating a committed operation.
 - **A snapshot and cursor per key**, written together in one transaction.
 - **Compaction.** Payloads below a floor are dropped without changing the state
   a replay of the compacted prefix would produce; identity rows remain.
@@ -79,8 +81,9 @@ const program = Effect.gen(function* () {
 ## Guarantees
 
 - Append is atomic.
-- A repeated `opId` is idempotent, including after compaction; reuse with a
-  different payload or actor is an identity conflict.
+- A repeated `opId` is idempotent, including after compaction, where the payload
+  is gone and the result is `AlreadyCommitted`; reuse with a different payload or
+  actor is an identity conflict, proven by a retained payload hash.
 - Committed order is stable and gap-free.
 - The snapshot and cursor are written together.
 - Compaction drops committed payloads but never changes the state a replay of

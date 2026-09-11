@@ -12,7 +12,9 @@ import {
   makeJournal,
   makeJournalLayer,
   opId,
+  type AppendResult,
   type Codec,
+  type Committed,
   type Journal,
   type JournalOptions,
 } from '../src/index.js'
@@ -115,6 +117,12 @@ const withJournal = <A>(
     ),
   )
 
+/** Narrows an append result that must carry the committed operation. */
+const appendCommitted = (result: AppendResult<Operation>): Committed<Operation> => {
+  if (result._tag !== 'Committed') throw new Error('Expected a committed operation')
+  return result.committed
+}
+
 describe('a durable journal', () => {
   it('orders appends and reads them after a cursor', () =>
     withJournal(function* (journal) {
@@ -158,7 +166,7 @@ describe('a durable journal', () => {
   it('is idempotent by operation identity and rejects a conflicting reuse', () =>
     withJournal(function* (journal) {
       yield* journal.append(todos, add(1, 'a'), principal)
-      const again = yield* journal.append(todos, add(1, 'a'), principal)
+      const again = appendCommitted(yield* journal.append(todos, add(1, 'a'), principal))
       expect(again.sequence).toBe(1)
       expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
 
@@ -176,11 +184,11 @@ describe('a durable journal', () => {
 
   it('records the actor from the principal, never the operation', () =>
     withJournal(function* (journal) {
-      const committed = yield* journal.append(todos, add(1), {
+      const result = yield* journal.append(todos, add(1), {
         actorId: 'alice',
         canWrite: true,
       })
-      expect(committed.actorId).toBe('alice')
+      expect(appendCommitted(result).actorId).toBe('alice')
     }))
 
   it('rejects invalid input before committing', () =>
@@ -276,9 +284,37 @@ describe('a durable journal', () => {
       ])
       expect(yield* journal.load(todos)).toEqual(before)
 
-      // A retransmission of a compacted operation is still idempotent.
-      expect((yield* journal.append(todos, add(1, 'a'), principal)).sequence).toBe(1)
+      // A retransmission of a compacted operation is answered from its identity,
+      // but the compacted payload is not returned.
+      expect(yield* journal.append(todos, add(1, 'a'), principal)).toMatchObject({
+        _tag: 'AlreadyCommitted',
+        opId: 'a:1',
+        sequence: 1,
+      })
       expect(yield* journal.load(todos)).toEqual(before)
+    }))
+
+  it('refuses a compacted identity reused with different data or actor', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      yield* journal.compact(todos, 1)
+
+      // Same opId, different payload: before the payload hash this was accepted
+      // as an idempotent repeat and returned the uncommitted payload.
+      const payload = yield* Effect.result(journal.append(todos, remove(1, 'a'), principal))
+      expect(payload).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'IdentityConflictError' },
+      })
+
+      const actor = yield* Effect.result(
+        journal.append(todos, add(1, 'a'), { actorId: 'mallory', canWrite: true }),
+      )
+      expect(actor).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'IdentityConflictError' },
+      })
+      expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
     }))
 
   it('refuses a compaction cursor that moves backwards or past the snapshot', () =>
@@ -338,7 +374,9 @@ describe('a durable journal', () => {
           ).toEqual([['a:1', 1]])
           expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
           // The log continues from the legacy cursor rather than restarting.
-          expect((yield* journal.append(todos, add(2, 'b'), principal)).sequence).toBe(2)
+          expect(
+            appendCommitted(yield* journal.append(todos, add(2, 'b'), principal)).sequence,
+          ).toBe(2)
         },
         {},
         path,
@@ -346,7 +384,12 @@ describe('a durable journal', () => {
 
       const migrated = new DatabaseSync(path)
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 1 })
+        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 2 })
+        // The payload identity is backfilled for rows retained from before the
+        // column existed, so a later retransmission can still prove its payload.
+        expect(
+          migrated.prepare('SELECT payload_hash FROM operations WHERE op_id = ?').get('a:1'),
+        ).toMatchObject({ payload_hash: expect.any(String) })
       } finally {
         migrated.close()
       }
@@ -383,7 +426,7 @@ describe('a durable journal', () => {
 
       const migrated = new DatabaseSync(path)
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 1 })
+        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 2 })
       } finally {
         migrated.close()
       }

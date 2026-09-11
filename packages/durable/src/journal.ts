@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import * as SqliteClient from '@effect/sql-sqlite-node/SqliteClient'
 import {
   Config,
@@ -25,7 +26,7 @@ import {
   OperationRejectedError,
 } from './errors.js'
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 /** Counters an application can scrape; the default registry already collects them. */
 export const journalMetrics = {
@@ -92,6 +93,20 @@ export interface EffectRecord {
 export type AppendError =
   InvalidOperationError | OperationRejectedError | IdentityConflictError | JournalError
 
+/**
+ * The outcome of `append`. `AlreadyCommitted` means the operation is known but
+ * its payload was compacted away, so no `Committed` operation can be returned;
+ * a caller must not treat the retransmitted content as the committed one.
+ */
+export type AppendResult<Operation> =
+  | { readonly _tag: 'Committed'; readonly committed: Committed<Operation> }
+  | {
+      readonly _tag: 'AlreadyCommitted'
+      readonly opId: OpId
+      readonly sequence: number
+      readonly actorId: ActorId
+    }
+
 export interface Journal<Operation, Snapshot, Principal> {
   readonly load: (
     key: DocumentId,
@@ -102,11 +117,18 @@ export interface Journal<Operation, Snapshot, Principal> {
     key: DocumentId,
     after: number,
   ) => Effect.Effect<ReadonlyArray<Committed<Operation>>, InvalidCursorError | JournalError>
+  /**
+   * Commits an operation. A repeat of a known `opId` returns `Committed` with the
+   * stored operation while its payload is retained, and `AlreadyCommitted`
+   * without one once compaction has removed it. A reuse with different data or
+   * actor is an `IdentityConflictError` in either case, proven by a retained
+   * payload hash.
+   */
   readonly append: (
     key: DocumentId,
     input: unknown,
     principal: Principal,
-  ) => Effect.Effect<Committed<Operation>, AppendError>
+  ) => Effect.Effect<AppendResult<Operation>, AppendError>
   readonly compact: (
     key: DocumentId,
     through: number,
@@ -136,6 +158,9 @@ export interface Journal<Operation, Snapshot, Principal> {
 
 const describe = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause)
+
+/** A compacted operation keeps this instead of its payload, so identity is provable. */
+const hashPayload = (encoded: string): string => createHash('sha256').update(encoded).digest('hex')
 
 const journalError = (message: string, cause: unknown): JournalError =>
   new JournalError({ message, cause })
@@ -211,24 +236,44 @@ const makeShapeEffect = <Operation, Snapshot, Principal>(
 const migrate = (sql: SqlClient.SqlClient): Effect.Effect<void, JournalError> =>
   Effect.gen(function* () {
     const version = yield* sql<{ readonly user_version: number }>`PRAGMA user_version`
-    if ((version[0]?.user_version ?? 0) >= SCHEMA_VERSION) return
+    const current = version[0]?.user_version ?? 0
+    if (current >= SCHEMA_VERSION) return
     yield* sql.withTransaction(
       Effect.gen(function* () {
-        yield* sql`CREATE TABLE IF NOT EXISTS documents (
-          key TEXT PRIMARY KEY, cursor INTEGER NOT NULL, snapshot TEXT NOT NULL,
-          compact_before INTEGER NOT NULL DEFAULT 0
-        )`
-        yield* sql`CREATE TABLE IF NOT EXISTS operations (
-          key TEXT NOT NULL, op_id TEXT NOT NULL, sequence INTEGER NOT NULL,
-          actor_id TEXT NOT NULL, input TEXT,
-          PRIMARY KEY (key, op_id), UNIQUE (key, sequence)
-        )`
-        yield* sql`CREATE TABLE IF NOT EXISTS effects (
-          key TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, error TEXT
-        )`
+        if (current < 1) {
+          yield* sql`CREATE TABLE IF NOT EXISTS documents (
+            key TEXT PRIMARY KEY, cursor INTEGER NOT NULL, snapshot TEXT NOT NULL,
+            compact_before INTEGER NOT NULL DEFAULT 0
+          )`
+          yield* sql`CREATE TABLE IF NOT EXISTS operations (
+            key TEXT NOT NULL, op_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+            actor_id TEXT NOT NULL, input TEXT,
+            PRIMARY KEY (key, op_id), UNIQUE (key, sequence)
+          )`
+          yield* sql`CREATE TABLE IF NOT EXISTS effects (
+            key TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, error TEXT
+          )`
+        }
+        if (current < 2) {
+          yield* sql`ALTER TABLE operations ADD COLUMN payload_hash TEXT`
+          // Backfill identities for operations retained from before this column
+          // existed, so a later retransmission can still prove its payload. SHA-256
+          // is not available in SQL, so the rows are hashed in JavaScript.
+          const retained = yield* sql<{
+            readonly key: string
+            readonly op_id: string
+            readonly input: string
+          }>`SELECT key, op_id, input FROM operations WHERE input IS NOT NULL`
+          yield* Effect.forEach(
+            retained,
+            row =>
+              sql`UPDATE operations SET payload_hash = ${hashPayload(String(row.input))} WHERE key = ${row.key} AND op_id = ${row.op_id}`,
+            { discard: true },
+          )
+        }
         // A literal, not a bound parameter: SQLite rejects a placeholder in a
         // PRAGMA assignment. Keep in step with SCHEMA_VERSION.
-        yield* sql`PRAGMA user_version = 1`
+        yield* sql`PRAGMA user_version = 2`
       }),
     )
   }).pipe(Effect.mapError(error => journalError('Could not migrate the journal', error)))
@@ -243,6 +288,7 @@ interface OperationRow {
   readonly actor_id: string
   readonly sequence: number
   readonly input: string | null
+  readonly payload_hash: string | null
 }
 
 interface EffectRow {
@@ -344,34 +390,50 @@ const makeShape = <Operation, Snapshot, Principal>(
       catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
     })
 
+    const payloadHash = hashPayload(encoded)
+    const conflict = (): IdentityConflictError =>
+      new IdentityConflictError({
+        opId,
+        message: `Operation "${opId}" was reused with different data or actor`,
+      })
+
     const outcome = yield* sql
       .withTransaction(
         Effect.gen(function* () {
           const prior =
-            yield* sql<OperationRow>`SELECT actor_id, sequence, input FROM operations WHERE key = ${key} AND op_id = ${opId}`
+            yield* sql<OperationRow>`SELECT actor_id, sequence, input, payload_hash FROM operations WHERE key = ${key} AND op_id = ${opId}`
           if (prior.length > 0) {
-            // A compacted operation keeps its identity row but loses its
-            // payload; a retransmission is answered from that identity.
             const row = prior[0]!
-            const committed = yield* Effect.try({
-              try: () => ({
-                operation:
-                  row.input === null
-                    ? operation
-                    : options.operation.decode(JSON.parse(String(row.input))),
-                sequence: Number(row.sequence),
-                actorId: toActorId(String(row.actor_id)),
-              }),
-              catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-            })
-            if (row.input !== null && (row.input !== encoded || committed.actorId !== actorId))
-              return yield* Effect.fail(
-                new IdentityConflictError({
-                  opId,
-                  message: `Operation "${opId}" was reused with different data or actor`,
-                }),
-              )
-            return { committed, changed: false }
+            const sequence = Number(row.sequence)
+            const priorActor = toActorId(String(row.actor_id))
+            if (row.input !== null) {
+              // The payload is retained, so the committed operation is canonical.
+              if (row.input !== encoded || priorActor !== actorId)
+                return yield* Effect.fail(conflict())
+              const operation = yield* Effect.try({
+                try: () => options.operation.decode(JSON.parse(String(row.input))),
+                catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+              })
+              return {
+                result: {
+                  _tag: 'Committed' as const,
+                  committed: { operation, sequence, actorId: priorActor },
+                },
+                changed: false,
+              }
+            }
+            // The payload was compacted away. Answer idempotently from the stored
+            // identity, but never rebuild a committed operation from the
+            // retransmitted content: it may not be what was committed.
+            if (
+              priorActor !== actorId ||
+              (row.payload_hash !== null && row.payload_hash !== payloadHash)
+            )
+              return yield* Effect.fail(conflict())
+            return {
+              result: { _tag: 'AlreadyCommitted' as const, opId, sequence, actorId: priorActor },
+              changed: false,
+            }
           }
           const documents =
             yield* sql<DocumentRow>`SELECT cursor, snapshot FROM documents WHERE key = ${key}`
@@ -403,9 +465,15 @@ const makeShape = <Operation, Snapshot, Principal>(
             try: () => JSON.stringify(options.snapshot.encode(reduced)),
             catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
           })
-          yield* sql`INSERT INTO operations (key, op_id, sequence, actor_id, input) VALUES (${key}, ${opId}, ${sequence}, ${actorId}, ${encoded})`
+          yield* sql`INSERT INTO operations (key, op_id, sequence, actor_id, input, payload_hash) VALUES (${key}, ${opId}, ${sequence}, ${actorId}, ${encoded}, ${payloadHash})`
           yield* sql`INSERT INTO documents (key, cursor, snapshot) VALUES (${key}, ${sequence}, ${encodedSnapshot}) ON CONFLICT(key) DO UPDATE SET cursor = excluded.cursor, snapshot = excluded.snapshot`
-          return { committed: { operation, sequence, actorId }, changed: true }
+          return {
+            result: {
+              _tag: 'Committed' as const,
+              committed: { operation, sequence, actorId },
+            },
+            changed: true,
+          }
         }),
       )
       .pipe(
@@ -416,16 +484,16 @@ const makeShape = <Operation, Snapshot, Principal>(
 
     // Publish and observe only after the transaction committed, so a subscriber
     // never sees a change that could still roll back.
-    if (outcome.changed) {
+    if (outcome.changed && outcome.result._tag === 'Committed') {
       yield* Metric.update(journalMetrics.appends, 1)
       yield* Effect.logDebug('journal append', {
         key,
         opId,
-        sequence: outcome.committed.sequence,
+        sequence: outcome.result.committed.sequence,
       })
       yield* PubSub.publish(changes, key)
     }
-    return outcome.committed
+    return outcome.result
   })
 
   const compact: Shape['compact'] = Effect.fn('Journal.compact')(function* (

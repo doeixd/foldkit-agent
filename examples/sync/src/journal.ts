@@ -4,6 +4,7 @@ import {
   documentId as toDocumentId,
   makeJournal,
   opId as toOpId,
+  type AppendResult as DurableAppendResult,
   type Committed as DurableCommitted,
   type Journal as DurableJournal,
 } from 'foldkit-durable'
@@ -115,12 +116,18 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
       toSyncDocumentId(documentId),
     )
 
-  const append = (input: unknown, principal: Principal): Committed => {
+  const appendResult = (input: unknown, principal: Principal): DurableAppendResult<Operation> => {
     if (!principal.actorId || !principal.canWrite) throw new Error('Unauthorized operation')
-    const committed = Effect.runSync(
-      durable.append(toDocumentId(principal.documentId), input, principal),
-    )
-    return toCommitted(committed, principal.documentId)
+    return Effect.runSync(durable.append(toDocumentId(principal.documentId), input, principal))
+  }
+
+  const append = (input: unknown, principal: Principal): Committed => {
+    const result = appendResult(input, principal)
+    if (result._tag === 'AlreadyCommitted')
+      throw new Error(
+        `Operation "${result.opId}" was already committed and its payload was compacted`,
+      )
+    return toCommitted(result.committed, principal.documentId)
   }
 
   const snapshot = (documentId: string): { cursor: number; model: Shared } => {
@@ -206,7 +213,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
             rejected.push(operation.opId)
             continue
           }
-          const committed = Effect.runSync(
+          const result = Effect.runSync(
             durable.append(toDocumentId(principal.documentId), operation, principal).pipe(
               Effect.catchTag('OperationRejectedError', error =>
                 Effect.sync(() => {
@@ -216,10 +223,16 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
               ),
             ),
           )
-          if (committed === undefined) continue
+          if (result === undefined) continue
+          if (result._tag === 'AlreadyCommitted') {
+            // The commit happened before, and compaction removed its payload.
+            // Acknowledge without settling; its effects were settled then.
+            acknowledged.push(result.opId)
+            continue
+          }
           // Settled before the ack, so the client's retry cannot repeat it.
-          await settle(toCommitted(committed, principal.documentId))
-          acknowledged.push(committed.operation.opId)
+          await settle(toCommitted(result.committed, principal.documentId))
+          acknowledged.push(result.committed.operation.opId)
         }
         if (cursor < Effect.runSync(durable.floor(toDocumentId(principal.documentId)))) {
           const { cursor: at, model } = snapshot(principal.documentId)

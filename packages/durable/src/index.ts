@@ -22,6 +22,7 @@ export {
   makeJournal,
   makeJournalLayer,
   type AppendError,
+  type AppendResult,
   type AuthorizationRequest,
   type Committed,
   type EffectRecord,

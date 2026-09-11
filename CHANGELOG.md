@@ -5,6 +5,37 @@ All notable changes to this project are recorded here. The project follows
 released from a version tag (`vX.Y.Z`). A release only republishes packages whose
 version changed; `pnpm` skips versions already in the registry.
 
+## Unreleased
+
+Correctness fixes from a review of the implementation. Breaking for `foldkit-sync`
+(the storage and presence APIs) and `foldkit-durable` (`append`'s result).
+
+### `foldkit-durable`
+
+- **Compacted operation identity.** Compaction drops the payload but now keeps a
+  SHA-256 payload hash, so a retry of a compacted `opId` with different data or
+  actor is an `IdentityConflictError` instead of being accepted as an idempotent
+  repeat. When the payload is compacted, `append` returns `AlreadyCommitted`
+  (`opId`, `sequence`, `actorId`) rather than returning the retransmitted
+  operation as the committed one — which could otherwise run an effect for
+  content that was never committed. The `user_version` migration to 2 adds and
+  backfills the column.
+
+### `foldkit-sync`
+
+- **Foreign acknowledgements.** A response that acknowledges an operation the
+  replica never sent (for example one submitted while the exchange was in flight)
+  is a `ForeignAcknowledgementError` and no longer deletes that pending operation.
+  A response that both acknowledges and rejects one id is refused too.
+- **Encoded persistence.** The replica state is encoded through the shared codec
+  before it is saved, so a transforming `shared` schema (`Schema.NumberFromString`,
+  a brand, a date) round-trips instead of failing to reload. `Storage` is now
+  opaque, and persisted state ids are branded.
+- **Failed open cleanup.** `openReplica` closes its storage on a failed open,
+  matching `openLwwClock`, instead of leaking the handle.
+- **Presence identity.** `servePresence` stamps the connection's own peer id and
+  ignores a client-supplied one, so a peer cannot spoof, move, or remove another.
+
 ## 0.2.0
 
 `foldkit-sync` 0.2.0 and `foldkit-durable` 0.1.1. The `foldkit-agent` family is
