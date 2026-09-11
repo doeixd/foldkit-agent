@@ -5,7 +5,9 @@
  * removed `pick` spike; `Sync.make` compiles it to `defineSync`'s `shared`/`empty`.
  */
 import { Schema } from 'effect'
-import type { DependencyTree, ModelRef } from 'foldkit-surface'
+import type { DependencyTree, ModelRef, WritableProjection } from 'foldkit-surface'
+
+export type { WritableProjection }
 
 type EntrySchema<E> = E extends { readonly Schema: infer S } ? S : never
 // Tuple-wrapped so an empty entry map (E = never) yields `unknown` rather than
@@ -18,14 +20,6 @@ interface ErasedRef {
   readonly dependency: readonly string[]
   readonly get: (model: never) => unknown
   readonly set: (model: never, value: never) => never
-}
-
-export interface WritableProjection<Model, Fields extends Schema.Struct.Fields> {
-  readonly schema: Schema.Struct<Fields>
-  /** The Model paths the projection reads, for a Surface built over it. */
-  readonly dependencies: DependencyTree
-  readonly get: (model: Model) => Schema.Struct.Type<Fields>
-  readonly set: (model: Model, shared: Schema.Struct.Type<Fields>) => Model
 }
 
 /** Unions dependency paths, dropping duplicates. */

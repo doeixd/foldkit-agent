@@ -26,6 +26,17 @@ export interface ModelRef<Root, Value> {
 }
 
 /**
+ * A `ModelRef` generated for a named Model field. `key` is the literal field
+ * name, so a reference-based selection can infer its output keys without a
+ * parallel field registry or string paths.
+ */
+export interface FieldRef<Root, Value, Key extends string = string> extends ModelRef<Root, Value> {
+  readonly key: Key
+  /** The application definition this field was generated from. */
+  readonly owner: object
+}
+
+/**
  * Low-level escape hatch for a focus with no Model path of its own. Prefer the
  * `App.model` tree; use this for an optic that is not part of the Model.
  */
@@ -44,33 +55,33 @@ export const ModelRef = {
 }
 
 export type RefTree<Root, F extends Schema.Struct.Fields> = {
-  readonly [K in keyof F]: RefNode<Root, F[K]>
+  readonly [K in keyof F & string]: RefNode<Root, F[K], K>
 }
 
 // Tuple-wrapped so the conditional is *non-distributive*: without it,
 // `Value = Option<V>` distributes over `None | Some<V>` and `.at()` would return
 // a union of two unrelated `ModelRef`s.
-type Selectable<Root, Value> = [Value] extends [Option.Option<infer Inner>]
-  ? ModelRef<Root, Value> & {
+type Selectable<Root, Value, Key extends string> = [Value] extends [Option.Option<infer Inner>]
+  ? FieldRef<Root, Value, Key> & {
       readonly select: <P>(projection: Projection<Inner, P>) => Projection<Root, Option.Option<P>>
     }
-  : ModelRef<Root, Value> & {
+  : FieldRef<Root, Value, Key> & {
       readonly select: <P>(projection: Projection<Value, P>) => Projection<Root, P>
     }
 
-type RefNode<Root, S> =
+type RefNode<Root, S, Key extends string> =
   S extends Schema.Struct<infer F>
-    ? Selectable<Root, Schema.Struct.Type<F>> & RefTree<Root, F>
+    ? Selectable<Root, Schema.Struct.Type<F>, Key> & RefTree<Root, F>
     : S extends Schema.Schema<infer A>
       ? A extends ReadonlyArray<infer E>
-        ? Selectable<Root, ReadonlyArray<E>> & {
-            readonly index: (index: number) => Selectable<Root, Option.Option<E>>
+        ? Selectable<Root, ReadonlyArray<E>, Key> & {
+            readonly index: (index: number) => Selectable<Root, Option.Option<E>, string>
           }
-        : A extends Readonly<Record<infer K, infer V>>
-          ? Selectable<Root, A> & {
-              readonly at: (key: K) => Selectable<Root, Option.Option<V>>
+        : A extends Readonly<Record<infer K extends string, infer V>>
+          ? Selectable<Root, A, Key> & {
+              readonly at: (key: K) => Selectable<Root, Option.Option<V>, K>
             }
-          : Selectable<Root, A>
+          : Selectable<Root, A, Key>
       : never
 
 type AnySchema = Schema.Schema<unknown>
@@ -83,6 +94,7 @@ const RESERVED_REF_NAMES = new Set([
   'Schema',
   'optic',
   'dependency',
+  'key',
   'read',
   'get',
   'set',
@@ -105,7 +117,8 @@ function makeTree(
   optic: Optic.Optional<unknown, unknown>,
   get: (root: unknown) => unknown,
   optional = false,
-  set?: (root: unknown, value: unknown) => unknown,
+  set: ((root: unknown, value: unknown) => unknown) | undefined,
+  owner: object,
 ): Record<string, unknown> {
   const erasedOptic = optic as {
     key(key: string): Optic.Optional<unknown, unknown>
@@ -118,6 +131,8 @@ function makeTree(
     Schema: schema,
     optic,
     dependency: path,
+    key: path[path.length - 1] ?? '',
+    owner,
     get,
     set: setFocus,
   }
@@ -128,8 +143,14 @@ function makeTree(
       if (RESERVED_REF_NAMES.has(key)) {
         throw new Error(`Model field "${key}" is reserved by ModelRef`)
       }
-      node[key] = makeTree(fields[key] as AnySchema, [...path, key], erasedOptic.key(key), root =>
-        propertyReader(get(root), key),
+      node[key] = makeTree(
+        fields[key] as AnySchema,
+        [...path, key],
+        erasedOptic.key(key),
+        root => propertyReader(get(root), key),
+        false,
+        undefined,
+        owner,
       )
     }
   }
@@ -150,6 +171,7 @@ function makeTree(
         const { [key]: _removed, ...rest } = container
         return setFocus(root, rest)
       },
+      owner,
     )
   node.index = (index: number) =>
     makeTree(
@@ -169,6 +191,7 @@ function makeTree(
           : array.filter((_, i) => i !== index)
         return setFocus(root, next)
       },
+      owner,
     )
   node.select = (projection: Projection<unknown, unknown>) => {
     const dependencies = mergeDependencies([path, ...projection.dependencies])
@@ -246,6 +269,19 @@ export interface Projection<Root, Value> {
   readonly dependencies: DependencyTree
   readonly requirements: readonly Requirement[]
   readonly read: (root: Root) => Value
+}
+
+/**
+ * A projection Surface can install back into a Model. Public reads use the
+ * read-only `Projection`; only a writable selection carries installation.
+ * `set` writes exactly the declared fields, so an excess field in an untrusted
+ * value cannot reach local state.
+ */
+export interface WritableProjection<Model, Fields extends Schema.Struct.Fields> {
+  readonly schema: Schema.Struct<Fields>
+  readonly dependencies: DependencyTree
+  readonly get: (model: Model) => Schema.Struct.Type<Fields>
+  readonly set: (model: Model, shared: Schema.Struct.Type<Fields>) => Model
 }
 
 function makeProjection<Value>(
@@ -480,6 +516,17 @@ export type Renderer<Model, Message> = (model: Model, h: ViewBuilder<Message>) =
 /** `unknown` when `Sub` is a subtype of `Super`, `never` otherwise. */
 type Subset<Sub, Super> = [Sub] extends [Super] ? unknown : never
 
+type RefRoot<R> = R extends ModelRef<infer Root, any> ? Root : never
+
+type RefRoots<Refs extends readonly unknown[]> = {
+  readonly [K in keyof Refs]: RefRoot<Refs[K]>
+}
+
+/** The struct fields a reference selection produces, keyed by each ref's field. */
+type PickFields<Refs extends readonly FieldRef<any, any, string>[]> = {
+  readonly [R in Refs[number] as R['key']]: R['Schema']
+}
+
 export const Surface = {
   make: <
     F extends Schema.Struct.Fields,
@@ -487,14 +534,69 @@ export const Surface = {
   >(config: {
     readonly Model: Schema.Struct<F>
     readonly Message: MessageUnion<Cases>
-  }): AppScope<Schema.Struct.Type<F>, F, Cases> => ({
-    Model: config.Model,
-    Message: config.Message,
-    model: makeTree(config.Model, [], Optic.id(), root => root) as unknown as RefTree<
-      Schema.Struct.Type<F>,
-      F
-    >,
-  }),
+  }): AppScope<Schema.Struct.Type<F>, F, Cases> => {
+    // One token per application, so a selection cannot silently mix two
+    // applications whose Models happen to be structurally identical.
+    const owner: object = {}
+    return {
+      Model: config.Model,
+      Message: config.Message,
+      model: makeTree(
+        config.Model,
+        [],
+        Optic.id(),
+        root => root,
+        false,
+        undefined,
+        owner,
+      ) as unknown as RefTree<Schema.Struct.Type<F>, F>,
+    }
+  },
+
+  /**
+   * Derives a writable projection from generated Model field references:
+   * `Surface.pick(App.model.todos, App.model.selectedTodoId)` infers
+   * `{ todos, selectedTodoId }` and its codec. Every reference must share one
+   * Root; a raw optic or an unrelated application is rejected. Repeated
+   * identical members deduplicate; a conflicting definition throws.
+   */
+  pick: <const Refs extends readonly FieldRef<any, any, string>[]>(
+    ...refs: Refs & (IsUnion<RefRoots<Refs>[number]> extends true ? never : unknown)
+  ): WritableProjection<RefRoots<Refs>[number], PickFields<Refs>> => {
+    const selected = [...refs]
+    // Two applications can have structurally identical Models, so the root type
+    // check cannot separate them; the owner token can.
+    const owner = selected[0]?.owner
+    for (const ref of selected) {
+      if (ref.owner !== owner) {
+        throw new Error('Surface.pick: references from different applications')
+      }
+    }
+    const fields: Record<string, AnySchema> = {}
+    for (const ref of selected) {
+      const existing = fields[ref.key]
+      if (existing !== undefined) {
+        if (existing === ref.Schema) continue
+        throw new Error(`Surface.pick: conflicting definitions for "${ref.key}"`)
+      }
+      fields[ref.key] = ref.Schema
+    }
+    return {
+      schema: objectSchema(fields) as never,
+      dependencies: mergeDependencies(selected.map(ref => ref.dependency)),
+      get: model => {
+        const out: Record<string, unknown> = {}
+        for (const ref of selected) out[ref.key] = ref.get(model as never)
+        return out as never
+      },
+      set: (model, shared) => {
+        let next = model
+        for (const ref of selected)
+          next = ref.set(next as never, (shared as Record<string, unknown>)[ref.key] as never)
+        return next
+      },
+    }
+  },
 
   define: <
     Root,
