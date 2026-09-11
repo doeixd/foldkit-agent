@@ -2,10 +2,10 @@
  * A writable projection of an application Model built from Surface `ModelRef`s:
  * the shared Schema, how to read the shared fields, and how to write them back
  * leaving local fields untouched. This is the Surface-based replacement for the
- * removed `pick` spike; `Sync.define` compiles it to `defineSync`'s `shared`/`empty`.
+ * removed `pick` spike; `Sync.make` compiles it to `defineSync`'s `shared`/`empty`.
  */
 import { Schema } from 'effect'
-import type { ModelRef } from 'foldkit-surface'
+import type { DependencyTree, ModelRef } from 'foldkit-surface'
 
 type EntrySchema<E> = E extends { readonly Schema: infer S } ? S : never
 // Tuple-wrapped so an empty entry map (E = never) yields `unknown` rather than
@@ -15,14 +15,30 @@ type EntryModel<E> = [E] extends [never] ? unknown : E extends ModelRef<infer M,
 /** `ModelRef` is invariant in its focus, so the runtime uses an erased shape. */
 interface ErasedRef {
   readonly Schema: Schema.Schema<unknown>
+  readonly dependency: readonly string[]
   readonly get: (model: never) => unknown
   readonly set: (model: never, value: never) => never
 }
 
 export interface WritableProjection<Model, Fields extends Schema.Struct.Fields> {
   readonly schema: Schema.Struct<Fields>
+  /** The Model paths the projection reads, for a Surface built over it. */
+  readonly dependencies: DependencyTree
   readonly get: (model: Model) => Schema.Struct.Type<Fields>
   readonly set: (model: Model, shared: Schema.Struct.Type<Fields>) => Model
+}
+
+/** Unions dependency paths, dropping duplicates. */
+const mergeDependencies = (paths: readonly (readonly string[])[]): DependencyTree => {
+  const seen = new Set<string>()
+  const merged: (readonly string[])[] = []
+  for (const path of paths) {
+    const key = path.join('\u0000')
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(path)
+  }
+  return merged
 }
 
 export const project = <const Entries extends Record<string, ModelRef<any, any>>>(
@@ -39,6 +55,7 @@ export const project = <const Entries extends Record<string, ModelRef<any, any>>
 
   return {
     schema: Schema.Struct(fields) as never,
+    dependencies: mergeDependencies(keys.map(key => erased(key).dependency)),
     get: model => {
       const shared: Record<string, unknown> = {}
       for (const key of keys) shared[key] = erased(key).get(model as never)
