@@ -13,13 +13,16 @@
 import { and, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { Selection } from 'foldkit-remote'
+import { RemoteServerError, type EntitySource } from 'foldkit-remote-server'
 import type { EntityBinding, RelationBinding } from './binding.js'
 import { idColumn, projectsAny, requiredColumns } from './columns.js'
 import type { OrderTerm } from './cursor.js'
+import { DrizzleDatabase } from './database.js'
 
 export * from './binding.js'
 export * from './columns.js'
 export * from './cursor.js'
+export * from './database.js'
 export * from './page.js'
 export * from './pagination.js'
 export * from './window.js'
@@ -105,19 +108,18 @@ export const selectColumns = (
 }
 
 /**
- * Builds a `RemoteServer.entity` reader from a binding and a Drizzle executor.
- * The executor is the one Drizzle-specific line,
- * `(query) => db.select(query.columns).from(table).where(query.where)`.
+ * A pruned reader backed by an injected executor. Use it when the database is
+ * not an Effect service, or to test the projection without one.
  *
  * Field authorization still holds: only `context.fields` (already intersected
  * with the principal's allowed fields by `RemoteServer`) become columns.
  */
-export const source =
-  <E>(
+export const reader =
+  <E, R = never>(
     binding: EntityBinding<any, any>,
-    run: (query: SourceQuery) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E>,
+    run: (query: SourceQuery) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E, R>,
   ) =>
-  (context: ReadContext): Effect.Effect<ReadonlyArray<EntityRecord>, E> =>
+  (context: ReadContext): Effect.Effect<ReadonlyArray<EntityRecord>, E, R> =>
     Effect.gen(function* () {
       if (context.ids.length === 0) return []
       if (!projectsAny(binding, context.fields)) return []
@@ -125,3 +127,28 @@ export const source =
       const rows = yield* run({ columns, where: whereIds(binding, context.ids) })
       return rows.map(row => ({ id: String(row.id), values: row }))
     })
+
+const runDrizzle =
+  (binding: EntityBinding<any, any>) =>
+  (
+    query: SourceQuery,
+  ): Effect.Effect<ReadonlyArray<Record<string, unknown>>, RemoteServerError, DrizzleDatabase> =>
+    Effect.gen(function* () {
+      const database = yield* DrizzleDatabase
+      return yield* Effect.tryPromise({
+        try: () =>
+          Promise.resolve(database.select(query.columns).from(binding.table).where(query.where)),
+        catch: error =>
+          new RemoteServerError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      })
+    })
+
+/** A `RemoteServer.entity` source backed by the `DrizzleDatabase` service. */
+export const source = <P = unknown>(
+  binding: EntityBinding<any, any>,
+): EntitySource<P, DrizzleDatabase> => ({
+  entity: binding.name,
+  read: reader(binding, runDrizzle(binding)),
+})

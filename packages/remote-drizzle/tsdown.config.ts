@@ -6,5 +6,13 @@ export default defineConfig({
   dts: true,
   clean: true,
   target: 'es2022',
-  deps: { neverBundle: ['effect', 'foldkit-remote', 'foldkit-surface', 'drizzle-orm'] },
+  deps: {
+    neverBundle: [
+      'effect',
+      'foldkit-remote',
+      'foldkit-remote-server',
+      'foldkit-surface',
+      'drizzle-orm',
+    ],
+  },
 })

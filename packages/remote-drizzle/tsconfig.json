@@ -8,9 +8,10 @@
     "noEmit": false,
     "paths": {
       "foldkit-remote": ["../remote/src/index.ts"],
+      "foldkit-remote-server": ["../remote-server/src/index.ts"],
       "foldkit-surface": ["../surface/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
-  "references": [{ "path": "../remote" }]
+  "references": [{ "path": "../remote" }, { "path": "../remote-server" }]
 }

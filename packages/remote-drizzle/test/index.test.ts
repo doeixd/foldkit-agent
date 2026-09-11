@@ -8,9 +8,9 @@ import {
   keysetWhere,
   orderByTerms,
   queryPlan,
+  reader,
   relationsFor,
   requiredColumns,
-  source,
   whereIds,
   type SourceQuery,
 } from '../src/index.js'
@@ -119,7 +119,7 @@ describe('RemoteDrizzle', () => {
 
   it('prunes to allowed fields, batches ids, and normalizes records', async () => {
     const calls: SourceQuery[] = []
-    const read = source(UserBinding, query => {
+    const read = reader(UserBinding, query => {
       calls.push(query)
       return Effect.succeed([{ id: 'a', name: 'A' }])
     })
@@ -133,7 +133,7 @@ describe('RemoteDrizzle', () => {
 
   it('selects the primary key even when it is not a requested field', async () => {
     const calls: SourceQuery[] = []
-    const read = source(UserBinding, query => {
+    const read = reader(UserBinding, query => {
       calls.push(query)
       return Effect.succeed([{ id: 'a', name: 'A' }])
     })
@@ -145,7 +145,7 @@ describe('RemoteDrizzle', () => {
 
   it('does no work for empty ids or a selection with nothing to project', async () => {
     let called = false
-    const read = source(UserBinding, () => {
+    const read = reader(UserBinding, () => {
       called = true
       return Effect.succeed([])
     })
