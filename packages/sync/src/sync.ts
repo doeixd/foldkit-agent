@@ -1,4 +1,4 @@
-import { Effect, Metric, Ref, Schema, SynchronizedRef } from 'effect'
+import { Effect, Exit, Metric, Ref, Schema, SynchronizedRef } from 'effect'
 import {
   CheckpointRegressionError,
   CommittedOrderError,
@@ -525,7 +525,14 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           yield* storage.close
         }),
       }
-    }).pipe(Effect.withSpan('Sync.openReplica', { attributes: { documentId, replicaId } }))
+    }).pipe(
+      Effect.withSpan('Sync.openReplica', { attributes: { documentId, replicaId } }),
+      // Close a partially initialized storage on any failure, including a
+      // defect, so a failed open cannot leak the connection.
+      Effect.onExit(exit =>
+        Exit.isSuccess(exit) ? Effect.void : storage.close.pipe(Effect.ignore),
+      ),
+    )
 
   return {
     documentId,

@@ -7,6 +7,7 @@ import {
   layerFromPromise,
   opId,
   replicaId,
+  StorageError,
   type Committed,
   type Exchange,
   type Operation,
@@ -476,6 +477,20 @@ describe('the replica', () => {
     await submit(replica, created('eggs'))
     expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2', 'a:3'])
     await close(replica)
+  })
+
+  it('closes storage when the open fails', async () => {
+    let closes = 0
+    const storage: Storage = {
+      load: () => Effect.succeed(undefined),
+      save: () => Effect.fail(new StorageError({ message: 'disk full' })),
+      close: Effect.sync(() => {
+        closes += 1
+      }),
+    }
+
+    await expect(open('a', storage)).rejects.toThrow('disk full')
+    expect(closes).toBe(1)
   })
 
   it('refuses an acknowledgement for an operation the request never sent', async () => {
