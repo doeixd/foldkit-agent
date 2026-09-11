@@ -2148,18 +2148,34 @@ installable; CI is green.
 
 ## 20. Immediate next step and open questions
 
-**Next step:** Phase 0 is complete (commit `eb14306`; results in §15). Begin
-Phase 1: replace the `packages/surface/src/index.ts` spike with the real
-`ModelRef`/`Projection`/`Surface` implementation, keeping the Phase 0 type
-contract in `test/inference.test-d.ts` green. The builder-seam decision (open
-question 2) is not a Phase 1 blocker; record it before Phase 2 composition. The
-spike's sound cast is the working assumption.
+**Next step:** Phases 0-13 and 15 are executed; Phase 14
+(`foldkit-remote-drizzle`) is implemented but its Postgres acceptance is not run
+(no database in CI). Remaining work: run the Phase 14 batched-relation and
+pagination acceptance against a real Postgres and decide whether the package
+ships or is dropped (open question 7); build the Surface-based `Sync.define` on
+top of `Sync.project`; work through the review findings and open questions below.
+The builder-seam decision (open question 2) is answered: proceed with the sound
+cast recorded in §15.
 
-**Review findings (open, lower severity).** Fixed in `de53997`: RemoteServer no
-longer reads/returns fields the client did not request; `RemotePersistence.restore`
-clears a wrong-shape snapshot instead of throwing; `classifyLive` accepts a
-non-1 first cursor; `Remote.observe` emits an `onError` rather than a defect; the
-dead `Remote.live` `policy` option is gone. Still open:
+**Review findings.** Fixed in `de53997`: RemoteServer no longer reads/returns
+fields the client did not request; `RemotePersistence.restore` clears a
+wrong-shape snapshot instead of throwing; `classifyLive` accepts a non-1 first
+cursor; `Remote.observe` emits an `onError` rather than a defect; the dead
+`Remote.live` `policy` option is gone.
+
+Fixed in `545bc62`, `98b2d1b`, `bfce617`, `0f864b0`, `08cfd01`:
+`Connection.merge` ignores a zero-edge page and `dedupeConnection` splits a
+segment at a dropped interior edge (no false adjacency); `reconcileMutation`
+always clears `pending`; `Sync.project({})` types `Model` as `unknown`, not
+`never`; `remote-drizzle` `whereIds` throws a clear error when the table has no
+`id` column; `RemoteServer.FoldkitRemoteRead` filters untrusted field names with
+`Object.hasOwn` into a null-prototype accumulator; `RemotePersistence.restore`
+rejects a malformed *entry*, not just a malformed top level; `Query` identity
+canonicalisation drops `undefined`-valued keys so an explicit `undefined`
+optional matches an absent one; the read handler de-dups ids and intersects
+authorization in sets rather than `Array.includes`.
+
+Still open (all lower severity):
 
 - **`Projection.struct` mixes roots silently.** `EntryRoot<Entries[keyof Entries]>`
   is a union; mixing ModelRefs/Projections with different `Root`s type-checks and
@@ -2171,13 +2187,10 @@ dead `Remote.live` `policy` option is gone. Still open:
   layout would fail silently.
 - **Unbounded mutation state.** `MutationState.applied`/`failed` grow without GC;
   define a retention policy.
-- **`Connection` dedupe can leave a hole.** Removing a mid-segment duplicate keeps
-  the segment's boundaries, which no longer describe its edges (contradictory
-  input only).
 - **`live.invalidateConnection` never clears `stale`.** A later successful merge
   does not mark the connection fresh; the clearing path is unspecified.
-- **remote-drizzle assumes the id column is named `id`** and does not check that
-  the table-derived Schema agrees with the Remote Entity's `id` schema.
+- **remote-drizzle does not check that the table-derived Schema agrees with the
+  Remote Entity's `id` schema** (it now requires the `id` column to exist).
 - **`handlers(server, principal)` binds one principal per handler set**, not per
   request; authentication middleware integration is deferred (§8.10).
 - **`ModelRef.fromOptic` throws** via `Result.getOrThrow` on a non-focusing optic;
