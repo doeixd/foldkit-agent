@@ -72,7 +72,18 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   Tested through `Scene` with identity, Style and conflict assertions.
 - **Out of reach with this seam.** `Menu`, `Listbox`, `ComboBox` and `DatePicker`
   own their markup and expose no `toView`/attribute bundles, so there is nothing
-  to resolve against. The Surface adapter is also not in this slice.
+  to resolve against.
+
+### `foldkit-mixins-surface` (private)
+
+- **SurfaceView bridge.** `SurfaceView.define(surface, slots, render)` binds a
+  Surface's projected Model and Message subset to a core `SlotView`: the
+  renderer's input is the projection, and its builder is typed with the
+  Surface's Message subset, so a Behavior cannot emit a message the Surface does
+  not expose. The result is an ordinary `SlotView`, so Style/Behavior attach and
+  pipe unchanged; `SurfaceView.toRenderer` adapts it to `Surface.view` /
+  `Surface.rootView`. Type tests pin the projected-Model and Message-subset
+  rejections. Phase 10 started, not complete.
 
 ### `foldkit-agent`
 

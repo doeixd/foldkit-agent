@@ -282,7 +282,23 @@ override even when a later attachment would otherwise win.
   mapped with the same builders. One slot contribution therefore applies to
   every item, while each item's base still owns its own events (a disabled tab
   omits `OnClick`, so a Behavior may add one only there).
-- The Surface adapter remains.
+### Surface bridge (`foldkit-mixins-surface`)
+
+- `SurfaceView.define(surface, slots, render)` type-binds a Surface's projected
+  Model and Message subset to a core `SlotView`. Input is the projection, so a
+  Style/Behavior callback cannot read the root Model; the builder is
+  `HtmlBuilder<subset>`, so a Behavior cannot emit a Message the Surface does not
+  expose.
+- The result is an ordinary `SlotView`, so the core attach/pipe algebra applies
+  unchanged. `SurfaceView.toRenderer` is the one boundary cast: `Surface.view`
+  hands a renderer a `ViewBuilder` (the builder minus its `MessageUniverse`
+  phantom), which core's `HtmlBuilder` parameter cannot accept nominally.
+- A core change that would erase the cast — accepting `Omit<HtmlBuilder, symbol>`
+  throughout — was prototyped and rejected: it forces every render/Behavior
+  annotation to switch types under contravariance, for little gain.
+- Started, not complete: runtime composition through `Surface.rootView` in a real
+  application, introspection metadata (slot contracts in `Surface.inspect`), and
+  the `@foldkit/ui` + Surface combination remain.
 
 ## Phase plan (this package)
 
@@ -298,7 +314,9 @@ override even when a later attachment would otherwise win.
 9. `@foldkit/ui` adapter (separate package). Stateless set plus Submodels
    Dialog/Popover/Tooltip/Slider/Tabs/RadioGroup/Calendar done.
    Menu/Listbox/ComboBox/DatePicker expose no consumer seam.
-10. Surface adapter (separate package).
+10. Surface adapter (separate package). `foldkit-mixins-surface` bridges a
+    Surface's projected Model and Message subset to a SlotView. Started, not
+    complete.
 
 Style CSS compiler, DevTools, and agent metadata wait until the core
 survives real views.

@@ -14,6 +14,7 @@
     { "path": "./packages/remote-drizzle" },
     { "path": "./packages/mixins" },
     { "path": "./packages/mixins-ui" },
+    { "path": "./packages/mixins-surface" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" }
   ]
