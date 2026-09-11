@@ -16,9 +16,14 @@ export type DiagnosticCode =
   | 'mixins:attribute-conflict'
   | 'mixins:structural-override'
   | 'mixins:duplicate-mount-name'
+  | 'a11y:missing-slot'
+  | 'a11y:hidden-slot'
+  | 'a11y:capability-mismatch'
+  | 'a11y:missing-event'
+  | 'a11y:missing-attribute'
 
 export interface Diagnostic {
-  readonly source: 'mixins'
+  readonly source: 'mixins' | 'a11y'
   readonly code: DiagnosticCode
   readonly severity: 'error'
   readonly message: string

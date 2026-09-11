@@ -6,6 +6,7 @@
  * resolve into ordinary Foldkit attributes. No Handles, no Atoms, no second
  * runtime: state stays in Model/Submodel, effects in Command/Mount.
  */
+export * as A11y from './a11y.js'
 export * as Attr from './attr.js'
 export * as Behavior from './behavior.js'
 export * as Capability from './capability.js'
@@ -23,6 +24,12 @@ export { Style } from './style.js'
 export { Theme } from './theme.js'
 
 export type { AttrToken } from './attr.js'
+export type {
+  A11yDiagnostic,
+  A11yDiagnosticCode,
+  Pattern as A11yPattern,
+  SlotRequirement as A11yRequirement,
+} from './a11y.js'
 export type {
   BehaviorSlotOptions,
   BehaviorSpec,

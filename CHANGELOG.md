@@ -31,8 +31,11 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   and an unpublished event or attribute; a Behavior owns no state.
 - **Theme and recipes.** `Theme.define` is typed token data, with
   `Theme.variable`/`Theme.variables` compiling to CSS custom properties;
-  `Style.recipe` is a typed variant selector returning Style data. A11y and the
-  UI/Surface adapters are not in this slice.
+  `Style.recipe` is a typed variant selector returning Style data.
+- **A11y patterns.** `A11y.pattern` is a portable requirements map and
+  `A11y.validate` reports every mismatch as a stable `a11y:*` diagnostic
+  (missing or hidden slot, capability mismatch, missing event or attribute). It
+  is pure and DOM-independent. The UI/Surface adapters are not in this slice.
 
 ### `foldkit-agent`
 

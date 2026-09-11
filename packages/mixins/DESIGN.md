@@ -197,17 +197,37 @@ override even when a later attachment would otherwise win.
   continuous element listener is a Mount; a network call is Message -> update ->
   Command.
 
+### A11y patterns
+
+- An `A11y.pattern` is a portable requirements map: slot name -> required
+  capability, events, attributes, and `optional`. It is independent of any one
+  component, so `validate` is a runtime check, not a compile-time one. A pattern
+  naming a slot a contract lacks is a reportable diagnostic, not an unreadable
+  `never`.
+- `A11y.validate(pattern, slots)` returns every mismatch as an `A11yDiagnostic`
+  with a stable `a11y:*` code, in authored order. It is pure and DOM-independent:
+  it checks the declared contract, never a rendered tree, and claims no WCAG
+  certification.
+- A missing non-optional slot, a hidden slot, a capability the slot does not
+  satisfy, and unpublished events or attributes are each reported. A hidden slot
+  is reported once and not checked further. An `optional` slot may be absent but
+  is still checked when present.
+- Slot lookup uses `Object.hasOwn`, so a plain-object contract cannot answer for
+  an inherited key such as `toString`.
+- `Diagnostic.source` widened to `'mixins' | 'a11y'`, so both layers share one
+  data shape and tooling consumes them uniformly.
+
 ## Phase plan (this package)
 
 0. Probes — this file. Done.
-1. Capability, Event, Attr, Slot, Slots. Metadata only.
-2. Mixin contribution model + deterministic resolver.
-3. SlotView.
-4. Style v1 (class, inline, compose, when, whenInput).
-5. Theme + recipes.
-6. Behavior v1 (no hidden state).
-7. Mount composition.
-8. A11y patterns + diagnostics.
+1. Capability, Event, Attr, Slot, Slots. Metadata only. Done.
+2. Mixin contribution model + deterministic resolver. Done.
+3. SlotView. Done.
+4. Style v1 (class, inline, compose, when, whenInput). Done.
+5. Theme + recipes. Done.
+6. Behavior v1 (no hidden state). Done.
+7. Mount composition. Done.
+8. A11y patterns + diagnostics. Done.
 9. `@foldkit/ui` adapter (separate package).
 10. Surface adapter (separate package).
 
