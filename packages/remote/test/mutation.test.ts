@@ -79,6 +79,27 @@ describe('Remote mutations', () => {
     expect(failed.failed.has('req-1')).toBe(true)
   })
 
+  it('bounds the settled-request ledger', () => {
+    let state = emptyMutationState
+    for (let index = 0; index < 4096; index += 1) {
+      state = reconcileMutation(emptyStore, state, `req-${index}`, []).state
+    }
+
+    expect(state.applied.size).toBeLessThan(4096)
+    expect(state.applied.has('req-0')).toBe(false)
+    expect(state.applied.has('req-4095')).toBe(true)
+  })
+
+  it('bounds the failed-request ledger', () => {
+    let state = emptyMutationState
+    for (let index = 0; index < 4096; index += 1) {
+      state = failMutation(state, `req-${index}`)
+    }
+
+    expect(state.failed.size).toBeLessThan(4096)
+    expect(state.failed.has('req-4095')).toBe(true)
+  })
+
   it('clears pending even when a request is re-begun and reconciled again', () => {
     const started = beginMutation(emptyMutationState, 'req-1')
     const first = reconcileMutation(emptyStore, started, 'req-1', [

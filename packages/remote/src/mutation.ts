@@ -25,6 +25,24 @@ export const emptyMutationState: MutationState = {
   failed: new Set(),
 }
 
+/**
+ * How many settled request ids a mutation state retains. A retry settles well
+ * inside this window, so bounding the ledger stops a long-lived application
+ * from growing it without limit; a retry older than the window would re-apply
+ * its entities.
+ */
+const MUTATION_ID_WINDOW = 1024
+
+/** Records `id` as most recent, evicting the oldest once the window is full. */
+const remember = (ids: ReadonlySet<string>, id: string): ReadonlySet<string> => {
+  const next = new Set(ids)
+  // Re-inserting an existing id moves it to the most-recent end.
+  next.delete(id)
+  next.add(id)
+  if (next.size <= MUTATION_ID_WINDOW) return next
+  return new Set([...next].slice(next.size - MUTATION_ID_WINDOW))
+}
+
 export const beginMutation = (state: MutationState, requestId: string): MutationState => ({
   ...state,
   pending: new Set([...state.pending, requestId]),
@@ -33,7 +51,7 @@ export const beginMutation = (state: MutationState, requestId: string): Mutation
 export const failMutation = (state: MutationState, requestId: string): MutationState => {
   const pending = new Set(state.pending)
   pending.delete(requestId)
-  return { ...state, pending, failed: new Set([...state.failed, requestId]) }
+  return { ...state, pending, failed: remember(state.failed, requestId) }
 }
 
 export interface Reconciled {
@@ -59,8 +77,7 @@ export const reconcileMutation = (
           writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
         store,
       )
-  const applied = new Set(state.applied)
-  applied.add(requestId)
+  const applied = remember(state.applied, requestId)
   const pending = new Set(state.pending)
   pending.delete(requestId)
   return { store: next, state: { ...state, applied, pending } }
