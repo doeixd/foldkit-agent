@@ -43,7 +43,9 @@ const ProjectBinding = entity('Project', projects, {
 
 describe('RemoteDrizzle', () => {
   it('derives an Entity Schema from the table', () => {
-    expect(UserBinding.Schema).toBeDefined()
+    const row = { id: '123e4567-e89b-42d3-a456-426614174000', name: 'Ada', email: 'a@b.c' }
+
+    expect(Schema.decodeUnknownSync(UserBinding.Schema)(row)).toEqual(row)
   })
 
   it('always projects the primary key, selected fields, and relation keys', () => {

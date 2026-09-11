@@ -18,7 +18,7 @@ export interface RelationBinding {
 export interface EntityBinding<Name extends string, Table extends PgTable> {
   readonly name: Name
   readonly table: Table
-  readonly Schema: Schema.Schema<unknown>
+  readonly Schema: Schema.Codec<unknown>
   readonly columns: Readonly<Record<string, AnyColumn>>
   readonly relations: Readonly<Record<string, RelationBinding>>
 }
@@ -27,13 +27,13 @@ export const entity = <const Name extends string, Table extends PgTable>(
   name: Name,
   table: Table,
   options?: {
-    readonly schema?: Schema.Schema<unknown> | undefined
+    readonly schema?: Schema.Codec<unknown> | undefined
     readonly relations?: Readonly<Record<string, RelationBinding>> | undefined
   },
 ): EntityBinding<Name, Table> => ({
   name,
   table,
   columns: getTableColumns(table),
-  Schema: options?.schema ?? (createSelectSchema(table) as unknown as Schema.Schema<unknown>),
+  Schema: options?.schema ?? (createSelectSchema(table) as unknown as Schema.Codec<unknown>),
   relations: options?.relations ?? {},
 })
