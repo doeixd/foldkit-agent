@@ -238,6 +238,27 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  packages/mixins-ui:
+    devDependencies:
+      '@foldkit/ui':
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)(foldkit@0.158.2(effect@4.0.0-rc.112))
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+      foldkit:
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)
+      foldkit-mixins:
+        specifier: workspace:*
+        version: link:../mixins
+      tsdown:
+        specifier: ^0.23.0
+        version: 0.23.0(tsx@4.23.13)(typescript@5.9.3)(unrun@0.3.1)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/remote:
     dependencies:
       foldkit-surface:
@@ -1177,6 +1198,13 @@ packages:
 
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
+
+  '@foldkit/ui@0.158.2':
+    resolution: {integrity: sha512-0bAIsQ8hiL0ilc0mzM19G6QF0VnrvedL0y1IzTilR8Su/mW/uOEMqKQXS6onWNYWI6Xsw9fTszJ0xhGHj/BvxQ==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      effect: 4.0.0-rc.112
+      foldkit: '>=0.155.0'
 
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
@@ -7474,6 +7502,12 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@foldkit/ui@0.158.2(effect@4.0.0-rc.112)(foldkit@0.158.2(effect@4.0.0-rc.112))':
+    dependencies:
+      '@floating-ui/dom': 1.8.0
+      effect: 4.0.0-rc.112
+      foldkit: 0.158.2(effect@4.0.0-rc.112)
 
   '@hono/node-server@2.1.1(hono@4.13.7)':
     dependencies:

@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
-import { Entity, RemoteData, Selection, type EntityRef } from '../src/index.js'
+import type { ModelRef } from 'foldkit-surface'
+import { Entity, Remote, RemoteData, Selection, type EntityRef } from '../src/index.js'
 
 const User = Entity.make(
   'User',
@@ -57,3 +58,13 @@ RemoteData.match(initial, {
   Refreshing: () => 0,
   NotFound: () => 0,
 })
+
+// --- Remote.at requires the Remote model shape ------------------------------
+
+const Data = Remote.make({ entities: [User] })
+declare const goodStore: ModelRef<unknown, Schema.Schema.Type<typeof Data.Model>>
+Remote.at(Data, goodStore)
+
+declare const wrongStore: ModelRef<unknown, { readonly entities: string }>
+// @ts-expect-error a focus without the Remote model shape is not a store
+Remote.at(Data, wrongStore)

@@ -1,0 +1,48 @@
+{
+  "name": "foldkit-mixins-ui",
+  "version": "0.0.0",
+  "description": "Published slot contracts and mixin adapters for @foldkit/ui, built on foldkit-mixins.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Patrick Glenn <doeixd@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doeixd/foldkit-plus.git",
+    "directory": "packages/mixins-ui"
+  },
+  "homepage": "https://github.com/doeixd/foldkit-plus/tree/main/packages/mixins-ui#readme",
+  "bugs": {
+    "url": "https://github.com/doeixd/foldkit-plus/issues"
+  },
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -b"
+  },
+  "peerDependencies": {
+    "@foldkit/ui": "^0.158.2",
+    "effect": "^4.0.0-rc.112",
+    "foldkit": "^0.158.2",
+    "foldkit-mixins": "workspace:^"
+  },
+  "devDependencies": {
+    "@foldkit/ui": "0.158.2",
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "foldkit-mixins": "workspace:*",
+    "tsdown": "^0.23.0",
+    "typescript": "^5.7.2"
+  }
+}

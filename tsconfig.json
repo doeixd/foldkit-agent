@@ -13,6 +13,7 @@
     { "path": "./packages/remote-server" },
     { "path": "./packages/remote-drizzle" },
     { "path": "./packages/mixins" },
+    { "path": "./packages/mixins-ui" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" }
   ]

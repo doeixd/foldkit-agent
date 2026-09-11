@@ -264,14 +264,29 @@ export const RemoteData = {
   },
 }
 
+/** The Remote scope's slot in the application Model. */
+export interface RemoteModel {
+  readonly entities: EntityStore
+  readonly connections: Readonly<Record<string, unknown>>
+  readonly requests: Readonly<Record<string, unknown>>
+  readonly mutations: Readonly<Record<string, unknown>>
+}
+
+/**
+ * `EntityStore` is a runtime value (Sets and all), not a wire shape, and the
+ * store is built in memory rather than decoded. This schema carries the layout
+ * for `RemoteModel` without pretending to validate the entries.
+ */
+const entityStoreSchema = Schema.Unknown as unknown as Schema.Schema<EntityStore>
+
 const remoteModelSchema = (): Schema.Struct<{
-  readonly entities: Schema.Schema<Readonly<Record<string, unknown>>>
+  readonly entities: Schema.Schema<EntityStore>
   readonly connections: Schema.Schema<Readonly<Record<string, unknown>>>
   readonly requests: Schema.Schema<Readonly<Record<string, unknown>>>
   readonly mutations: Schema.Schema<Readonly<Record<string, unknown>>>
 }> =>
   Schema.Struct({
-    entities: Schema.Record(Schema.String, Schema.Unknown),
+    entities: entityStoreSchema,
     connections: Schema.Record(Schema.String, Schema.Unknown),
     requests: Schema.Record(Schema.String, Schema.Unknown),
     mutations: Schema.Record(Schema.String, Schema.Unknown),
@@ -282,17 +297,14 @@ export interface RemoteDescriptor<Model extends Schema.Struct<Schema.Struct.Fiel
   readonly Model: Model
 }
 
-export interface BoundRemote<AppModel, Store> {
+export interface BoundRemote<AppModel, Store extends RemoteModel> {
   readonly store: ModelRef<AppModel, Store>
 }
 
-const storeOf = <AppModel, Store>(
+const storeOf = <AppModel, Store extends RemoteModel>(
   bound: BoundRemote<AppModel, Store>,
   model: AppModel,
-): EntityStore => {
-  const remote = bound.store.get(model) as unknown as { readonly entities?: EntityStore }
-  return remote.entities ?? {}
-}
+): EntityStore => bound.store.get(model).entities
 
 /**
  * The transport boundary. `foldkit-remote` never talks to a transport directly;
@@ -328,7 +340,7 @@ export const Remote = {
   }),
 
   /** Binds a Remote scope to its store's location in the application Model. */
-  at: <AppModel, Store>(
+  at: <AppModel, Store extends RemoteModel>(
     _definition: RemoteDescriptor<any>,
     store: ModelRef<AppModel, Store>,
   ): BoundRemote<AppModel, Store> => ({ store }),
@@ -340,14 +352,16 @@ export const Remote = {
    * as `Failed` instead of being asserted into `Value`.
    */
   select:
-    <AppModel, Store, Value>(bound: BoundRemote<AppModel, Store>, selection: Selection<Value>) =>
+    <AppModel, Store extends RemoteModel, Value>(
+      bound: BoundRemote<AppModel, Store>,
+      selection: Selection<Value>,
+    ) =>
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
       Model: remoteDataSchema(selection.schema),
       dependencies: [],
       requirements: [{ entity: selection.entity, id, fields: selection.fields }],
       read: (root: AppModel): RemoteData<Value> => {
-        const remote = bound.store.get(root) as unknown as { readonly entities?: EntityStore }
-        const store = remote.entities ?? {}
+        const store = storeOf(bound, root)
         const key = entityKey(selection.entity, id)
         if (isTombstone(store, key)) return { _tag: 'NotFound' }
         const values: Record<string, unknown> = {}
@@ -376,14 +390,14 @@ export const Remote = {
   ): ReadonlyArray<Requirement> => plan(store, projection.requirements),
 
   /** The pure plan for a projection against a Model, reading its remote store. */
-  observeProjection: <AppModel, Store, Value>(
+  observeProjection: <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     projection: Projection<AppModel, Value>,
   ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements),
 
   /** The pure plan for a Surface's projection. */
-  planSurface: <AppModel, Store, Model, Message, Params>(
+  planSurface: <AppModel, Store extends RemoteModel, Model, Message, Params>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     surface: Surface<AppModel, Model, Message, Params>,
@@ -395,7 +409,7 @@ export const Remote = {
    * Executes the plan against the `RemoteClient` and returns a new store. Used
    * for SSR route prefetch, hover prefetch, and tests. Never called during render.
    */
-  prefetch: Effect.fn('Remote.prefetch')(function* <AppModel, Store, Value>(
+  prefetch: Effect.fn('Remote.prefetch')(function* <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     projection: Projection<AppModel, Value>,
@@ -442,7 +456,7 @@ export const Remote = {
    * Model and fetches them through `RemoteClient`, emitting a Message per batch.
    * Pass the returned entry into the application's `Subscription.make` record.
    */
-  observe: <AppModel, Store, Model, SurfaceMessage, Params, Message>(
+  observe: <AppModel, Store extends RemoteModel, Model, SurfaceMessage, Params, Message>(
     bound: BoundRemote<AppModel, Store>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
@@ -489,7 +503,7 @@ export const Remote = {
    * `onResumeUnavailable`, so the app invalidates and refetches rather than
    * silently missing events.
    */
-  live: <AppModel, Store, Model, SurfaceMessage, Params, Message>(
+  live: <AppModel, Store extends RemoteModel, Model, SurfaceMessage, Params, Message>(
     bound: BoundRemote<AppModel, Store>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,

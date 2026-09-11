@@ -37,6 +37,15 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   (missing or hidden slot, capability mismatch, missing event or attribute). It
   is pure and DOM-independent. The UI/Surface adapters are not in this slice.
 
+### `foldkit-mixins-ui` (private)
+
+- **`@foldkit/ui` adapter.** New private package formalizing the attribute
+  bundles of Button, Input, Checkbox, and Disclosure as `Slots`, and resolving
+  attached Mixins into them. Base attributes, event Messages and
+  `ChildAttribute`s are preserved; a Behavior cannot take over an event the
+  component already owns. The remaining components and the Surface adapter are
+  not in this slice.
+
 ### `foldkit-agent`
 
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The

@@ -217,6 +217,23 @@ override even when a later attachment would otherwise win.
 - `Diagnostic.source` widened to `'mixins' | 'a11y'`, so both layers share one
   data shape and tooling consumes them uniformly.
 
+### `@foldkit/ui` adapter (`foldkit-mixins-ui`)
+
+- A separate package: `foldkit-mixins-ui` peers on `@foldkit/ui`, `effect`,
+  `foldkit`, and `foldkit-mixins`, so core stays free of `@foldkit/ui`.
+- `@foldkit/ui` components do not own markup: they build typed attribute bundles
+  and hand them to a consumer `toView`. The adapter formalizes those bundles as
+  `Slots` and `resolve` merges attached Mixins per bundle. Base attributes, event
+  Messages and `ChildAttribute`s are preserved by identity; non-slot entries
+  (`Disclosure.animatePanel`) pass through unchanged.
+- Published contracts: Button (`button`), Input (`input`/`label`/`description`),
+  Checkbox (`checkbox`/`label`/`description`/`hiddenInput`), Disclosure
+  (`button`/`panel`). A slot advertises the capability, events and attributes a
+  Behavior may require; the base bundle's ownership is what turns taking over a
+  click into a `mixins:event-conflict` rather than a second silent handler.
+- The later component set (Dialog, Menu, Tabs, ComboBox, ...) and the Surface
+  adapter remain.
+
 ## Phase plan (this package)
 
 0. Probes — this file. Done.
@@ -228,7 +245,7 @@ override even when a later attachment would otherwise win.
 6. Behavior v1 (no hidden state). Done.
 7. Mount composition. Done.
 8. A11y patterns + diagnostics. Done.
-9. `@foldkit/ui` adapter (separate package).
+9. `@foldkit/ui` adapter (separate package). Button/Input/Checkbox/Disclosure done.
 10. Surface adapter (separate package).
 
 Style CSS compiler, DevTools, and agent metadata wait until the core
