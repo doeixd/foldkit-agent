@@ -11,6 +11,7 @@
     { "path": "./packages/surface" },
     { "path": "./packages/remote" },
     { "path": "./packages/remote-server" },
+    { "path": "./packages/remote-drizzle" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" }
   ]
