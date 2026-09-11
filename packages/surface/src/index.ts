@@ -112,6 +112,13 @@ function optionalReader(value: unknown): Option.Option<unknown> {
   return value === undefined ? Option.none() : Option.some(value)
 }
 
+/** Reads the tag off a Foldkit Message constructor without constructing one. */
+const messageTag = (constructor: unknown): string | undefined => {
+  const literal = (constructor as { fields?: { _tag?: { ast?: { literal?: unknown } } } }).fields
+    ?._tag?.ast?.literal
+  return typeof literal === 'string' ? literal : undefined
+}
+
 function makeTree(
   schema: AnySchema,
   path: readonly string[],
@@ -491,6 +498,11 @@ type MsgOf<Ms extends readonly unknown[]> = {
   readonly [K in keyof Ms]: Ms[K] extends (...args: never[]) => infer M ? M : never
 }[number]
 
+/** The union of Messages a tuple of constructors produces. */
+type SubsetOf<Ms extends readonly unknown[]> = Ms[number] extends (...args: never[]) => infer M
+  ? M
+  : never
+
 type AppMessage<Cases extends Record<string, Schema.Struct.Fields>> = Schema.Schema.Type<
   MessageUnion<Cases>
 >
@@ -547,6 +559,28 @@ export interface Application<
   ) => Update.Return<Root, Schema.Schema.Type<MessageUnion<Cases>>>
 }
 
+declare const messageSubsetRoot: unique symbol
+
+/**
+ * A typed subset of one application's Messages: the selected constructors, a
+ * codec for exactly those variants, and a runtime membership test. Surface does
+ * not label a subset agent-visible, durable, or presence; `Agent` and `Sync`
+ * attach their own policy to the same value.
+ */
+export interface MessageSubset<
+  Root,
+  Message,
+  Subset extends Message,
+  Ms extends readonly ((...args: never[]) => Message)[],
+> {
+  /** Phantom owner, so a subset cannot be crossed between applications. */
+  readonly [messageSubsetRoot]?: Root
+  readonly constructors: Ms
+  readonly schema: Schema.Schema<Subset>
+  readonly tags: ReadonlySet<string>
+  readonly includes: (message: Message) => message is Subset
+}
+
 const makeScope = <
   F extends Schema.Struct.Fields,
   Cases extends Record<string, Schema.Struct.Fields>,
@@ -600,6 +634,51 @@ export const Surface = {
   }): Application<Schema.Struct.Type<F>, F, Cases> => {
     const scope = makeScope(config)
     return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
+  },
+
+  /**
+   * Selects a typed Message subset by constructor reference:
+   * `Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])`. Each
+   * constructor must be this application's own variant; a duplicate or a variant
+   * from another union throws.
+   */
+  messages: <
+    Root,
+    F extends Schema.Struct.Fields,
+    Cases extends Record<string, Schema.Struct.Fields>,
+    const Ms extends readonly MessageConstructor<Cases>[],
+  >(
+    app: AppScope<Root, F, Cases>,
+    messages: Ms,
+  ): MessageSubset<
+    Root,
+    Schema.Schema.Type<MessageUnion<Cases>>,
+    SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
+    Ms
+  > => {
+    const tags = new Set<string>()
+    for (const constructor of messages) {
+      const tag = messageTag(constructor)
+      if (tag === undefined) {
+        throw new Error('Surface.messages: expected Message constructors')
+      }
+      if ((app.Message as unknown as Record<string, unknown>)[tag] !== constructor) {
+        throw new Error(
+          `Surface.messages: "${tag}" is not a variant of this application's Message union`,
+        )
+      }
+      if (tags.has(tag)) throw new Error(`Surface.messages: duplicate "${tag}"`)
+      tags.add(tag)
+    }
+    return {
+      constructors: messages,
+      schema: Schema.Union([...messages] as unknown as ReadonlyArray<
+        Schema.Schema<unknown>
+      >) as unknown as Schema.Schema<SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>>,
+      tags,
+      includes: (message): message is SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>> =>
+        tags.has((message as { readonly _tag?: string })._tag ?? ''),
+    }
   },
 
   /**
