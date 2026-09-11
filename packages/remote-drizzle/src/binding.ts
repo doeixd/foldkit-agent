@@ -192,12 +192,26 @@ export const entity = <const Name extends string, Table extends PgTable>(
       )
     }
   }
+  const computed = options?.computed ?? {}
+  for (const [field, config] of Object.entries(computed)) {
+    if (columns[field] !== undefined || relations[field] !== undefined) {
+      throw new Error(
+        `[foldkit-remote-drizzle] computed field "${field}" on entity "${name}" collides with a column or relation`,
+      )
+    }
+    const relation = relations[config.relation]
+    if (relation === undefined || relation.kind === 'one') {
+      throw new Error(
+        `[foldkit-remote-drizzle] computed field "${field}" on entity "${name}" needs a collection relation named "${config.relation}"`,
+      )
+    }
+  }
   return {
     name,
     table,
     columns,
     Schema: (options?.schema ?? createSelectSchema(table)) as SelectSchema<Table>,
     relations,
-    computed: options?.computed ?? {},
+    computed,
   }
 }

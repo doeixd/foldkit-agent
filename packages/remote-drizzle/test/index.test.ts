@@ -149,4 +149,26 @@ describe('RemoteDrizzle', () => {
       }),
     ).toThrow(/collides with a column/)
   })
+
+  it('rejects a computed field that collides or names a non-collection relation', () => {
+    expect(() =>
+      entity('Project', projects, {
+        relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+        computed: { name: { relation: 'owner' } },
+      }),
+    ).toThrow(/collides with a column or relation/)
+
+    expect(() =>
+      entity('Project', projects, {
+        computed: { ownerCount: { relation: 'missing' } },
+      }),
+    ).toThrow(/needs a collection relation/)
+
+    expect(() =>
+      entity('Project', projects, {
+        relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+        computed: { ownerCount: { relation: 'owner' } },
+      }),
+    ).toThrow(/needs a collection relation/)
+  })
 })
