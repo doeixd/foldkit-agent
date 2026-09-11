@@ -40,12 +40,13 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 - **Theme and recipes.** `Theme.define` is typed token data, with
   `Theme.variable`/`Theme.variables` compiling to CSS custom properties;
   `Style.recipe` is a typed variant selector returning Style data.
-- **Advanced Style compiler (started).** `Style.pseudo`/`media` compile to a
-  deterministic class (FNV-1a of the canonical rule text) plus CSS text on
-  `NamedStyle.css`; equal rules share a class. CSS is data, so SSR and the
-  browser agree and nothing mutates the DOM. Rules inside `Style.whenInput` are
-  rejected (`style:conditional-rules-unsupported`). Keyframes, layers,
-  container queries and nested selectors beyond `&` are not in this slice.
+- **Advanced Style compiler (started).** `Style.pseudo`/`media`/`supports`/
+  `container`/`nest` compile to a deterministic class (FNV-1a of the canonical
+  rule text) plus CSS text on `NamedStyle.css`; declarations are emitted
+  kebab-cased and equal rules share a class. CSS is data, so SSR and the browser
+  agree and nothing mutates the DOM. Rules inside `Style.whenInput` are rejected
+  (`style:conditional-rules-unsupported`). Keyframes, layers and global rules are
+  not in this slice.
 - **A11y patterns.** `A11y.pattern` is a portable requirements map and
   `A11y.validate` reports every mismatch as a stable `a11y:*` diagnostic
   (missing or hidden slot, capability mismatch, missing event or attribute). It

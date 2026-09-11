@@ -74,6 +74,23 @@ describe('Style rule compiler', () => {
     expect(Both.css).toContain('@media (min-width: 40rem)')
   })
 
+  it('compiles supports, container and nested selectors', () => {
+    const Combined = Style.forSlots(RuleSlots)({
+      root: Style.compose(
+        Style.supports('(display: grid)', { display: 'grid' }),
+        Style.container('(min-width: 30rem)', { gridTemplateColumns: '1fr 1fr' }),
+        Style.nest('> span', { color: 'red' }),
+      ),
+    })
+    const builders = SlotView.buildersFor(RuleSlots, [Combined.mixin], { input: undefined, h })
+    const generated = classValue(builders.root.attrs())
+    expect(Combined.css).toBe(
+      `@supports (display: grid){.${generated}{display:grid}}` +
+        `@container (min-width: 30rem){.${generated}{grid-template-columns:1fr 1fr}}` +
+        `.${generated} > span{color:red}`,
+    )
+  })
+
   it('shares a class for equal rules and not for different ones', () => {
     const one = Style.forSlots(RuleSlots)({ root: Style.pseudo(':hover', { color: 'red' }) })
     const two = Style.forSlots(RuleSlots)({ root: Style.pseudo(':hover', { color: 'red' }) })

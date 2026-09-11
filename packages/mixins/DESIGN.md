@@ -314,9 +314,10 @@ Status: started. v1 compiles rule-based Style to a deterministic class plus CSS
 text; collection stays caller-owned.
 
 - A `StyleRule` is `{ selector, at?, declarations }`. `selector` is relative to
-  the generated class and uses `&` (`&:hover`, `&[data-open]`).
-- `Style.pseudo(pseudo, declarations)` and `Style.media(query, declarations)`
-  produce a StyleValue carrying rules; `Style.compose` concatenates them.
+  the generated class and uses `&` (`&:hover`, `&[data-open]`). Declarations are
+  authored in camelCase and emitted kebab-cased.
+- `Style.pseudo`/`media`/`supports`/`container`/`nest` produce a StyleValue
+  carrying rules; `Style.compose` concatenates them.
 - Compilation is deterministic: declarations are sorted, rules keep authored
   order, and the class name is an FNV-1a base36 hash of the canonical rule text.
   Equal rules share a class; different rules differ.

@@ -28,10 +28,30 @@ export const pseudo = (suffix: string, declarations: Readonly<Record<string, str
 export const media = (query: string, declarations: Readonly<Record<string, string>>): StyleRule =>
   rule('&', declarations, `@media ${query}`)
 
+export const supports = (
+  condition: string,
+  declarations: Readonly<Record<string, string>>,
+): StyleRule => rule('&', declarations, `@supports ${condition}`)
+
+export const container = (
+  condition: string,
+  declarations: Readonly<Record<string, string>>,
+): StyleRule => rule('&', declarations, `@container ${condition}`)
+
+/** A nested selector relative to the class, e.g. `> span` or `[data-open] &`. */
+export const nest = (selector: string, declarations: Readonly<Record<string, string>>): StyleRule =>
+  rule(`& ${selector}`, declarations)
+
+/** `gridTemplateColumns` -> `grid-template-columns`; custom properties pass through. */
+const kebab = (property: string): string =>
+  property.startsWith('--')
+    ? property
+    : property.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`)
+
 const declarationsText = (declarations: Readonly<Record<string, string>>): string =>
   Object.keys(declarations)
     .sort()
-    .map(property => `${property}:${declarations[property]}`)
+    .map(property => `${kebab(property)}:${declarations[property]}`)
     .join(';')
 
 /** Canonical, declaration-sorted, authored-rule-order text for a rule list. */

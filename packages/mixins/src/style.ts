@@ -83,6 +83,39 @@ export const media = (query: string, declarations: Readonly<Record<string, strin
     rules: Object.freeze([Rules.media(query, declarations)]),
   })
 
+/** An at-rule, e.g. `Style.supports('(display: grid)', { display: 'grid' })`. */
+export const supports = (
+  condition: string,
+  declarations: Readonly<Record<string, string>>,
+): StyleValue =>
+  Object.freeze({
+    classes: empty.classes,
+    style: empty.style,
+    rules: Object.freeze([Rules.supports(condition, declarations)]),
+  })
+
+/** A container query, e.g. `Style.container('(min-width: 30rem)', {...})`. */
+export const container = (
+  condition: string,
+  declarations: Readonly<Record<string, string>>,
+): StyleValue =>
+  Object.freeze({
+    classes: empty.classes,
+    style: empty.style,
+    rules: Object.freeze([Rules.container(condition, declarations)]),
+  })
+
+/** A nested selector relative to the generated class, e.g. `Style.nest('> span', {...})`. */
+export const nest = (
+  selector: string,
+  declarations: Readonly<Record<string, string>>,
+): StyleValue =>
+  Object.freeze({
+    classes: empty.classes,
+    style: empty.style,
+    rules: Object.freeze([Rules.nest(selector, declarations)]),
+  })
+
 /** A boolean known at authoring time. */
 export const when = (condition: boolean, piece: StyleValue): StyleValue =>
   condition ? piece : empty
@@ -252,6 +285,9 @@ export const Style = {
   whenInput,
   pseudo,
   media,
+  supports,
+  container,
+  nest,
   empty,
   toContribution,
   forSlots,
