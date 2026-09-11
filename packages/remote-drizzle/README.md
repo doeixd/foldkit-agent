@@ -27,8 +27,19 @@ const User = entity('User', users)
 ```
 
 `entity(name, table, { schema?, relations? })` derives an Effect Schema from the
-table with `drizzle-orm/effect-schema` and exposes the table columns. Pass
-`schema` to override the derived Schema, and `relations` to name a foreign key:
+table with `drizzle-orm/effect-schema` and exposes the table columns. The derived
+Schema can seed the Remote Entity, so the table is declared once and the Entity
+still checks field names:
+
+```ts
+import { Entity } from 'foldkit-remote'
+
+const User = entity('User', users)
+const UserEntity = Entity.make('User', User.Schema)
+```
+
+Pass `schema` to override the derived Schema, and `relations` to name a foreign
+key:
 
 ```ts
 const User = entity('User', users)

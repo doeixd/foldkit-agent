@@ -5,10 +5,21 @@
  * Tech); see `THIRD_PARTY_NOTICES.md`.
  */
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
+import type { BuildSchema } from 'drizzle-orm/effect-schema'
 import { getTableColumns, type AnyColumn } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import type { Schema } from 'effect'
 import type { OrderTerm } from './cursor.js'
+
+/**
+ * The Effect select schema Drizzle derives for a table. Naming it lets an
+ * entity be built from a binding: `Entity.make(name, binding.Schema)`.
+ */
+export type SelectSchema<Table extends PgTable> = BuildSchema<
+  'select',
+  Table['_']['columns'],
+  undefined
+>
 
 export interface RelationTarget {
   readonly entity: EntityBinding<any, any>
@@ -130,7 +141,7 @@ const normalizeRelation = (config: RelationConfig): RelationBinding => {
 export interface EntityBinding<Name extends string, Table extends PgTable> {
   readonly name: Name
   readonly table: Table
-  readonly Schema: Schema.Codec<unknown>
+  readonly Schema: SelectSchema<Table>
   readonly columns: Readonly<Record<string, AnyColumn>>
   readonly relations: Readonly<Record<string, RelationBinding>>
 }
@@ -146,7 +157,7 @@ export const entity = <const Name extends string, Table extends PgTable>(
   name,
   table,
   columns: getTableColumns(table),
-  Schema: options?.schema ?? (createSelectSchema(table) as unknown as Schema.Codec<unknown>),
+  Schema: (options?.schema ?? createSelectSchema(table)) as SelectSchema<Table>,
   relations: Object.fromEntries(
     Object.entries(options?.relations ?? {}).map(([field, config]) => [
       field,
