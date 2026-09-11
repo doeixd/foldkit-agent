@@ -132,4 +132,38 @@ describe('Style rule compiler', () => {
     const generated = classValue(builders.root.attrs())
     expect(Style.stylesheet(Base)).toBe(`@layer base{}.${generated}:hover{color:red}`)
   })
+
+  it('keeps top-level rule CSS when the style also has an input condition', () => {
+    const Mixed = Style.forSlots(RuleSlots)({
+      root: Style.compose(
+        Style.pseudo(':hover', { color: 'red' }),
+        Style.whenInput<{ readonly on: boolean }>(input => input.on, Style.class('on')),
+      ),
+    })
+    expect(Mixed.css).toContain(':hover{color:red}')
+  })
+
+  it('emits global CSS contributed by a conditional piece', () => {
+    const Fade = Style.keyframes({ from: { opacity: '0' }, to: { opacity: '1' } })
+    const Mixed = Style.forSlots(RuleSlots)({
+      root: Style.whenInput<{ readonly on: boolean }>(input => input.on, Fade.style),
+    })
+    expect(Mixed.globalCss).toContain('@keyframes')
+  })
+
+  it('composes rule-bearing recipe variants', () => {
+    const Recipe = Style.recipe({
+      base: Style.class('button'),
+      variants: {
+        intent: {
+          primary: Style.pseudo(':hover', { color: 'red' }),
+          ghost: Style.class('ghost'),
+        },
+      },
+    })
+    const Primary = Style.forSlots(RuleSlots)({ root: Recipe({ intent: 'primary' }) })
+    const Ghost = Style.forSlots(RuleSlots)({ root: Recipe({ intent: 'ghost' }) })
+    expect(Primary.css).toContain(':hover{color:red}')
+    expect(Ghost.css).toBe('')
+  })
 })

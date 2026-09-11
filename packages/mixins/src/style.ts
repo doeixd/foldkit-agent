@@ -191,10 +191,16 @@ interface CompiledStyle {
   readonly globalCss?: string
 }
 
+/** Global CSS is emitted whether or not its condition is active. */
+const collectGlobalCss = (style: StyleValue): ReadonlyArray<string> => [
+  ...(style.globalCss ?? []),
+  ...(style.conditions ?? []).flatMap(condition => collectGlobalCss(condition.piece)),
+]
+
 /** A rule-bearing style gets one deterministic class and its CSS text. */
 const compileStyle = (style: StyleValue): CompiledStyle => {
   const rules = style.rules ?? []
-  const globalCss = style.globalCss ?? []
+  const globalCss = collectGlobalCss(style)
   const generated = rules.length === 0 ? undefined : Rules.className(rules)
   return {
     classes: generated === undefined ? style.classes : Object.freeze([...style.classes, generated]),
@@ -257,12 +263,12 @@ export const forSlots =
         })
       }
       if (piece !== undefined) {
-        const contribution = toContribution(piece)
-        contributions[key] = contribution
-        if (typeof contribution !== 'function') {
-          if (contribution.css !== undefined) css += contribution.css
-          if (contribution.globalCss !== undefined) globalCss += contribution.globalCss
-        }
+        contributions[key] = toContribution(piece)
+        // Rule and global CSS are static even when the contribution is deferred,
+        // so gather them from the compiled piece, not from the contribution.
+        const compiled = compileStyle(piece)
+        if (compiled.css !== undefined) css += compiled.css
+        if (compiled.globalCss !== undefined) globalCss += compiled.globalCss
       }
     }
     return Object.freeze({
