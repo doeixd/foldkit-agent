@@ -56,7 +56,11 @@ const ProjectCardSlots = Slots.define({
 
 const ProjectCardStyle = Style.forSlots(ProjectCardSlots)(
   {
-    root: Style.compose(Style.class('card'), Style.inline({ display: 'grid', gap: '0.5rem' })),
+    root: Style.compose(
+      Style.class('card'),
+      Style.inline({ display: 'grid', gap: '0.5rem' }),
+      Style.pseudo(':hover', { boxShadow: '0 1px 2px' }),
+    ),
     title: Style.class('card-title'),
     status: Style.whenInput<ProjectedModel>(
       input => input.project.archived,
@@ -156,5 +160,6 @@ export const runDemo = (): ReadonlyArray<string> => {
   lines.push(`root style: ${JSON.stringify(styleValue(resolved.root))}`)
   lines.push(`status classes: ${classTokens(resolved.status).join(' ')}`)
   lines.push(`archive aria-disabled: ${String(attributeValue(resolved.archive, 'AriaDisabled'))}`)
+  lines.push(`stylesheet: ${Style.stylesheet(ProjectCardStyle)}`)
   return lines
 }

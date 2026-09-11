@@ -103,10 +103,10 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
 
 - **Worked Surface + Mixins trace.** A `ProjectCard` Surface projects two fields
   and exposes two of the application's Messages; a SlotView styles and decorates
-  it (`Style.whenInput`, a Behavior reading the projected input). The demo prints
-  the observation set, slot contracts, mixin names, projected model and resolved
-  attributes; `pnpm demo` runs it and a test asserts every line. Remote is not
-  part of this example.
+  it (`Style.whenInput`, `Style.pseudo`, a Behavior reading the projected input).
+  The demo prints the observation set, slot contracts, mixin names, projected
+  model, resolved attributes and the compiled stylesheet; `pnpm demo` runs it and
+  a test asserts every line. Remote is not part of this example.
 
 ### `foldkit-agent`
 

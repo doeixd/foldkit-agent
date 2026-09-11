@@ -16,10 +16,11 @@ observes: project, selection
 slots: root(Container), title(Container), status(Container), archive(Interactive)
 mixins: ProjectCardStyle, ArchiveBehavior
 projected: {"project":{"name":"Apollo","archived":true},"selection":"p1"}
-root classes: card
+root classes: card style-yow16s
 root style: {"display":"grid","gap":"0.5rem"}
 status classes: archived
 archive aria-disabled: true
+stylesheet: .style-yow16s:hover{box-shadow:0 1px 2px}
 ```
 
 Read it as: the Surface decides what the card may observe (`project`,
@@ -28,5 +29,10 @@ Read it as: the Surface decides what the card may observe (`project`,
 input, not the root Model. The root-only `internalNotes` field never reaches the
 renderer, and `DeleteProject` is not in the Surface's Message set, so a `toView`
 cannot emit it.
+
+`Style.pseudo(':hover', …)` compiles to one deterministic class
+(`style-yow16s`) plus CSS text; `Style.stylesheet(ProjectCardStyle)` is the
+`<style>` block the application would inject. The class is a hash of the rule, so
+it is identical on the server and the client.
 
 `test/demo.test.ts` asserts every line, so the trace cannot silently drift.
