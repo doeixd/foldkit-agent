@@ -299,6 +299,55 @@ describe('the journal adapter', () => {
       guarded.close()
     }
   })
+
+  it('refuses a compacted identity reused with a different payload without settling', async () => {
+    let notifications = 0
+    const guarded = openJournal(':memory:', {
+      effects: message =>
+        message._tag === 'RenamedTodo'
+          ? [
+              {
+                name: 'notify',
+                run: async () => {
+                  notifications += 1
+                },
+              },
+            ]
+          : [],
+    })
+    try {
+      guarded.append(operation('seed', 1, created('todo')), principal)
+      const a = await open('a')
+      await a.submit(Message.RenamedTodo({ id: 'todo', title: 'renamed' }))
+      await expect(
+        a.synchronize({
+          exchange: async (cursor, pending) => {
+            await guarded.transport(principal).exchange(cursor, pending)
+            throw new Error('connection lost')
+          },
+        }),
+      ).rejects.toThrow('connection lost')
+      guarded.compact('todos', 2)
+      expect(notifications).toBe(1)
+
+      // a:1 is committed and compacted. Reusing that opId with a different
+      // payload must conflict, and must not settle an effect for the
+      // replacement payload that never entered the state machine.
+      await expect(
+        guarded
+          .transport(principal)
+          .exchange(0, [
+            operation('a', 1, Message.RenamedTodo({ id: 'todo', title: 'malicious' })),
+          ]),
+      ).rejects.toThrow()
+      expect(notifications).toBe(1)
+      expect(guarded.snapshot('todos').model).toEqual({
+        todos: [{ id: 'todo', title: 'renamed' }],
+      })
+    } finally {
+      guarded.close()
+    }
+  })
 })
 
 describe('the wired replica', () => {
