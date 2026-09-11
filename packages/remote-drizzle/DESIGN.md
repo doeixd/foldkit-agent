@@ -103,6 +103,9 @@ when the read is for a **single parent**; otherwise it is ambiguous.
 
 ## D2 — Window-change refetch
 
+**Status: implemented in `8bdebdd`.** The analysis below is the reasoning that
+led to it.
+
 ### Current behaviour
 
 `plan` calls `missingFields(store, key, fields)`, which returns a field unless
@@ -278,9 +281,9 @@ dialects in one client is a bug factory.
 
 ## Suggested sequence
 
-1. **D2 (window-change refetch)** — fix the shipped trap before building on it.
-   It is correctness, not a feature, and it establishes `Remote.writeRead`, which
-   D1 wants.
+1. **D2 (window-change refetch)** — done (`8bdebdd`): `EntityEntry.windows`,
+   `Remote.writeRead`, and persistence version 2. It established the shared
+   write path D1 wants.
 2. **D1 server cursor (A2)** — complete the adapter for single-parent relations.
 3. **Nullable ordering fix** — required before cursoring nullable columns.
 4. **D1 client accumulation (B2 -> B3, B4 long-term)** — the library-grade
@@ -295,7 +298,7 @@ dialects in one client is a bug factory.
 | --- | --- | --- | --- | --- |
 | D1 cursor | A2 single-parent, C1 id cursor | M | adapter + server | No load-more for batched relations |
 | D1 accumulation | B2 now, B3 next, B4 long-term | L | client model | Apps own merge correctness |
-| D2 window change | A2 record applied window | M | store + persistence + read path | Silent stale page on window change |
+| D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
 | D3 relation authz | A1/A5 now, A2 row-level later | S–M | adapter (A2) | Reveals target ids |
 | D4 computed | A1 defer, A2 counts later | S–M | adapter | No aggregates |
 | Nullable ordering | Fix before nullable cursors | S | cursor kernel | Invalid SQL on a null cursor |
