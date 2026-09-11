@@ -204,6 +204,18 @@ export const applyConnectionEvent = (
 export const isStale = (state: LiveState, connection: string): boolean =>
   state.stale.has(connection)
 
+/**
+ * Clears a connection's stale mark once a fresh page has been adopted. An
+ * invalidating event only records that a refetch is due; whoever merges the
+ * refetched page calls this so `isStale` stops reporting.
+ */
+export const refreshConnection = (state: LiveState, connection: string): LiveState => {
+  if (!state.stale.has(connection)) return state
+  const stale = new Set(state.stale)
+  stale.delete(connection)
+  return { ...state, stale }
+}
+
 /** `hasPrevious` accounting for edges recorded outside the loaded boundary. */
 export const liveHasPrevious = (
   connection: Connection,

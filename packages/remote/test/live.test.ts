@@ -16,9 +16,11 @@ import {
   applyEntityEvent,
   classifyLive,
   emptyLiveState,
+  invalidateConnection,
   isStale,
   liveHasNext,
   liveHasPrevious,
+  refreshConnection,
   shouldWake,
 } from '../src/live.js'
 import { addOverlay, emptyOptimistic, visibleItems } from '../src/optimistic.js'
@@ -207,5 +209,13 @@ describe('Live data', () => {
     })
     expect(isStale(result.state, 'Feed')).toBe(true)
     expect(result.outcome).toBe('applied')
+  })
+
+  it('refreshConnection clears only the refreshed connection', () => {
+    const stale = invalidateConnection(invalidateConnection(emptyLiveState, 'Feed'), 'Inbox')
+    const refreshed = refreshConnection(stale, 'Feed')
+
+    expect(isStale(refreshed, 'Feed')).toBe(false)
+    expect(isStale(refreshed, 'Inbox')).toBe(true)
   })
 })
