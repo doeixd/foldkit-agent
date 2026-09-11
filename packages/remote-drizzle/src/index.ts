@@ -221,7 +221,13 @@ export const source = <P = unknown>(
         const relation = binding.relations[field]
         if (relation === undefined) continue
 
+        const window = context.windows?.[field]
         if (relation.kind === 'one') {
+          if (window !== undefined) {
+            return yield* new RemoteServerError({
+              message: `Relation "${field}" is singular and cannot be windowed`,
+            })
+          }
           for (const row of rows) {
             const id = row[field]
             row[field] =
@@ -241,7 +247,6 @@ export const source = <P = unknown>(
           ...new Set(rows.map(row => row[field]).filter(key => key !== null && key !== undefined)),
         ]
 
-        const window = context.windows?.[field]
         if (window !== undefined) {
           if (
             window.last !== undefined ||

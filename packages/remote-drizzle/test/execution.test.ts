@@ -327,6 +327,26 @@ describe('RemoteDrizzle execution', () => {
     if (result._tag === 'Failure') expect(result.failure.message).toMatch(/only a first window/)
   })
 
+  it('rejects a window on a singular relation', async () => {
+    const { database } = fakeDatabaseQueue([[{ id: 'p1', name: 'P', owner: 'u1' }]])
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        source(ProjectBinding)
+          .read({
+            ids: ['p1'],
+            fields: ['id', 'owner'],
+            principal: null,
+            windows: { owner: { first: 1 } },
+          })
+          .pipe(Effect.provideService(DrizzleDatabase, database)),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag === 'Failure') expect(result.failure.message).toMatch(/singular/)
+  })
+
   it('loads a many-to-many relation through the join table', async () => {
     const { database, calls } = fakeDatabaseQueue([
       [{ id: 'p1', tags: 'p1' }],
