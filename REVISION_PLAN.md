@@ -1566,6 +1566,12 @@ const journal = yield* makeJournal({
 | Live delivery | Ordered per stream, deduped, monotonic resume cursor, explicit `ResumeUnavailable` | A streaming transport alone does not make live reliable. |
 | Live/optimistic dedupe | Stable `MutationId`/`LiveEventId`/`EdgeIdentity`; overlays know their settler | Prevents triple inserts from optimistic + mutation + live. |
 | Live insertion policy | Per connection: `visible`/`boundary`/`invalidate`/`ignore` | An insert at the head must not disturb a middle window. |
+| Dependency shape | `readonly string[]`, absolute from the Root Model; `Projection.of` on a raw Schema contributes none | Only a `ModelRef` knows a Model path; a raw-Schema projection is not a Model projection. |
+| Dependency merge | `struct`/`array`/`option`/`select` union and de-duplicate; result is order-independent | Masking, DevTools, and invalidation read one canonical set. |
+| `ModelRef.select` on an optional focus | Maps inside `Option`, preserving absence (`Projection<Root, Option<P>>`) | No silent collapse of `Option<Option<A>>`. |
+| `Projection.array`/`option` | Wrap the whole value (`ReadonlyArray<Root>→ReadonlyArray<Value>`, `Option<Root>→Option<Value>`) | Avoids accidental double-wrap; nesting stays explicit. |
+| `Surface.registry` | Explicit descriptor; throws on a duplicate `name` | No hidden global registry; fail fast. |
+| Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; resolution is Phase 1 slice 5 | A field must not silently shadow a method. |
 
 ---
 
