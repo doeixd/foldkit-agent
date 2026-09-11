@@ -206,7 +206,9 @@ What an application does next:
 [`examples/sync`](../examples/sync) runs the whole path: a SQLite journal,
 IndexedDB replicas, a `ws` transport, an agent bound to the shared replica, and a
 demo that takes two clients offline, converges them, and replays server-authority
-effects exactly once. `pnpm demo` runs it.
+effects through the durable ledger (recorded successes are reused; a crash between
+the external action and its record can repeat it — see the durable README).
+`pnpm demo` runs it.
 
 The package READMEs — [`foldkit-durable`](../packages/durable) and
 [`foldkit-sync`](../packages/sync) — document the full APIs.
