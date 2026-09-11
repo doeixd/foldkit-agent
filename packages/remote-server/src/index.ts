@@ -100,6 +100,13 @@ export interface ServerDefinition<P, R = never> {
   readonly queries: ReadonlyMap<string, QuerySource<P, R>>
 }
 
+/** A read batch may not carry more than this many distinct ids per entity. */
+const DEFAULT_MAX_IDS_PER_ENTITY = 1000
+
+export interface HandlerOptions {
+  readonly maxIdsPerEntity?: number | undefined
+}
+
 export const RemoteServer = {
   entity: <P = unknown, R = never>(
     entity: EntityDescriptor<any, any>,
@@ -171,6 +178,7 @@ export const RemoteServer = {
   handlers: <P, R>(
     server: ServerDefinition<P, R>,
     principal: P,
+    options: HandlerOptions = {},
   ): {
     readonly FoldkitRemoteRead: (
       payload: Schema.Schema.Type<typeof ReadBatch>,
@@ -211,6 +219,9 @@ export const RemoteServer = {
       for (const [name, group] of grouped) {
         const source = server.entities.get(name)
         if (source === undefined) continue
+        if (group.ids.length > (options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)) {
+          return yield* new RemoteReadError({ message: `Too many "${name}" ids in one read batch` })
+        }
         const requested = [...group.fields]
         const permitted =
           source.authorize === undefined ? requested : source.authorize(principal, requested)

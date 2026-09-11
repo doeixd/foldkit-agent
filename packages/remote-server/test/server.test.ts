@@ -377,4 +377,47 @@ describe('RemoteServer', () => {
 
     expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { name: 'name:7' } }])
   })
+
+  it('refuses a read batch that exceeds the per-entity id limit', async () => {
+    const server = RemoteServer.make(
+      {},
+      {
+        entities: [
+          RemoteServer.entity<string>(User, {
+            read: ({ ids, fields }) =>
+              Effect.succeed(
+                ids.map(id => ({
+                  id,
+                  values: Object.fromEntries(fields.map(field => [field, field])),
+                })),
+              ),
+          }),
+        ],
+      },
+    )
+    const limited = RemoteRpc.toLayer({
+      ...RemoteServer.handlers(server, 'user', { maxIdsPerEntity: 2 }),
+      FoldkitRemoteLive: () => Stream.empty,
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const client = yield* RpcTest.makeClient(RemoteRpc)
+            return yield* client.FoldkitRemoteRead({
+              requests: [
+                { entity: 'User', id: 'a', fields: ['id'] },
+                { entity: 'User', id: 'b', fields: ['id'] },
+                { entity: 'User', id: 'c', fields: ['id'] },
+              ],
+            })
+          }),
+        ).pipe(Effect.provide(limited)),
+      ),
+    )
+
+    expect(result._tag).toBe('Failure')
+    if (result._tag === 'Failure') expect(result.failure._tag).toBe('RemoteReadError')
+  })
 })
