@@ -76,6 +76,9 @@ const _userSummary: Projection<
   { readonly id: string; readonly name: string }
 > = UserSummary
 
+const emptySelection = Projection.of(User.schema)({})
+const _emptySelection: Projection<Schema.Schema.Type<typeof User.schema>, {}> = emptySelection
+
 const ProjectSummary = Projection.of(Project.schema)({
   id: true,
   name: true,

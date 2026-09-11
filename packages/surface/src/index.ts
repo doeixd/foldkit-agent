@@ -149,6 +149,17 @@ function makeProjection<Value>(
   return { Model, dependencies, read }
 }
 
+/**
+ * `Schema.Struct({})` is not an empty-object schema: it accepts `{foo:1}`, `[]`,
+ * and `"str"` even with `onExcessProperty: 'error'`. A genuinely empty selection
+ * needs a `never`-valued record.
+ */
+function objectSchema(fields: Record<string, AnySchema>): AnySchema {
+  return Object.keys(fields).length === 0
+    ? Schema.Record(Schema.String, Schema.Never)
+    : Schema.Struct(fields)
+}
+
 type OfSelection<F extends Schema.Struct.Fields> = {
   readonly [K in keyof F]?: true | Projection<Schema.Schema.Type<F[K]>, unknown>
 }
@@ -200,7 +211,7 @@ export const Projection = {
         return out
       }
       return makeProjection(
-        Schema.Struct(picked),
+        objectSchema(picked),
         mergeDependencies(dependencies),
         read,
       ) as unknown as Projection<Schema.Struct.Type<F>, OfValue<F, Sel>>
@@ -232,7 +243,7 @@ export const Projection = {
       return out
     }
     return makeProjection(
-      Schema.Struct(picked),
+      objectSchema(picked),
       mergeDependencies(dependencies),
       read,
     ) as unknown as Projection<EntryRoot<Entries[keyof Entries]>, StructValue<Entries>>

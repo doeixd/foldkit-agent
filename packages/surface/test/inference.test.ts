@@ -107,6 +107,18 @@ describe('Surface runtime', () => {
     expect(Surface.registry(App, [a]).surfaces).toEqual([a])
   })
 
+  it('treats an empty selection as a strict empty object', () => {
+    // `Projection.Model` is the narrow `Schema.Schema` view; decode at the test
+    // boundary needs the full codec.
+    const decode = (schema: Schema.Schema<unknown>, input: unknown) =>
+      Schema.decodeUnknownSync(schema as unknown as Schema.ConstraintDecoder<unknown>)(input)
+
+    const empty = Projection.of(User.schema)({})
+    expect(empty.read({ id: 'u1', name: 'ada' })).toEqual({})
+    expect(decode(empty.Model, {})).toEqual({})
+    expect(() => decode(empty.Model, { id: 'u1' })).toThrow()
+  })
+
   it('starts a Remote selection as Initial', () => {
     const Data = Remote.make({ entities: [User] })
     const selection = Selection.make(User, { id: true, name: true })
