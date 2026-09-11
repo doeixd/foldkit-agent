@@ -13,6 +13,7 @@ type AnySchema = Schema.Schema<unknown>
 export * from './store.js'
 export * from './plan.js'
 export * from './connection.js'
+export * from './query.js'
 
 // ===========================================================================
 // Entity
