@@ -7,8 +7,25 @@
  * The cursor is opaque and is the row's identity: the executor re-reads the
  * ordering columns for that row and builds the predicate from those values, so
  * the wire cursor stays a string regardless of the ordered column types.
+ *
+ * NULL handling follows Postgres' default ordering (ASC: nulls last, DESC:
+ * nulls first), so a nullable ordering column sorts and pages correctly rather
+ * than emitting `col > NULL`.
  */
-import { and, asc, desc, eq, gt, lt, or, type AnyColumn, type SQL } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+  type AnyColumn,
+  type SQL,
+} from 'drizzle-orm'
 
 export interface OrderTerm {
   readonly column: AnyColumn
@@ -16,6 +33,32 @@ export interface OrderTerm {
 }
 
 export type Traversal = 'forward' | 'backward'
+
+/** Equality that treats a null cursor value as `IS NULL`, not `= NULL`. */
+const cursorEquality = (column: AnyColumn, value: unknown): SQL =>
+  value === null ? isNull(column) : eq(column, value)
+
+/**
+ * Rows after (forward) or before (backward) the cursor on one column. `false`
+ * means no row qualifies: with nulls last (ASC), nothing follows a null cursor;
+ * with nulls first (DESC), nothing precedes one.
+ */
+const cursorCompare = (
+  column: AnyColumn,
+  direction: OrderTerm['direction'],
+  value: unknown,
+  traversal: Traversal,
+): SQL => {
+  const ascending = direction === 'asc'
+  const forward = traversal === 'forward'
+  if (value === null) {
+    return (forward ? !ascending : ascending) ? isNotNull(column) : sql`false`
+  }
+  if (forward) {
+    return ascending ? or(gt(column, value), isNull(column))! : lt(column, value)
+  }
+  return ascending ? lt(column, value) : or(gt(column, value), isNull(column))!
+}
 
 /**
  * `(a CMP A) OR (a = A AND b CMP B) OR ...` — the lexicographic predicate that
@@ -28,14 +71,11 @@ export const keysetWhere = (
   traversal: Traversal,
 ): SQL | undefined => {
   if (terms.length === 0) return undefined
-  const forward = traversal === 'forward'
   const branches = terms.map((term, index) => {
-    const ascending = term.direction === 'asc'
-    const compare = ascending === forward ? gt : lt
     const equalities = terms
       .slice(0, index)
-      .map((previous, previousIndex) => eq(previous.column, values[previousIndex]))
-    const branch = compare(term.column, values[index])
+      .map((previous, previousIndex) => cursorEquality(previous.column, values[previousIndex]))
+    const branch = cursorCompare(term.column, term.direction, values[index], traversal)
     return equalities.length === 0 ? branch : and(...equalities, branch)!
   })
   return branches.length === 1 ? branches[0] : or(...branches)

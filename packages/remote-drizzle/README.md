@@ -111,6 +111,9 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 - The cursor is the row id. A cursor request re-reads that row's ordering tuple
   before the page query, so the wire cursor stays a string whatever the ordered
   column types are.
+- A nullable ordered column pages under Postgres' default NULL ordering (ASC:
+  nulls last, DESC: nulls first); the keyset predicate uses `IS NULL` / `IS NOT
+  NULL` rather than comparing a column to NULL.
 - The window is client-supplied: `first`/`last` are clamped to a positive integer
   under `maxPageSize` (default 100), and `after`/`before` or `first`/`last`
   cannot be combined.

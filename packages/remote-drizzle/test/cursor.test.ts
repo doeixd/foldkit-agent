@@ -34,6 +34,40 @@ describe('keysetWhere', () => {
     expect(predicate.params).toEqual(['e1'])
   })
 
+  it.each([
+    ['asc', 'forward', null, ['false'], [], []],
+    ['asc', 'forward', 'v', ['> $1', 'is null'], [], ['v']],
+    ['asc', 'backward', null, ['is not null'], [], []],
+    ['asc', 'backward', 'v', ['< $1'], ['is null'], ['v']],
+    ['desc', 'forward', null, ['is not null'], [], []],
+    ['desc', 'forward', 'v', ['< $1'], ['is null'], ['v']],
+    ['desc', 'backward', null, ['false'], [], []],
+    ['desc', 'backward', 'v', ['> $1', 'is null'], [], ['v']],
+  ] as const)('handles nulls: %s %s %s', (direction, traversal, value, present, absent, params) => {
+    const predicate = render([{ column: events.id, direction }], [value], traversal)
+    const sql = normalized(predicate)
+    for (const part of present) expect(sql).toContain(part)
+    for (const part of absent) expect(sql).not.toContain(part)
+    expect(predicate.params).toEqual([...params])
+  })
+
+  it('uses IS NULL for a null equality in a multi-column order', () => {
+    const predicate = render(
+      [
+        { column: events.createdAt, direction: 'desc' },
+        { column: events.id, direction: 'asc' },
+      ],
+      [null, 'e1'],
+      'forward',
+    )
+    const sql = normalized(predicate)
+
+    expect(sql).toContain('"events"."created_at" is not null')
+    expect(sql).toContain('"events"."created_at" is null')
+    expect(sql).toContain('"events"."id" > $1')
+    expect(predicate.params).toEqual(['e1'])
+  })
+
   it('builds lexicographic branches for a multi-column order', () => {
     const terms: ReadonlyArray<OrderTerm> = [
       { column: events.createdAt, direction: 'desc' },
