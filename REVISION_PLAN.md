@@ -798,6 +798,12 @@ whose `Result` is a single entity rather than a connection.
 
 ## 8. Remote
 
+> Implemented: the pure core and the Foldkit Submodel (`Remote.make` →
+> `Model`/`initial`/`Message`/`update`/`rpc`), `Remote.at`/`select` with a typed
+> entity registry, `observe`/`live`, `mutate`/`mutateInto`, persistence, the
+> server Sources, and the `FoldkitRemoteLive` handler. The snippets below are the
+> target API; where the shipped form differs it is noted inline.
+
 `foldkit-remote` provides what neither Foldkit nor Effect provides: normalized
 application-facing server state. Everything below the semantic layer is Effect.
 
@@ -809,7 +815,7 @@ const Data = Remote.make({
   queries: [ProjectsByOwner],
   mutations: [RenameProject],
 })
-// Data.Model, Data.Message, Data.update, Data.initial, Data.rpc, Data.registry
+// Data.Model, Data.Message, Data.update, Data.initial, Data.rpc
 
 const Model = Schema.Struct({ route: Route, session: Session, remote: Data.Model })
 const App = Surface.make({ Model, Message })
@@ -942,7 +948,7 @@ diffs it against the cache and returns the minimal missing/stale selections.
 const Read   = Rpc.make("FoldkitRemoteRead",   { payload: ReadBatch,      success: ReadBatchResult, error: RemoteReadError })
 const Mutate = Rpc.make("FoldkitRemoteMutate", { payload: MutationRequest, success: MutationResult,  error: RemoteMutationError })
 const Live   = Rpc.make("FoldkitRemoteLive",   { payload: LiveRequirement, success: LivePatch, error: RemoteLiveError, stream: true })
-const RemoteRpc = RpcGroup.make(Read, Mutate, Live)
+const RemoteRpc = RpcGroup.make(Read, Mutate, QueryRpc, Live)
 ```
 
 **Verified rc.112:** `Rpc.make(tag, { payload, success, error, stream: true })` — the
@@ -983,7 +989,9 @@ Verify exact syntax against rc.112.
 
 ```ts
 const subscriptions = (model: Model) => [
-  Remote.observe(AppRemote, ProjectPage, { projectId: model.route.projectId }),
+  Remote.observe(AppRemote, ProjectPage, { projectId: model.route.projectId }, message =>
+    GotRemote({ message }),
+  ),
 ]
 ```
 
@@ -1070,7 +1078,7 @@ const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
   }),
 )
 
-const Server = RemoteServer.make(Data, {
+const Server = RemoteServer.make({
   entities: [UserSource, ProjectSource],
   queries: [ProjectsByOwnerSource],
   mutations: [RenameProjectSource],
