@@ -20,7 +20,9 @@ import type { OrderTerm } from './cursor.js'
 export * from './binding.js'
 export * from './columns.js'
 export * from './cursor.js'
+export * from './page.js'
 export * from './pagination.js'
+export * from './window.js'
 
 /** The relations a Selection reads, for batched (two-stage) loading. */
 export const relationsFor = (
