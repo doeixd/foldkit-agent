@@ -125,6 +125,14 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
 - **Type a boundary from the side the runtime consumes.** Dispatch decodes, so
   its input type is the schema's *encoded* side. Typing it from the decoded side
   accepted `{value: 42}` and rejected the `{value: '42'}` that works.
+- **Drizzle's Effect driver does not load under the pinned Effect.**
+  `drizzle-orm@1.0.0-rc.4`'s `effect-postgres` driver imports
+  `cache/core/cache-effect.ts`, which calls `Schema.TaggedErrorClass` — a name
+  `effect@4.0.0-rc.112` does not export. A static import throws
+  `Schema$1.TaggedErrorClass is not a function` and fails every test file that
+  reaches it, not just the query. Require a Context tag and let the application
+  provide the database; do not import the driver in library code until the two
+  versions agree.
 
 **Effect 4, not 3**
 
