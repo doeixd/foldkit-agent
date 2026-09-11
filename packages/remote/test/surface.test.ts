@@ -45,6 +45,15 @@ describe('Remote and Surface', () => {
     expect(selectUser('u1').read(root(gone))).toEqual({ _tag: 'NotFound' })
   })
 
+  it('reports Failed when a stored field does not match the Selection schema', () => {
+    const store = writeEntity(emptyStore, entityKey('User', 'u1'), { id: 'u1', name: 42 })
+    const data = selectUser('u1').read(root(store))
+
+    expect(data._tag).toBe('Failed')
+    if (data._tag !== 'Failed') return
+    expect(data.error._tag).toBe('DecodeError')
+  })
+
   it('exposes requirements the planner turns into a minimal fetch plan', () => {
     const requirements = Remote.requirements(selectUser('u1'))
     expect(requirements).toEqual([{ entity: 'User', id: 'u1', fields: ['id', 'name'] }])

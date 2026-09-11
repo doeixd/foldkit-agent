@@ -4,7 +4,7 @@
  * Phase 3 is the **pure core**: entity identity, selections, and `RemoteData`.
  * The store, planner, and wire land in later phases. Nothing here performs I/O.
  */
-import { Context, Effect, Option, Schema, SchemaGetter, Stream } from 'effect'
+import { Context, Effect, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
 import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
 import { entityKey, isTombstone, readField, writeEntity, type EntityStore } from './store.js'
@@ -199,6 +199,23 @@ export type RemoteData<A> =
   | { readonly _tag: 'Failed'; readonly error: RemoteError; readonly previous?: A }
   | { readonly _tag: 'NotFound' }
 
+const remoteErrorSchema = Schema.Struct({ _tag: Schema.String, message: Schema.String })
+
+/** A `RemoteData` schema, so a projection that reads remote state is typed. */
+const remoteDataSchema = <A>(value: Schema.Schema<A>): Schema.Schema<RemoteData<A>> =>
+  Schema.Union([
+    Schema.Struct({ _tag: Schema.Literal('Initial') }),
+    Schema.Struct({ _tag: Schema.Literal('Loading') }),
+    Schema.Struct({ _tag: Schema.Literal('Ready'), value }),
+    Schema.Struct({ _tag: Schema.Literal('Refreshing'), value }),
+    Schema.Struct({
+      _tag: Schema.Literal('Failed'),
+      error: remoteErrorSchema,
+      previous: Schema.optional(value),
+    }),
+    Schema.Struct({ _tag: Schema.Literal('NotFound') }),
+  ]) as unknown as Schema.Schema<RemoteData<A>>
+
 export const RemoteData = {
   /** Exhaustive: omitting a state is a compile error. */
   match: <A, R>(
@@ -318,12 +335,14 @@ export const Remote = {
 
   /**
    * A Projection node that reads a `RemoteData` value out of the store. The id
-   * is supplied by the caller, usually from a Surface's params.
+   * is supplied by the caller, usually from a Surface's params. The assembled
+   * value is decoded against the Selection, so malformed server data surfaces
+   * as `Failed` instead of being asserted into `Value`.
    */
   select:
     <AppModel, Store, Value>(bound: BoundRemote<AppModel, Store>, selection: Selection<Value>) =>
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
-      Model: Schema.Unknown as unknown as Schema.Schema<RemoteData<Value>>,
+      Model: remoteDataSchema(selection.schema),
       dependencies: [],
       requirements: [{ entity: selection.entity, id, fields: selection.fields }],
       read: (root: AppModel): RemoteData<Value> => {
@@ -337,7 +356,12 @@ export const Remote = {
           if (Option.isNone(value)) return { _tag: 'Initial' }
           values[field] = value.value
         }
-        return { _tag: 'Ready', value: values as Value }
+        const decoded = Schema.decodeUnknownResult(
+          selection.schema as unknown as Schema.ConstraintDecoder<Value>,
+        )(values)
+        return Result.isFailure(decoded)
+          ? { _tag: 'Failed', error: { _tag: 'DecodeError', message: decoded.failure.message } }
+          : { _tag: 'Ready', value: decoded.success }
       },
     }),
 
