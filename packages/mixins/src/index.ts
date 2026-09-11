@@ -18,6 +18,8 @@ export * as Slot from './slot.js'
 export * as Slots from './slots.js'
 export * as SlotView from './slotView.js'
 
+export { Style } from './style.js'
+
 export type { AttrToken } from './attr.js'
 export type { Any as AnyCapability, Satisfies } from './capability.js'
 export type { Contribution, SlotContribution } from './contribution.js'
@@ -28,3 +30,4 @@ export type { ResolveOptions, SlotAttributes } from './resolver.js'
 export type { SlotProtection, UnnamedSlot } from './slot.js'
 export type { SlotBuilder, SlotBuilders, SlotViewRender } from './slotView.js'
 export type { Contract as SlotsContract } from './slots.js'
+export type { NamedStyle, StylePieces, StyleValue } from './style.js'

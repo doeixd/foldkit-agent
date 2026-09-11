@@ -21,7 +21,10 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   structured `DiagnosticError`.
 - **SlotView.** `SlotView.define` publishes typed Slots and resolves attached
   Mixins per slot into ordinary Foldkit attributes; `SlotView.attach` is
-  immutable. Style and Behavior are not in this slice.
+  immutable.
+- **Style v1.** Pure `Style.class`/`inline`/`compose`/`when`/`forSlots`, compiling
+  to a contribution; `Style.attach` is `SlotView.attach` for a style. Input-driven
+  conditional style and the CSS compiler are not in this slice.
 
 ### `foldkit-agent`
 

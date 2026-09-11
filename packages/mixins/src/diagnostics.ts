@@ -5,6 +5,7 @@
  * so `resolve` throws a `DiagnosticError` carrying one.
  */
 export type DiagnosticCode =
+  | 'mixins:unknown-slot'
   | 'mixins:protected-event'
   | 'mixins:protected-attribute'
   | 'mixins:protected-style-property'

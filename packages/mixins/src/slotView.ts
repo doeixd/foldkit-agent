@@ -77,8 +77,19 @@ export const define = <Slots, Input, Message>(
   options?: { readonly name?: string },
 ): SlotView<Slots, Input, Message> => makeView(options?.name, slots, [], render)
 
+/** A transform on any view, used by Message-free mixins such as Style. */
+export type SlotViewTransform = <Slots, Input, Message>(
+  view: SlotView<Slots, Input, Message>,
+) => SlotView<Slots, Input, Message>
+
+/** A transform restricted to one Message universe, for Message-bearing mixins. */
+export type SlotViewTransformFor<Message> = <Slots, Input>(
+  view: SlotView<Slots, Input, Message>,
+) => SlotView<Slots, Input, Message>
+
 /** Attach one Mixin. Returns a new view; the original is unchanged. */
-export const attach =
-  <Slots, Input, Message>(mixin: Mixin<Message>) =>
-  (view: SlotView<Slots, Input, Message>): SlotView<Slots, Input, Message> =>
-    makeView(view.name, view.slots, [...view.mixins, mixin], view.render)
+export function attach(mixin: Mixin<never>): SlotViewTransform
+export function attach<MixinMessage>(mixin: Mixin<MixinMessage>): SlotViewTransformFor<MixinMessage>
+export function attach(mixin: Mixin<any>): SlotViewTransform {
+  return view => makeView(view.name, view.slots, [...view.mixins, mixin], view.render)
+}
