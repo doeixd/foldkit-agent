@@ -1375,6 +1375,22 @@ const ProjectsByOwnerSource = RemoteDrizzle.query(ProjectsByOwner, {
   directly inside `RemoteServer.mutation` (maybe `RemoteDrizzle.returning` /
   `columns` / `normalize` helpers later).
 
+**Phase 14 status (provisional).** Implemented and tested without a database:
+`entity(name, table, {schema?, relations?})` binds an Entity to a table and derives
+the Entity Schema from `drizzle-orm/effect-schema`; `columnsFor` prunes a Selection
+to its scalar columns; `relationsFor` yields relation bindings; `whereIds` renders a
+whole id batch as one `IN`; `cursorCondition` and `queryPlan` compile the
+filter/cursor/limit. Tests assert Schema derivation, field pruning, relation/scalar
+separation, id batching, and cursor SQL (rendered with `PgDialect`, no DB).
+
+**Value bar:** the hand-written `RemoteServer.entity` Source must map a Selection's
+fields to columns and build the id batch by hand, and a naive `select({...})` does
+not prune per request; the compiler removes that mapping and prunes correctly. The
+execution bridge (`RemoteDrizzle.source`/`query` running the Effect Drizzle `db` and
+normalizing rows) is **not** implemented and has no execution test (no Postgres in
+CI). The package stays **private/provisional** until that bridge demonstrates a
+materially shorter Source than the generic form with correct per-selection pruning.
+
 ### 8.15 Fate parity (framing for acceptance)
 
 The design aims to capture Fate's architectural benefits as native Foldkit + Effect
