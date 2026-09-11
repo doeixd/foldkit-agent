@@ -178,14 +178,20 @@ export const RemoteServer = {
     ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
   } => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
-      const grouped = new Map<string, { ids: string[]; fields: Set<string> }>()
+      const grouped = new Map<
+        string,
+        { ids: string[]; seenIds: Set<string>; fields: Set<string> }
+      >()
       for (const request of payload.requests) {
         let group = grouped.get(request.entity)
         if (group === undefined) {
-          group = { ids: [], fields: new Set() }
+          group = { ids: [], seenIds: new Set(), fields: new Set() }
           grouped.set(request.entity, group)
         }
-        if (!group.ids.includes(request.id)) group.ids.push(request.id)
+        if (!group.seenIds.has(request.id)) {
+          group.seenIds.add(request.id)
+          group.ids.push(request.id)
+        }
         for (const field of request.fields) group.fields.add(field)
       }
 
@@ -203,7 +209,8 @@ export const RemoteServer = {
           source.authorize === undefined ? requested : source.authorize(principal, requested)
         // Never read or return a field the client did not request, even if a
         // permissive `authorize` allows more.
-        const allowed = requested.filter(field => permitted.includes(field))
+        const permittedSet = new Set(permitted)
+        const allowed = requested.filter(field => permittedSet.has(field))
         if (allowed.length === 0) continue
 
         const records = yield* source
