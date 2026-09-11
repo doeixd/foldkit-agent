@@ -271,6 +271,10 @@ importers:
         version: 5.9.3
 
   packages/sync:
+    dependencies:
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../surface
     devDependencies:
       effect:
         specifier: 4.0.0-rc.112
