@@ -83,7 +83,9 @@ Correctness fixes from a review of the implementation. Breaking for `foldkit-syn
   not expose. The result is an ordinary `SlotView`, so Style/Behavior attach and
   pipe unchanged; `SurfaceView.toRenderer` adapts it to `Surface.view` /
   `Surface.rootView`. Type tests pin the projected-Model and Message-subset
-  rejections. Phase 10 started, not complete.
+  rejections, and runtime tests drive `Surface.rootView` end-to-end, including a
+  Style and a Behavior reading the projected input. Phase 10 started, not
+  complete.
 
 ### `foldkit-agent`
 
