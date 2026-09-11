@@ -173,12 +173,16 @@ const journalError = (message: string, cause: unknown): JournalError =>
 const resolveFile = (file: string | Config.Config<string>): Effect.Effect<string, JournalError> =>
   typeof file === 'string'
     ? Effect.succeed(file)
-    : file.pipe(Effect.mapError(cause => journalError('Could not read the journal file', cause)))
+    : file.pipe(
+        Effect.catchTag('ConfigError', cause =>
+          Effect.fail(journalError('Could not read the journal file', cause)),
+        ),
+      )
 
-const isAppendError = (error: unknown): error is AppendError =>
-  error instanceof InvalidOperationError ||
-  error instanceof OperationRejectedError ||
-  error instanceof IdentityConflictError
+const asJournalError =
+  (message: string) =>
+  (cause: unknown): Effect.Effect<never, JournalError> =>
+    Effect.fail(journalError(message, cause))
 
 /**
  * Opens a durable, ordered operation log with a snapshot and cursor per key.
@@ -190,20 +194,15 @@ const isAppendError = (error: unknown): error is AppendError =>
  * the application's own transition function. The SQLite connection is released
  * when the effect's scope closes.
  */
-export const makeJournal = <Operation, Snapshot, Principal>(
+export const makeJournal = Effect.fn('Journal.make')(function* <Operation, Snapshot, Principal>(
   options: JournalOptions<Operation, Snapshot, Principal>,
-): Effect.Effect<
-  Journal<Operation, Snapshot, Principal>,
-  JournalError | UnsupportedJournalVersionError,
-  Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const file = yield* resolveFile(options.file)
-    // Build the driver into the journal's own scope, not the transient scope of
-    // this effect, so the connection outlives `makeJournal`.
-    const context = yield* Layer.build(SqliteClient.layer({ filename: file }))
-    return yield* makeShapeEffect(options).pipe(Effect.provide(context))
-  })
+) {
+  const file = yield* resolveFile(options.file)
+  // Build the driver into the journal's own scope, not the transient scope of
+  // this effect, so the connection outlives `makeJournal`.
+  const context = yield* Layer.build(SqliteClient.layer({ filename: file }))
+  return yield* makeShapeEffect(options).pipe(Effect.provide(context))
+})
 
 /**
  * The journal as a service, so an application composes it with `Effect.provide`
@@ -299,13 +298,7 @@ const migrate = (
         yield* sql`PRAGMA user_version = 2`
       }),
     )
-  }).pipe(
-    Effect.mapError(error =>
-      error instanceof UnsupportedJournalVersionError
-        ? error
-        : journalError('Could not migrate the journal', error),
-    ),
-  )
+  }).pipe(Effect.catchTag('SqlError', asJournalError('Could not migrate the journal')))
 
 interface DocumentRow {
   readonly cursor: number
@@ -347,7 +340,7 @@ const makeShape = <Operation, Snapshot, Principal>(
     yield* Effect.annotateCurrentSpan({ key })
     const rows =
       yield* sql<DocumentRow>`SELECT cursor, snapshot FROM documents WHERE key = ${key}`.pipe(
-        Effect.mapError(cause => journalError('Could not load the snapshot', cause)),
+        Effect.catchTag('SqlError', asJournalError('Could not load the snapshot')),
       )
     return yield* Effect.try({
       try: () => decodeSnapshot(rows[0]),
@@ -360,7 +353,7 @@ const makeShape = <Operation, Snapshot, Principal>(
     const rows = yield* sql<{
       readonly compact_before: number
     }>`SELECT compact_before FROM documents WHERE key = ${key}`.pipe(
-      Effect.mapError(cause => journalError('Could not read the compaction floor', cause)),
+      Effect.catchTag('SqlError', asJournalError('Could not read the compaction floor')),
     )
     return rows[0]?.compact_before ?? 0
   })
@@ -371,7 +364,7 @@ const makeShape = <Operation, Snapshot, Principal>(
       readonly cursor: number
       readonly compact_before: number
     }>`SELECT cursor, compact_before FROM documents WHERE key = ${key}`.pipe(
-      Effect.mapError(cause => journalError('Could not read the log', cause)),
+      Effect.catchTag('SqlError', asJournalError('Could not read the log')),
     )
     const cursor = documents[0]?.cursor ?? 0
     if (!Number.isSafeInteger(after) || after < 0 || after > cursor)
@@ -396,7 +389,7 @@ const makeShape = <Operation, Snapshot, Principal>(
       )
     const rows =
       yield* sql<OperationRow>`SELECT actor_id, sequence, input FROM operations WHERE key = ${key} AND sequence > ${after} AND input IS NOT NULL ORDER BY sequence`.pipe(
-        Effect.mapError(cause => journalError('Could not read the log', cause)),
+        Effect.catchTag('SqlError', asJournalError('Could not read the log')),
       )
     return yield* Effect.try({
       try: () =>
@@ -518,11 +511,7 @@ const makeShape = <Operation, Snapshot, Principal>(
           }
         }),
       )
-      .pipe(
-        Effect.mapError(error =>
-          isAppendError(error) ? error : journalError('Could not append the operation', error),
-        ),
-      )
+      .pipe(Effect.catchTag('SqlError', asJournalError('Could not append the operation')))
 
     // Publish and observe only after the transaction committed, so a subscriber
     // never sees a change that could still roll back.
@@ -563,11 +552,7 @@ const makeShape = <Operation, Snapshot, Principal>(
           yield* sql`UPDATE documents SET compact_before = ${through} WHERE key = ${key}`
         }),
       )
-    }).pipe(
-      Effect.mapError(error =>
-        error instanceof InvalidCompactionError ? error : journalError('Could not compact', error),
-      ),
-    )
+    }).pipe(Effect.catchTag('SqlError', asJournalError('Could not compact')))
     yield* Metric.update(journalMetrics.compactions, 1)
     yield* Effect.logDebug('journal compact', { key, through })
   })
@@ -576,7 +561,7 @@ const makeShape = <Operation, Snapshot, Principal>(
     yield* Effect.annotateCurrentSpan({ key })
     const rows =
       yield* sql<EffectRow>`SELECT key, status, result, error FROM effects WHERE key = ${key}`.pipe(
-        Effect.mapError(cause => journalError('Could not read the effect record', cause)),
+        Effect.catchTag('SqlError', asJournalError('Could not read the effect record')),
       )
     const row = rows[0]
     if (row === undefined) return Option.none<EffectRecord>()
@@ -606,7 +591,7 @@ const makeShape = <Operation, Snapshot, Principal>(
         catch: cause => journalError('Could not record the effect', cause),
       })
       yield* sql`INSERT INTO effects (key, status, result, error) VALUES (${key}, ${status}, ${encoded}, ${error ?? null}) ON CONFLICT(key) DO UPDATE SET status = excluded.status, result = excluded.result, error = excluded.error`.pipe(
-        Effect.mapError(cause => journalError('Could not record the effect', cause)),
+        Effect.catchTag('SqlError', asJournalError('Could not record the effect')),
       )
     })
 
