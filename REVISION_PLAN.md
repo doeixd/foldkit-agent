@@ -2203,13 +2203,16 @@ the Selection, returning `Failed`/`DecodeError` on a mismatch instead of
 asserting into `Value`; the projection now carries a real `RemoteData` schema
 rather than `Schema.Unknown`.
 
+Fixed in `ca4f23f`: the Remote Model shape is a named `RemoteModel` that the
+schema and the store accessors share, so `storeOf`/`Remote.select` no longer
+cast an inline shape and a layout change is a compile error (`Remote.at` is
+constrained, with a negative type case).
+
 Still open (all lower severity):
 
 - **`Projection.struct` mixes roots silently.** `EntryRoot<Entries[keyof Entries]>`
   is a union; mixing ModelRefs/Projections with different `Root`s type-checks and
   reads wrong. All entries share the Root in practice, but a guard is warranted.
-- **`storeOf`/`Remote.select` cast the store shape.** A change to the Remote Model
-  layout would fail silently.
 - **`live.invalidateConnection` never clears `stale`.** A later successful merge
   does not mark the connection fresh; the clearing path is unspecified.
 - **remote-drizzle does not check that the table-derived Schema agrees with the
