@@ -163,6 +163,8 @@ const Post = entity('Post', posts, {
 The read loads every child row in one `IN (...)`, ordered by child id, and emits
 `values.comments = ["Comment:c1", "Comment:c2"]`. The Entity declares the field as
 `Schema.Array(Entity.ref(CommentEntity))` and the Selection selects it as `true`.
+A collection relation may also take `orderBy` (default target id) and `where`
+(appended to the child query, e.g. to exclude soft-deleted rows).
 
 A many-to-many relation joins through a table; `localColumn` references the
 owner's `id` and `foreignColumn` the target's `id`:

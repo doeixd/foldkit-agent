@@ -248,7 +248,10 @@ export const source = <P = unknown>(
               relation.entity.table,
               { id: targetId, parent: relation.foreignKey },
               {
-                where: inArray(relation.foreignKey, parentKeys),
+                where:
+                  relation.where === undefined
+                    ? inArray(relation.foreignKey, parentKeys)
+                    : and(inArray(relation.foreignKey, parentKeys), relation.where),
                 orderBy: naturalOrder,
               },
             )
@@ -263,7 +266,10 @@ export const source = <P = unknown>(
               relation.through,
               { parent: relation.localColumn, child: targetId },
               {
-                where: inArray(relation.localColumn, parentKeys),
+                where:
+                  relation.where === undefined
+                    ? inArray(relation.localColumn, parentKeys)
+                    : and(inArray(relation.localColumn, parentKeys), relation.where),
                 innerJoin: {
                   table: relation.entity.table,
                   on: eq(relation.foreignColumn, targetId),

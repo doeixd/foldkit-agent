@@ -1,4 +1,4 @@
-import { type SQL } from 'drizzle-orm'
+import { eq, type SQL } from 'drizzle-orm'
 import { pgTable, PgDialect, text, uuid } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
 import { Entity, Selection } from 'foldkit-remote'
@@ -306,5 +306,30 @@ describe('RemoteDrizzle execution', () => {
     expect(patches).toEqual([
       { entity: 'Project', id: 'p1', values: { id: 'p1', name: 'P', owner: 'User:u1' } },
     ])
+  })
+
+  it('applies a relation where filter to the child query', async () => {
+    const filtered = entity('Post', posts, {
+      relations: {
+        comments: many(CommentBinding, {
+          foreignKey: comments.postId,
+          localKey: posts.id,
+          where: eq(comments.body, 'keep'),
+        }),
+      },
+    })
+    const { database, calls } = fakeDatabaseQueue([
+      [{ id: 'p1', comments: 'p1' }],
+      [{ id: 'c1', parent: 'p1' }],
+    ])
+
+    await Effect.runPromise(
+      source(filtered)
+        .read({ ids: ['p1'], fields: ['id', 'comments'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    const dialect = new PgDialect()
+    expect(dialect.sqlToQuery(calls[1]!.where as SQL).sql).toContain('"comments"."body" =')
   })
 })

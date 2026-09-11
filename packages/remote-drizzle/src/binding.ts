@@ -6,7 +6,7 @@
  */
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
 import type { BuildSchema } from 'drizzle-orm/effect-schema'
-import { getTableColumns, type AnyColumn } from 'drizzle-orm'
+import { getTableColumns, type AnyColumn, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import type { Schema } from 'effect'
 import type { OrderTerm } from './cursor.js'
@@ -38,6 +38,8 @@ export interface ManyRelation extends RelationTarget {
   readonly localKey: AnyColumn
   /** Natural order of the loaded refs; defaults to the target id. */
   readonly orderBy?: readonly OrderTerm[] | undefined
+  /** Appended to the child query, e.g. to exclude soft-deleted rows. */
+  readonly where?: SQL | undefined
 }
 
 /**
@@ -51,6 +53,8 @@ export interface ManyToManyRelation extends RelationTarget {
   readonly foreignColumn: AnyColumn
   /** Natural order of the loaded refs; defaults to the target id. */
   readonly orderBy?: readonly OrderTerm[] | undefined
+  /** Appended to the joined query; may reference the target table. */
+  readonly where?: SQL | undefined
 }
 
 export type RelationBinding = OneRelation | ManyRelation | ManyToManyRelation
@@ -67,6 +71,7 @@ export type RelationConfig =
       readonly foreignKey: AnyColumn
       readonly localKey: AnyColumn
       readonly orderBy?: readonly OrderTerm[] | undefined
+      readonly where?: SQL | undefined
     }
   | {
       readonly kind: 'manyToMany'
@@ -75,6 +80,7 @@ export type RelationConfig =
       readonly localColumn: AnyColumn
       readonly foreignColumn: AnyColumn
       readonly orderBy?: readonly OrderTerm[] | undefined
+      readonly where?: SQL | undefined
     }
 
 export const one = (
@@ -88,6 +94,7 @@ export const many = (
     readonly foreignKey: AnyColumn
     readonly localKey: AnyColumn
     readonly orderBy?: readonly OrderTerm[] | undefined
+    readonly where?: SQL | undefined
   },
 ): ManyRelation => ({
   kind: 'many',
@@ -95,6 +102,7 @@ export const many = (
   foreignKey: options.foreignKey,
   localKey: options.localKey,
   ...(options.orderBy === undefined ? {} : { orderBy: options.orderBy }),
+  ...(options.where === undefined ? {} : { where: options.where }),
 })
 
 export const manyToMany = (
@@ -104,6 +112,7 @@ export const manyToMany = (
     readonly localColumn: AnyColumn
     readonly foreignColumn: AnyColumn
     readonly orderBy?: readonly OrderTerm[] | undefined
+    readonly where?: SQL | undefined
   },
 ): ManyToManyRelation => ({
   kind: 'manyToMany',
@@ -112,6 +121,7 @@ export const manyToMany = (
   localColumn: options.localColumn,
   foreignColumn: options.foreignColumn,
   ...(options.orderBy === undefined ? {} : { orderBy: options.orderBy }),
+  ...(options.where === undefined ? {} : { where: options.where }),
 })
 
 const normalizeRelation = (config: RelationConfig): RelationBinding => {
@@ -123,6 +133,7 @@ const normalizeRelation = (config: RelationConfig): RelationBinding => {
         foreignKey: config.foreignKey,
         localKey: config.localKey,
         ...(config.orderBy === undefined ? {} : { orderBy: config.orderBy }),
+        ...(config.where === undefined ? {} : { where: config.where }),
       }
     case 'manyToMany':
       return {
@@ -132,6 +143,7 @@ const normalizeRelation = (config: RelationConfig): RelationBinding => {
         localColumn: config.localColumn,
         foreignColumn: config.foreignColumn,
         ...(config.orderBy === undefined ? {} : { orderBy: config.orderBy }),
+        ...(config.where === undefined ? {} : { where: config.where }),
       }
     default:
       return { kind: 'one', entity: config.entity, field: config.field }
