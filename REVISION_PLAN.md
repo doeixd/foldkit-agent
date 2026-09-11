@@ -542,6 +542,14 @@ const ProjectCard = Surface.define(App, "ProjectCard", {
 narrowed; `view`/`embed`/`rootView` cast soundly, and the subset checks are what
 make the cast safe.
 
+**Submodel interop (Phase 2):** a Surface renderer embeds a Foldkit Submodel via
+`h.submodel`, and `toParentMessage` must land inside the Surface's Message set
+(the builder is narrowed to it). The reverse — a Submodel view embedding a
+Surface via `Surface.embed` — type-checks only when the Submodel's Message
+universe includes the Surface's Messages; the usual direction is Surface →
+Submodel. An access boundary and an ownership boundary compose without either
+gaining the other's authority.
+
 **Invariants**
 
 - `Params` optional (conceptually `void`); `messages` optional (read-only Surface,
@@ -1590,6 +1598,7 @@ const journal = yield* makeJournal({
 | Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; a Struct field with one of these names throws when the tree is built | A field must not silently shadow a method. |
 | Surface rendering | Renderers are Model-consuming; `rootView` is the Root boundary; `embed` composes with Model and Message subset checks | A parent has its projected Model, not Root, so children must read from it structurally. |
 | Surface descriptor | No eager `Model`/`dependencies`; derive via `projection(params)` | A parameterized projection reads `params`, so eager evaluation with `undefined` is invalid. |
+| Surface + Submodel | Surface renderer embeds a Submodel via `h.submodel`; `toParentMessage` narrows to the Surface's Messages | Access boundary and ownership boundary compose without gaining each other's authority. |
 
 ---
 
