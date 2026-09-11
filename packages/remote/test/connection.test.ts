@@ -1,0 +1,117 @@
+import { describe, expect, it } from 'vitest'
+import {
+  cursor,
+  edge,
+  emptyConnection,
+  hasNext,
+  hasPrevious,
+  isGapped,
+  items,
+  merge,
+  segment,
+  terminal,
+  type Edge,
+} from '../src/index.js'
+
+const e = (id: string): Edge => edge({ entity: 'E', id })
+const page = (ids: readonly string[], start = terminal, end = terminal) =>
+  segment(ids.map(e), start, end)
+const ids = (connection: Parameters<typeof items>[0]): ReadonlyArray<string> =>
+  items(connection).map(value => value.ref.id)
+
+describe('Connection.merge', () => {
+  it('merges overlapping pages without duplication', () => {
+    const first = merge(emptyConnection, page(['a', 'b', 'c', 'd'], terminal, cursor('c1')))
+    const merged = merge(first, page(['c', 'd', 'e', 'f'], cursor('c1'), cursor('c2')))
+
+    expect(ids(merged)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(merged.segments).toHaveLength(1)
+  })
+
+  it('merges pages that overlap by edges even without a cursor match', () => {
+    const first = merge(emptyConnection, page(['a', 'b', 'c', 'd'], cursor('x'), cursor('y')))
+    const merged = merge(first, page(['c', 'd', 'e', 'f'], cursor('z'), cursor('w')))
+
+    expect(ids(merged)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+  })
+
+  it('preserves a gap as separate segments', () => {
+    const first = merge(emptyConnection, page(['a', 'b'], terminal, cursor('c1')))
+    const gapped = merge(first, page(['i', 'j'], cursor('c2'), cursor('c3')))
+
+    expect(isGapped(gapped)).toBe(true)
+    expect(gapped.segments).toHaveLength(2)
+    expect(ids(gapped)).toEqual(['a', 'b', 'i', 'j'])
+  })
+
+  it('derives hasNext/hasPrevious from boundaries, not row count', () => {
+    const partial = merge(emptyConnection, page(['a'], cursor('c0'), cursor('c1')))
+    expect(hasPrevious(partial)).toBe(true)
+    expect(hasNext(partial)).toBe(true)
+
+    const complete = merge(emptyConnection, page(['a'], terminal, terminal))
+    expect(hasPrevious(complete)).toBe(false)
+    expect(hasNext(complete)).toBe(false)
+  })
+
+  it('uses the edge key for identity, so a repeated ref can appear twice', () => {
+    const duplicateRef: Edge[] = [
+      edge({ entity: 'E', id: 'a' }, 'edge-1'),
+      edge({ entity: 'E', id: 'a' }, 'edge-2'),
+    ]
+    const merged = merge(emptyConnection, segment(duplicateRef, terminal, terminal))
+    expect(items(merged)).toHaveLength(2)
+  })
+
+  it('reconstructs an overlapping paginated sequence, deterministically', () => {
+    const alphabet = ['a', 'b', 'c', 'd', 'e', 'f'] as const
+    let seed = 987654321
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
+
+    for (let run = 0; run < 200; run++) {
+      const total = 3 + Math.floor(random() * 8)
+      const sequence = Array.from(
+        { length: total },
+        () => alphabet[Math.floor(random() * alphabet.length)]!,
+      )
+
+      const pages: Array<ReturnType<typeof page>> = []
+      let index = 0
+      let cursorId = 0
+      while (index < total) {
+        const size = 1 + Math.floor(random() * 3)
+        const window = sequence.slice(index, index + size)
+        const start = index === 0 ? terminal : cursor(`c${cursorId - 1}`)
+        const end = index + size >= total ? terminal : cursor(`c${cursorId}`)
+        pages.push(page(window, start, end))
+        index += Math.max(1, size - 1)
+        cursorId++
+      }
+
+      const expected: string[] = []
+      const seen = new Set<string>()
+      for (const id of sequence) {
+        const key = `E:${id}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        expected.push(id)
+      }
+
+      const connection = pages.reduce((current, value) => merge(current, value), emptyConnection)
+      expect(ids(connection)).toEqual(expected)
+
+      // Deterministic: the same page sequence yields the same connection.
+      const repeat = pages.reduce((current, value) => merge(current, value), emptyConnection)
+      expect(repeat).toEqual(connection)
+
+      // Idempotent in content: re-merging adds no new edges and no duplicates.
+      const again = pages.reduce((current, value) => merge(current, value), connection)
+      expect(new Set(ids(again))).toEqual(new Set(expected))
+      const keys = items(again).map(value => value.key)
+      expect(new Set(keys).size).toBe(keys.length)
+    }
+  })
+})
