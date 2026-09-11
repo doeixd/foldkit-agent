@@ -13,6 +13,15 @@ export type { Requirement } from 'foldkit-surface'
 
 type Window = NonNullable<Requirement['windows']>[string]
 
+/** A stable key for a window, so two equal windows compare equal. */
+export const windowKey = (window: Window): string =>
+  JSON.stringify([
+    window.first ?? null,
+    window.last ?? null,
+    window.after ?? null,
+    window.before ?? null,
+  ])
+
 export interface PlanFreshness {
   readonly now: number
   /** A present entry older than this many milliseconds is refreshed whole. */
@@ -67,7 +76,10 @@ export const plan = (
       entry !== undefined &&
       !entry.tombstone &&
       freshness.now - entry.updatedAt > freshness.freshness
-    const missing = expired ? group.fields : missingFields(store, key, group.fields)
+    const windowKeys = Object.fromEntries(
+      [...group.windows].map(([field, window]) => [field, windowKey(window)]),
+    )
+    const missing = expired ? group.fields : missingFields(store, key, group.fields, windowKeys)
     if (missing.length === 0) continue
     // Only a field being fetched carries its window.
     const missingSet = new Set(missing)

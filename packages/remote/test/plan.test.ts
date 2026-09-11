@@ -4,6 +4,7 @@ import {
   entityKey,
   plan,
   tombstone,
+  windowKey,
   writeEntity,
   type Requirement,
 } from '../src/index.js'
@@ -78,6 +79,41 @@ describe('Remote.plan', () => {
     ])
 
     expect(planned).toEqual([])
+  })
+
+  it('re-plans a field when its request window changes', () => {
+    const stored = writeEntity(emptyStore, entityKey('Project', 'p1'), { comments: [] }, 0, {
+      comments: windowKey({ first: 5 }),
+    })
+
+    expect(
+      plan(stored, [
+        {
+          entity: 'Project',
+          id: 'p1',
+          fields: ['comments'],
+          windows: { comments: { first: 5 } },
+        },
+      ]),
+    ).toEqual([])
+
+    expect(
+      plan(stored, [
+        {
+          entity: 'Project',
+          id: 'p1',
+          fields: ['comments'],
+          windows: { comments: { first: 10 } },
+        },
+      ]),
+    ).toEqual([
+      {
+        entity: 'Project',
+        id: 'p1',
+        fields: ['comments'],
+        windows: { comments: { first: 10 } },
+      },
+    ])
   })
 
   it('does not treat an entry as expired at exactly the freshness bound', () => {

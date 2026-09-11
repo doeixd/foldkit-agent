@@ -11,7 +11,7 @@ import { KeyValueStore } from 'effect/unstable/persistence'
 import { emptyStore, type EntityEntry, type EntityStore } from './store.js'
 
 /** Bump when the serialized shape changes; a mismatch discards the cache. */
-export const REMOTE_CACHE_VERSION = 1
+export const REMOTE_CACHE_VERSION = 2
 
 interface SerializedEntry {
   readonly values: Readonly<Record<string, unknown>>
@@ -19,6 +19,7 @@ interface SerializedEntry {
   readonly stale: ReadonlyArray<string>
   readonly tombstone: boolean
   readonly updatedAt: number
+  readonly windows: Readonly<Record<string, string>>
 }
 
 interface SerializedStore {
@@ -37,6 +38,7 @@ export const serializeStore = (store: EntityStore): SerializedStore => ({
         stale: [...entry.stale],
         tombstone: entry.tombstone,
         updatedAt: entry.updatedAt,
+        windows: entry.windows,
       },
     ]),
   ),
@@ -44,6 +46,12 @@ export const serializeStore = (store: EntityStore): SerializedStore => ({
 
 const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
   Array.isArray(value) && value.every(item => typeof item === 'string')
+
+const isStringRecord = (value: unknown): value is Readonly<Record<string, string>> =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  Object.values(value as Record<string, unknown>).every(item => typeof item === 'string')
 
 /** Throws on a malformed entry so `restore` can discard the whole snapshot. */
 const parseEntry = (value: unknown): EntityEntry => {
@@ -56,12 +64,14 @@ const parseEntry = (value: unknown): EntityEntry => {
   if (!isStringArray(entry.stale)) throw new Error('entry.stale is not a string array')
   if (typeof entry.tombstone !== 'boolean') throw new Error('entry.tombstone is not a boolean')
   if (typeof entry.updatedAt !== 'number') throw new Error('entry.updatedAt is not a number')
+  if (!isStringRecord(entry.windows)) throw new Error('entry.windows is not a string record')
   return {
     values: entry.values as Readonly<Record<string, unknown>>,
     present: new Set(entry.present),
     stale: new Set(entry.stale),
     tombstone: entry.tombstone,
     updatedAt: entry.updatedAt,
+    windows: entry.windows,
   }
 }
 

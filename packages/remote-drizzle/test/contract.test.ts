@@ -5,8 +5,6 @@ import {
   Remote,
   Selection,
   emptyStore,
-  entityKey,
-  writeEntity,
   type BoundRemote,
   type RemoteModel,
 } from 'foldkit-remote'
@@ -70,19 +68,15 @@ describe('RemoteDrizzle end to end', () => {
       [{ child: 'c1', parent: 'p1' }],
     ])
     const server = RemoteServer.make({}, { entities: [source(ProjectBinding)] })
+    const request = { entity: 'Project', id: 'p1', fields: selection.fields }
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
-        .FoldkitRemoteRead({
-          requests: [{ entity: 'Project', id: 'p1', fields: selection.fields }],
-        })
+        .FoldkitRemoteRead({ requests: [request] })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
-    const store = result.entities.reduce(
-      (current, entity) => writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
-      emptyStore,
-    )
+    const store = Remote.writeRead(emptyStore, [request], result)
     const bound = {
       store: {
         get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),
@@ -122,26 +116,20 @@ describe('RemoteDrizzle end to end', () => {
       ],
     ])
     const server = RemoteServer.make({}, { entities: [source(ProjectBinding)] })
+    const request = {
+      entity: 'Project',
+      id: 'p1',
+      fields: selection.fields,
+      windows: selection.connections,
+    }
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
-        .FoldkitRemoteRead({
-          requests: [
-            {
-              entity: 'Project',
-              id: 'p1',
-              fields: selection.fields,
-              windows: selection.connections,
-            },
-          ],
-        })
+        .FoldkitRemoteRead({ requests: [request] })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
-    const store = result.entities.reduce(
-      (current, entity) => writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
-      emptyStore,
-    )
+    const store = Remote.writeRead(emptyStore, [request], result)
     const bound = {
       store: {
         get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),

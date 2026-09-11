@@ -19,6 +19,11 @@ export interface EntityEntry {
   readonly tombstone: boolean
   /** Injected clock reading of the last write; never read from ambient state. */
   readonly updatedAt: number
+  /**
+   * The canonical window each present field was fetched with (`""` for none).
+   * A later request with a *known, different* window is planned as missing.
+   */
+  readonly windows: Readonly<Record<string, string>>
 }
 
 export type EntityStore = Readonly<Record<EntityKey, EntityEntry>>
@@ -32,6 +37,7 @@ const emptyEntry: EntityEntry = {
   stale: new Set(),
   tombstone: false,
   updatedAt: 0,
+  windows: {},
 }
 
 export const emptyStore: EntityStore = {}
@@ -50,13 +56,19 @@ export const writeEntity = (
   key: EntityKey,
   values: Readonly<Record<string, unknown>>,
   now = 0,
+  windows?: Readonly<Record<string, string>>,
 ): EntityStore => {
   const previous = store[key] ?? emptyEntry
   const present = new Set(previous.present)
   const stale = new Set(previous.stale)
+  const nextWindows: Record<string, string> = { ...previous.windows }
   for (const field of Object.keys(values)) {
     present.add(field)
     stale.delete(field)
+    // A write without a window clears any remembered one: the value changed.
+    const requested = windows?.[field]
+    if (requested !== undefined && requested !== '') nextWindows[field] = requested
+    else delete nextWindows[field]
   }
   return replace(store, key, {
     values: { ...previous.values, ...values },
@@ -64,6 +76,7 @@ export const writeEntity = (
     stale,
     tombstone: false,
     updatedAt: now,
+    windows: nextWindows,
   })
 }
 
@@ -90,6 +103,7 @@ export const tombstone = (store: EntityStore, key: EntityKey): EntityStore =>
     stale: new Set(),
     tombstone: true,
     updatedAt: 0,
+    windows: {},
   })
 
 /** Forgets everything known about the entity, including a tombstone. */
@@ -132,16 +146,23 @@ export const readField = (
 
 /**
  * The fields the planner must fetch. A tombstone makes every field known
- * (absent), so it returns an empty list and the entity is not refetched.
+ * (absent), so it returns an empty list and the entity is not refetched. A
+ * requested window that differs from the one a field was fetched with also
+ * marks it missing, but only when the stored window is known (never `""`), so a
+ * writer that does not record windows cannot cause a refetch loop.
  */
 export const missingFields = (
   store: EntityStore,
   key: EntityKey,
   fields: Iterable<string>,
+  windows?: Readonly<Record<string, string>>,
 ): ReadonlyArray<string> => {
   const value = store[key]
   if (value !== undefined && value.tombstone) return []
-  return [...fields].filter(
-    field => value === undefined || !value.present.has(field) || value.stale.has(field),
-  )
+  return [...fields].filter(field => {
+    if (value === undefined || !value.present.has(field) || value.stale.has(field)) return true
+    const requested = windows?.[field]
+    const stored = value.windows[field]
+    return requested !== undefined && stored !== undefined && stored !== '' && stored !== requested
+  })
 }

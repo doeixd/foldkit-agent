@@ -44,6 +44,20 @@ describe('EntityStore', () => {
     expect(missingFields(store, key, ['name', 'missing'])).toEqual(['missing'])
   })
 
+  it('marks a field missing only for a known, different window', () => {
+    const store = writeEntity(emptyStore, key, { comments: [] }, 0, { comments: 'A' })
+    expect(missingFields(store, key, ['comments'], { comments: 'A' })).toEqual([])
+    expect(missingFields(store, key, ['comments'], { comments: 'B' })).toEqual(['comments'])
+
+    // A writer that records no window must not cause a refetch loop...
+    const plain = writeEntity(emptyStore, key, { comments: [] })
+    expect(missingFields(plain, key, ['comments'], { comments: 'B' })).toEqual([])
+
+    // ...and a later write clears a remembered window.
+    const rewritten = writeEntity(store, key, { comments: [] })
+    expect(missingFields(rewritten, key, ['comments'], { comments: 'B' })).toEqual([])
+  })
+
   it('clears a tombstone when a later write arrives', () => {
     let store = tombstone(emptyStore, key)
     expect(isTombstone(store, key)).toBe(true)
@@ -93,6 +107,7 @@ describe('EntityStore', () => {
         stale: new Set(),
         tombstone: false,
         updatedAt: 2,
+        windows: {},
       }),
     )
   })
@@ -107,6 +122,7 @@ describe('EntityStore', () => {
         stale: new Set(),
         tombstone: true,
         updatedAt: 0,
+        windows: {},
       }),
     )
     expect(readField(store, key, 'name')).toEqual(Option.none())

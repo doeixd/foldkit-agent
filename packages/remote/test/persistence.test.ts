@@ -79,7 +79,7 @@ describe('RemotePersistence', () => {
   })
 
   it('clears a valid-JSON snapshot of the wrong shape', async () => {
-    for (const bad of ['null', '[]', '{"version":1}', '{"version":1,"entities":null}']) {
+    for (const bad of ['null', '[]', '{"version":2}', '{"version":2,"entities":null}']) {
       const result = await run(
         Effect.gen(function* () {
           const kv = yield* KeyValueStore.KeyValueStore
@@ -94,13 +94,15 @@ describe('RemotePersistence', () => {
   it('clears a snapshot with a malformed entry', async () => {
     const cases = [
       // `present` is a string, not a string array.
-      '{"version":1,"entities":{"User:u1":{"values":{"name":"x"},"present":"name","stale":[],"tombstone":false,"updatedAt":0}}}',
+      '{"version":2,"entities":{"User:u1":{"values":{"name":"x"},"present":"name","stale":[],"tombstone":false,"updatedAt":0,"windows":{}}}}',
       // An entry that is not an object.
-      '{"version":1,"entities":{"User:u1":null}}',
+      '{"version":2,"entities":{"User:u1":null}}',
       // `values` is not a record.
-      '{"version":1,"entities":{"User:u1":{"values":5,"present":[],"stale":[],"tombstone":false,"updatedAt":0}}}',
+      '{"version":2,"entities":{"User:u1":{"values":5,"present":[],"stale":[],"tombstone":false,"updatedAt":0,"windows":{}}}}',
       // `entities` is an array, not a record.
-      '{"version":1,"entities":[]}',
+      '{"version":2,"entities":[]}',
+      // `windows` is not a string record.
+      '{"version":2,"entities":{"User:u1":{"values":{},"present":[],"stale":[],"tombstone":false,"updatedAt":0,"windows":{"x":1}}}}',
     ]
 
     for (const bad of cases) {
@@ -134,5 +136,17 @@ describe('RemotePersistence', () => {
 
     expect(restored).toEqual(store)
     expect(isTombstone(restored, user)).toBe(true)
+  })
+
+  it('round-trips a field window', async () => {
+    const store = writeEntity(emptyStore, user, { comments: [] }, 0, { comments: 'W' })
+    const restored = await run(
+      Effect.gen(function* () {
+        yield* RemotePersistence.save(store, { key: 'cache' })
+        return yield* RemotePersistence.restore({ key: 'cache' })
+      }),
+    )
+
+    expect(restored).toEqual(store)
   })
 })

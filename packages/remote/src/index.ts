@@ -8,7 +8,7 @@ import { Context, Effect, Option, Result, Schema, SchemaGetter, Stream } from 'e
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
 import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
 import { entityKey, isTombstone, readField, writeEntity, type EntityStore } from './store.js'
-import { plan } from './plan.js'
+import { plan, windowKey } from './plan.js'
 import {
   MutationRequest,
   MutationResult,
@@ -405,6 +405,33 @@ export class RemoteClient extends Context.Service<
   }
 >()('foldkit-remote/RemoteClient') {}
 
+/**
+ * Writes a read result into the store, recording each field's applied window so
+ * a later request with a different window refetches. Every read path should use
+ * this rather than reducing `writeEntity` by hand.
+ */
+const writeRead = (
+  store: EntityStore,
+  requests: ReadonlyArray<Requirement>,
+  result: Schema.Schema.Type<typeof ReadBatchResult>,
+  now = 0,
+): EntityStore => {
+  const windowsByEntity = new Map<string, Record<string, string>>()
+  for (const request of requests) {
+    if (request.windows === undefined) continue
+    const key = entityKey(request.entity, request.id)
+    const windows = windowsByEntity.get(key) ?? {}
+    for (const [field, window] of Object.entries(request.windows)) {
+      windows[field] = windowKey(window)
+    }
+    windowsByEntity.set(key, windows)
+  }
+  return result.entities.reduce((current, entity) => {
+    const key = entityKey(entity.entity, entity.id)
+    return writeEntity(current, key, entity.values, now, windowsByEntity.get(key))
+  }, store)
+}
+
 export const Remote = {
   make: <const Entities extends readonly EntityDescriptor<any, any>[]>(config: {
     readonly entities: Entities
@@ -472,12 +499,12 @@ export const Remote = {
     projection: Projection<Root, Value>,
   ): ReadonlyArray<Requirement> => plan(store, projection.requirements),
 
-  /** The pure plan for a projection against a Model, reading its remote store. */
-  observeProjection: <AppModel, Store extends RemoteModel, Value>(
-    bound: BoundRemote<AppModel, Store>,
-    model: AppModel,
-    projection: Projection<AppModel, Value>,
-  ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements),
+  /** The pure plan for a projection against a Model, reading its remote store. */ observeProjection:
+    <AppModel, Store extends RemoteModel, Value>(
+      bound: BoundRemote<AppModel, Store>,
+      model: AppModel,
+      projection: Projection<AppModel, Value>,
+    ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements),
 
   /** The pure plan for a Surface's projection. */
   planSurface: <AppModel, Store extends RemoteModel, Model, Message, Params>(
@@ -503,11 +530,14 @@ export const Remote = {
     yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
     const client = yield* RemoteClient
     const result = yield* client.read({ requests: missing })
-    return result.entities.reduce(
-      (current, entity) => writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
-      store,
-    )
+    return writeRead(store, missing, result)
   }),
+
+  /**
+   * Writes a read result into the store, recording each field's applied window.
+   * `requests` are the planned requirements the result answers.
+   */
+  writeRead,
 
   /** Runs a mutation through `RemoteClient`, decoding its typed Output. */
   mutate: Effect.fn('Remote.mutate')(function* <Name extends string, Input, Output>(
@@ -543,7 +573,10 @@ export const Remote = {
     bound: BoundRemote<AppModel, Store>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    toMessage: (result: Schema.Schema.Type<typeof ReadBatchResult>) => Message,
+    toMessage: (
+      result: Schema.Schema.Type<typeof ReadBatchResult>,
+      requests: ReadonlyArray<Requirement>,
+    ) => Message,
     onError: (error: RemoteReadError) => Message,
   ): EntryWithoutKeepAlive<
     AppModel,
@@ -566,7 +599,7 @@ export const Remote = {
               return yield* client.read({ requests: requirements })
             })(),
           ).pipe(
-            Stream.map(toMessage),
+            Stream.map(result => toMessage(result, requirements)),
             Stream.catchIf(
               (_error): _error is RemoteReadError => true,
               error => Stream.succeed(onError(error)),
