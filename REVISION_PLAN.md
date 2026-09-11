@@ -156,6 +156,9 @@ Remote     = normalized entity store + requirement planner
 
 RemoteDrizzle = Remote Selection/Query graph ──▶ Drizzle relational query
                 (fields ──▶ columns, refs ──▶ predicates, relations ──▶ loads)
+
+Connection = ordered entity references + explicit known boundaries + overlays
+             (pages, live events, and optimistic inserts are all evidence about it)
 ```
 
 ```text
@@ -332,7 +335,7 @@ build in-repo under the existing `foldkit-*` convention for now; keep
 `foldkit-surface` designed so it could be proposed upstream later. Do not block the
 revision on an upstream decision. Revisit only after Phase 1 acceptance.
 `foldkit-remote-drizzle` is **provisional**: it earns a package only if it meets
-the value bar in §8.12.
+the value bar in §8.14.
 
 ### 4.4 One shared application scope
 
@@ -691,6 +694,50 @@ The patch schema derives from the entity struct. No secondary field type system.
 Edge cases: patching `id`; patching a relation; an empty patch; patching an
 optional field to absent vs `null`.
 
+### 7.5 Query, Connection, and Mutation
+
+```ts
+const ProjectsByOwner = Query.make("ProjectsByOwner", {
+  Input: Schema.Struct({ ownerId: UserId, sort: SortOrder }),
+  Result: Query.connection(Project, {
+    edgeKey: Schema.String,                         // optional; default edge identity is EntityRef
+    live: { prepend: "visible", append: "boundary" }, // insertion policy (see §8.13)
+  }),
+})
+
+const RenameProject = Mutation.make("RenameProject", {
+  Input: Schema.Struct({ id: ProjectId, name: Schema.String }),
+  Output: Schema.Struct({ projectId: ProjectId }),
+})
+```
+
+A `QueryRef` is a typed reference to one logical connection plus a window:
+
+```ts
+const latest = pipe(ProjectsByOwner.ref({ ownerId, sort: "newest" }), Query.first(25))
+const older = pipe(
+  ProjectsByOwner.ref({ ownerId, sort: "newest" }),
+  Query.after(cursor),
+  Query.first(25),
+)
+```
+
+**Invariants**
+
+- **Connection identity ≠ pagination request identity.** Connection identity is the
+  query descriptor plus its filter/sort input (canonical encoded) — **not**
+  `first`/`last`/`after`/`before`. `latest` and `older` above populate the *same*
+  normalized Connection; they are different windows of one logical structure.
+- A `QueryRef`'s cache key derives from the descriptor + canonical encoded input;
+  application code never writes cache-key arrays or cursors.
+- `Query.connection` options are part of the descriptor: `edgeKey` (when the same
+  node may appear more than once) and `live` (insertion policy).
+- Mutation `Output` is inferred; no explicit generics.
+
+**Edge cases**: canonical input key order; two inputs that encode equal; an input
+that is itself a relation; `edgeKey` present vs the `EntityRef` default; a Query
+whose `Result` is a single entity rather than a connection.
+
 ---
 
 ## 8. Remote
@@ -717,11 +764,10 @@ const AppRemote = pipe(Data, Remote.at(App.model.remote))
 
 ```ts
 interface RemoteModel {
-  entities: EntityStore      // values + presence (+ tombstones)
-  queries: QueryStore        // connection order + cursors (references, not copies)
+  entities: EntityStore        // values + presence (+ tombstones)
+  connections: ConnectionStore // ordered refs + explicit known boundaries + overlays
   requests: RequestState
   mutations: MutationState
-  optimistic: OptimisticLayers
 }
 ```
 
@@ -731,6 +777,11 @@ interface RemoteModel {
 - Cache updates happen only through Remote Messages processed by `Remote.update`.
   Network code never mutates the store directly, so DevTools/time-travel see cache
   evolution.
+- **One reconciliation engine.** The four producers of new facts — `ReadBatch` (a
+  page), `MutationResult`, `OptimisticOperation`, and `LiveEvent` — all feed
+  `EntityStore.apply` and `ConnectionStore.apply`. Pagination and live data are not
+  separate subsystems; they are evidence about the same normalized world (§8.12,
+  §8.13).
 - The remote Submodel owns its internal Messages; the app Message union wraps them
   (e.g. `GotRemoteMessage({ message })`) rather than being polluted with
   `StartedRequest`, `ReceivedBatch`, etc.
@@ -743,6 +794,7 @@ interface RemoteModel {
 - Out-of-order/overlapping batches writing the same field (last-writer policy vs
   merge; define it).
 - Entity deleted server-side (tombstone) then recreated (clear tombstone).
+- A page response arriving after the connection was invalidated.
 - Restoring a persisted cache whose entity set/version changed (clear + refetch).
 
 ### 8.3 Field presence and tombstones
@@ -787,7 +839,8 @@ type RemoteData<A> =
 ```
 
 `RemoteData.match(...)` is exhaustive. No Suspense-like hidden control flow;
-loading/error/data are visible application states.
+loading/error/data are visible application states. A connection projects as
+`RemoteData<Connection<A>>` (see §8.12).
 
 **Edge cases**
 
@@ -843,7 +896,9 @@ Verify exact syntax against rc.112.
 - Batching is semantic (`ReadBatch` built by Remote), not transport-dependent.
 - Reads may dedupe/union/batch. **Mutations preserve order and are never merged or
   auto-batched** (a future explicit transaction abstraction may batch them).
-- Live data is effect streaming RPC merged into the same store via Messages.
+- Live data is effect streaming RPC merged into the same store via Messages. The
+  live method carries a resume cursor and emits ordered, identified events; replay
+  semantics are part of the protocol, not the transport (§8.13).
 - Application transport is chosen directly from Effect (`RpcClient.layerProtocolHttp`,
   `layerProtocolSocket`, …).
 - A test fake must be built from the protocol spec, not from the implementation.
@@ -896,6 +951,11 @@ base cache + optimistic layer #1 + #2 = visible cache
 success → merge server patch, remove the layer
 failure → remove the layer, revealing the base
 ```
+
+Mutation results, live events, and optimistic overlays can describe the same change.
+Every cache operation therefore carries a stable identity (`MutationId`,
+`LiveEventId`, `EdgeIdentity`), an optimistic overlay records which authoritative
+result settles it, and inserting an edge already present is a no-op (§8.13).
 
 **Edge cases**
 
@@ -990,7 +1050,201 @@ const Server = RemoteServer.make(Data, {
 - Pure introspection: `Remote.inspect`, `Remote.inspectEntity`,
   `Remote.inspectQuery`, `Remote.plan`; DevTools must not reach into private layouts.
 
-### 8.12 Drizzle adapter (`foldkit-remote-drizzle`, provisional)
+### 8.12 Connections (normalized ordered data)
+
+**Reframe:** a connection is a normalized ordered data structure. Pagination and
+live events are merely different ways of learning more facts about it. One
+reconciliation model handles initial fetch, next/previous page, optimistic insert,
+live insert/delete, mutation result, refetch, and reconnect.
+
+```text
+Entity store            Connection store
+Project:p1              ProjectsByOwner({ ownerId: u1, sort: newest })
+Project:p2
+Project:p3              known ordering: p9 p7 p4 p2 p1
+Project:p4              known ranges:
+                          HEAD ───── cursor:C1
+                                    gap?
+                              cursor:C2 ───── TAIL
+```
+
+**Do not store a flat array plus `hasNext`.** If page 1 is `A B C D` and page 3 is
+`I J K L` with page 2 unloaded, a flat array falsely claims `A B C D I J K L` are
+adjacent. Represent **segments** with explicit boundaries:
+
+```ts
+interface ConnectionState {
+  readonly segments: ReadonlyArray<Segment>
+  readonly optimistic: ReadonlyArray<ConnectionOverlay>
+  readonly live: LiveState
+  readonly stale: boolean
+}
+
+interface Segment {
+  readonly edges: ReadonlyArray<EdgeRef>
+  readonly start: Boundary
+  readonly end: Boundary
+}
+
+type Boundary =
+  | { readonly _tag: "Terminal" }                    // definitively the head/tail
+  | { readonly _tag: "Cursor"; readonly cursor: Cursor }
+  | { readonly _tag: "Unknown" }                     // more may exist beyond here
+```
+
+**Edge identity.** Default edge identity is the `EntityRef`. When the same node may
+legitimately appear more than once, `Query.connection(Entity, { edgeKey: Schema })`
+supplies a server-provided edge key. Do not bake in a false universal assumption.
+
+**Merge is pure and deterministic.** `Connection.merge(current, page)` reconciles a
+page against the current connection using connection identity, edge identity, the
+request cursor, and the response start/end cursors. No RPC, no Effect, no clock —
+just deterministic data reconciliation that can be property-tested. Overlapping
+segments merge without duplication (`A B C D` + `C D E F` ⇒ `A B C D E F`).
+
+**Boundaries survive optimistic and live inserts.** An optimistic insert at the
+unresolved far end must not pretend it lives inside a contiguous loaded server range.
+Model it as an overlay:
+
+```text
+SERVER-KNOWN          OVERLAYS
+A B C ... T           prepend: optimistic X
+[more after]          append beyond unresolved edge: optimistic Y
+```
+
+Visible ordering = known server segments + overlays. When the server later returns
+canonical placement, the overlay disappears and the canonical edge is inserted (edge
+identity makes this idempotent).
+
+**Public API stays tiny.** A Surface receives `RemoteData<Connection<A>>` with
+`items`, `hasNext`, `hasPrevious` (internally, `next`/`previous` as
+`Option<PageRef>`). The UI emits ordinary Foldkit Messages (`ClickedLoadMore`);
+`update` issues `Remote.next(...)` / `Remote.previous(...)` as Commands — a
+declarative "extend the known forward/backward range of this connection", with no
+cursor bookkeeping in the UI. `Connection` carries its own boundaries.
+
+**Invariants**
+
+- Connection identity excludes pagination arguments; `first(25)` and
+  `after(cursor).first(25)` populate the same connection.
+- All connection mutations (page merge, optimistic overlay, live op, mutation
+  result) go through one reducer and produce the same canonical structure.
+- `Connection.merge` is pure and deterministic.
+- `hasNext`/`hasPrevious` derive from boundaries, never from "we got fewer rows".
+- A connection is never an array that claims adjacency it cannot prove.
+
+**Edge cases**
+
+- Page 1 then page 3 with no page 2 (the gap is preserved).
+- Forward, backward, jump-to-cursor, SSR partial window, prefetched page.
+- Overlapping pages with reordered or duplicated edges.
+- `edgeKey` collisions; a node legitimately appearing twice.
+- An optimistic insert beyond an unresolved boundary, later confirmed canonically.
+- An insert at the head while a middle window is visible (see the live policy below).
+- A mutation result and a live event for the same insert (dedupe).
+- Invalidation while an optimistic overlay is pending.
+- A `stale` connection rendered as `RemoteData.Refreshing`.
+
+### 8.13 Live data
+
+**Two fundamentally different live facts.**
+
+- **Entity facts** update normalized entities:
+  `EntityChanged({ ref, changed: ["status"] })`, or a normalized
+  `EntityPatched({ ref, patch })` / `EntityDeleted({ ref })`.
+- **Connection facts** describe membership/order and cannot be expressed as entity
+  patches: `Connection.prepend/append/insertBefore/insertAfter/remove/move/invalidate`.
+
+Both flow through `Remote.Message` → `Remote.update` into `EntityStore.apply` /
+`ConnectionStore.apply` — the same reducers pages use.
+
+**Events should be invalidations, not CDC payloads.** Prefer
+`EntityChanged(Project:p1, fields = ["status"])`; RemoteServer then re-resolves the
+**currently selected, authorized** fields for active subscribers and sends the
+normalized patch. This keeps authorization centralized, supports computed fields,
+lets different subscribers hold different selections, and never leaks raw database
+rows. Direct trusted patches are a later optimization.
+
+**Selection-aware fan-out.** A live event declares the fields that changed. A
+subscriber that does not select those fields is not woken and nothing is refetched.
+Because Surface exposes active selections, live subscriptions derive from active
+Surfaces: union their requirements while mounted, drop a requirement when the Surface
+unmounts. Surface lifetimes become live-subscription lifetimes; there is no manually
+managed subscription list.
+
+**Streaming RPC is transport, not reliability.** Delivery while connected does not
+answer: what if the connection drops, events were missed, the server restarts, events
+arrive out of order, or a client is offline for 30 minutes? Make replay part of the
+protocol from day one:
+
+```ts
+Live({ requirements, after: Option<LiveCursor> })
+// yields { cursor: LiveCursor, event: LiveEvent }
+```
+
+The client persists the last applied cursor; on reconnect it subscribes after it. The
+server replays from there, or answers `ResumeUnavailable`, in which case the affected
+requirements are marked stale, refetched, and a new cursor is established. This is
+stronger than "reconnect and hope".
+
+**Ordering and gaps must be defined.**
+
+- Ordering is promised **per live stream/session** (or per connection/topic), never
+  globally unless the backend can provide it.
+- Events for the same entity/connection are applied in cursor order.
+- Duplicates are ignored (`cursor <= lastApplied` ⇒ no-op).
+- A gap (`expected 100`, `received 105`) triggers a resume request, or
+  invalidation/refetch when the transport cannot resume.
+
+**Mutation / live / optimistic deduplication.** Rename a project and three things
+describe the same change: the optimistic patch, the mutation response, and a live
+event. Entity values are idempotent, but connection insertion is not (`prepend` three
+times inserts three edges). Every cache operation carries a stable identity
+(`MutationId`, `LiveEventId`, `EdgeIdentity`); an optimistic overlay records which
+authoritative result settles it; inserting an edge already present is a no-op.
+
+**Live + optimistic ordering is what overlays are for.** Chat example: canonical
+`A B C`, optimistic `X`, live `Y` → visible `X Y A B C`. When the server confirms
+`X`, remove the optimistic edge and insert the canonical one; edge identity prevents
+flicker or duplication. No imperative array surgery.
+
+**Live insertion policy (pagination boundaries).** Viewing the latest 30 messages and
+a new message arrives → prepend visibly. Viewing items 101–120 and an item is
+inserted at the head → it should not suddenly appear. Make this explicit:
+
+```ts
+Query.connection(Project, { live: { prepend: "visible", append: "boundary" } })
+```
+
+Semantics: `visible` (alter the visible window), `boundary` (record the new edge
+outside the loaded boundary), `invalidate` (mark stale and refetch), `ignore` (do not
+subscribe to membership changes). **Invalidation is a correctness escape hatch**, not
+an architectural failure: when server logic cannot determine the precise consequence,
+emit `Connection.invalidate`.
+
+**Invariants**
+
+- Pagination and live share one `Connection` structure and one reducer.
+- Live events are ordered per stream; duplicates are ignored; gaps
+  resume-or-invalidate.
+- The live cursor is monotonic and persisted; resume failure is explicit
+  (`ResumeUnavailable`), never silent.
+- Subscriptions derive from active Surfaces and are selection-aware.
+- Invalidation is always available and always correct.
+
+**Edge cases**
+
+- Resume unavailable after a restart; server cursor retention/expiry.
+- Out-of-order delivery; duplicate delivery; gap detection.
+- A live event for a field no active Surface selects (skip).
+- A live connection op for a connection no Surface observes (skip).
+- A live insert into a middle window under each policy
+  (`visible`/`boundary`/`invalidate`/`ignore`).
+- A live delete of an optimistically inserted edge.
+- Invalidation racing an in-flight page request.
+- Field authorization changing between an event and its re-resolution.
+
+### 8.14 Drizzle adapter (`foldkit-remote-drizzle`, provisional)
 
 **Thesis:** not a Drizzle driver — a **compiler from Remote's declarative
 entity/selection/query graph into Drizzle's typed relational query graph**, and
@@ -1079,7 +1333,7 @@ const ProjectsByOwnerSource = RemoteDrizzle.query(ProjectsByOwner, {
   directly inside `RemoteServer.mutation` (maybe `RemoteDrizzle.returning` /
   `columns` / `normalize` helpers later).
 
-### 8.13 Fate parity (framing for acceptance)
+### 8.15 Fate parity (framing for acceptance)
 
 The design aims to capture Fate's architectural benefits as native Foldkit + Effect
 primitives, and to add what Fate lacks:
@@ -1099,6 +1353,10 @@ primitives, and to add what Fate lacks:
 | live views | streaming RPC → normalized patches |
 | persisted cache | Effect Persistence / KV |
 | query composition | Selection + Surface composition |
+| normalized connections | `ConnectionStore` segments + boundaries |
+| connection events | `Connection.prepend/append/remove/move/invalidate` |
+| field-aware live fan-out | selection-aware live events |
+| live resume | monotonic `LiveCursor` + `ResumeUnavailable` |
 
 Beyond Fate: **Message capability masking** (`messages:`), full transition history
 through Foldkit Messages, one contract shared by Agent/Sync/Remote, and no
@@ -1112,9 +1370,9 @@ earned (see §13, §17).
 
 **Parity goal for acceptance:** data masking, composition, normalized entities,
 field presence, minimal fetching, batching, server field selection, ORM pruning,
-mutation reconciliation, optimistic updates, normalized lists/pagination, live,
-SSR, persistent cache. Deliberately **not** copied: Suspense-style render control
-flow.
+mutation reconciliation, optimistic updates, normalized connections with
+boundary-aware pagination, ordered and resumable live data, SSR, and persistent
+cache. Deliberately **not** copied: Suspense-style render control flow.
 
 ---
 
@@ -1298,6 +1556,14 @@ const journal = yield* makeJournal({
 | Drizzle adapter | A compiler from Selection/Query to Drizzle, **not** a driver; provisional | Drizzle is Effect-native and derives Schemas; the adapter earns its place only via the value bar. |
 | Drizzle mutations | Use Drizzle's Effect `db` directly; no mutation DSL initially | Drizzle's Effect API is already good; do not hide it prematurely. |
 | Drizzle relations | Metadata describes relationships; the adapter picks JOIN vs batched load | Do not force JOINs; batching is the normalized-system advantage. |
+| Connection identity | Query descriptor + filter/sort input; pagination args excluded | Pages and live events are evidence about one logical connection. |
+| Connection representation | Segments + boundaries (+ overlays), not a flat array + `hasNext` | A flat array falsely claims adjacency between non-contiguous pages. |
+| Edge identity | Default `EntityRef`; optional server `edgeKey` | The same node may legitimately appear more than once. |
+| Page merge | Pure deterministic `Connection.merge` | Property-testable; one reducer for pages, live, optimistic, and mutation results. |
+| Live events | Prefer invalidations (`EntityChanged(fields)`); the server re-resolves selected, authorized fields | Centralizes authorization; supports computed fields and per-subscriber selections. |
+| Live delivery | Ordered per stream, deduped, monotonic resume cursor, explicit `ResumeUnavailable` | A streaming transport alone does not make live reliable. |
+| Live/optimistic dedupe | Stable `MutationId`/`LiveEventId`/`EdgeIdentity`; overlays know their settler | Prevents triple inserts from optimistic + mutation + live. |
+| Live insertion policy | Per connection: `visible`/`boundary`/`invalidate`/`ignore` | An insert at the head must not disturb a middle window. |
 
 ---
 
@@ -1356,6 +1622,15 @@ Use this as a checklist when designing tests. Cross-reference the per-section li
   order; a relation-only selection that still needs the PK; field authorization vs
   column selection; multi-tenant `where`; date/numeric/json/array column mapping;
   branded id override; mutations via the raw Effect Drizzle API.
+
+**Connections / live**
+- Non-contiguous pages (gap preserved); overlapping merge; reordered/duplicate edges;
+  `edgeKey` collision; a node appearing twice; an optimistic insert beyond a
+  boundary; a head insert while a middle window is visible; mutation+live insert
+  dedupe; invalidate racing a page request; a stale connection rendered as
+  `Refreshing`; live resume unavailable/expired; out-of-order/duplicate/gap events;
+  selection-aware skip; live delete of an optimistic edge; authorization changing
+  between an event and its re-resolution.
 
 ---
 
@@ -1437,6 +1712,13 @@ directory (a probe from the repo root may resolve a different `effect`).
 - The adapter captures no connection; generated Sources require the Drizzle service.
 - Keep relation metadata declarative; do not bake a JOIN strategy into it.
 - A `NULL` column is a present value, not absence.
+
+**Connections / live**
+- Streaming RPC is transport, not reliability: define replay (resume cursor,
+  `ResumeUnavailable`) from day one.
+- Fate is the correctness baseline for pagination boundaries, field-aware fan-out,
+  connection events, and invalidation; match those behaviors rather than redesigning
+  them.
 
 **Process**
 
@@ -1520,12 +1802,16 @@ no fetch happens during `Surface.read`.
 
 ### Phase 5 — Queries and connections
 
-`Query.make`, `QueryRef`, connections, pagination, query cache, connection
-normalization. Still no transport.
+`Query.make`, `QueryRef`, `ConnectionStore` with segments/boundaries, edge identity,
+and the pure `Connection.merge`. Still no transport.
 
-**Acceptance:** connection identity is the encoded input + window; an entity update
-propagates to every connection containing it; overlapping windows dedupe; cursor
-state round-trips; no string cache keys exist in application code.
+**Acceptance:** connection identity = descriptor + filter/sort input (pagination
+args excluded), so `first(25)` and `after(cursor).first(25)` share one connection;
+`Connection.merge` is pure, deterministic, and property-tested over overlap, gap,
+reorder, and duplicate cases; non-contiguous pages preserve an explicit gap;
+`hasNext`/`hasPrevious` derive from boundaries; the `edgeKey` override works; an
+entity update propagates to every connection that contains it; no string cache keys
+exist in application code.
 
 ### Phase 6 — Effect RPC wire
 
@@ -1557,7 +1843,9 @@ Surface and releases the old; no I/O during render.
 `Mutation.make`, `Remote.mutate`, mutation status, cache patches, typed Output.
 
 **Acceptance:** a mutation result reconciles the store through Messages; transport
-retries do not duplicate a mutation's application (idempotency policy explicit);
+retries do not duplicate a mutation's application (idempotency policy explicit); a
+mutation result and a live event for the same entity are idempotent, and a mutation
+result plus a live insert of the same edge do not double-insert (edge identity);
 DevTools shows the cache mutation.
 
 ### Phase 10 — Optimistic layers
@@ -1566,14 +1854,22 @@ DevTools shows the cache mutation.
 
 **Acceptance:** overlapping optimistic patches rebase correctly on success; a
 failure removes exactly its layer; a success patch conflicting with a later layer is
-reconciled; no inverse patches are computed.
+reconciled; an optimistic insert beyond an unresolved boundary records an overlay and
+does not corrupt server-known ordering; a confirmed insert removes the overlay and
+inserts the canonical edge without flicker; no inverse patches are computed.
 
-### Phase 11 — Live streaming
+### Phase 11 — Live data
 
-Effect streaming RPC merged through the same normalized cache.
+Streaming Effect RPC with a resume cursor, ordered events, and connection/entity
+facts, all merged through `EntityStore.apply`/`ConnectionStore.apply`.
 
-**Acceptance:** live patches upsert into the store; a live/read race has a defined
-order; no parallel live-state architecture exists.
+**Acceptance:** a live event declares changed fields and wakes only subscribers that
+select them; subscriptions derive from active Surfaces and disappear with them; a
+dropped stream resumes from the persisted cursor or fails explicitly with
+`ResumeUnavailable` and refetches; duplicate events are no-ops and a gap
+resumes-or-invalidates; ordering is defined per stream; each insertion policy
+(`visible`/`boundary`/`invalidate`/`ignore`) behaves as specified; no parallel
+live-state architecture exists.
 
 ### Phase 12 — Persistence and SSR
 
@@ -1595,7 +1891,7 @@ installable until their replacements ship; migration notes exist.
 ### Phase 14 — `foldkit-remote-drizzle` (provisional)
 
 Only after Phases 7 and 12 are solid, and only if the adapter meets the value bar
-(§8.12): Entity↔Table binding, `Entity` Source compilation from a Selection,
+(§8.14): Entity↔Table binding, `Entity` Source compilation from a Selection,
 batched relation loads, Query→Connection with pagination, and Schema derivation.
 Pin and probe Drizzle first (§3.5).
 
@@ -1625,6 +1921,12 @@ names are rejected; production exposure remains separately opt-in.
   must fail `tsc`.
 - `Remote.plan`, `Remote.merge`, and replay are pure and **property-tested** over
   generated inputs (including cyclic requirements and empty/fully-satisfied caches).
+- `Connection.merge` is property-tested over generated segments, gaps, overlaps,
+  reorders, and duplicates.
+- Live ordering/dedupe/gap/resume are tested, including the `ResumeUnavailable` path
+  and the four insertion policies.
+- Selection-aware fan-out is tested: a change to a field no active Surface selects
+  wakes no Surface.
 - Presence and tombstone semantics have explicit cases (missing vs present-undefined
   vs present-null vs stale vs not-found).
 - RPC layers are tested with Effect's in-process/test RPC tooling; any fake is built
@@ -1661,7 +1963,8 @@ installable; CI is green.
 | Drizzle external deps uninstalled/unproven | Medium | Pin and probe `drizzle-orm` / `effect-postgres` / `effect-schema` before Phase 14; the adapter is provisional. |
 | ORM coupling / leaking SQL strategy | Medium | Relation metadata stays declarative; the adapter chooses strategy; abort the package if the value bar is not met. |
 | Connection/pagination correctness (races, stable order) | High | Require a stable total order; explicit tests for insert/remove/pagination semantics. |
-| Fate-parity gaps (lists, rebasing, GC, races) | High | Treat as implementation work with dedicated phases/tests (§8.13), not as assumed. |
+| Live replay/ordering correctness | High | Resume cursor + `ResumeUnavailable` + per-stream ordering are protocol from day one. |
+| Fate-parity gaps (lists, rebasing, GC, races) | High | Treat as implementation work with dedicated phases/tests (§8.15), not as assumed. |
 
 ---
 
@@ -1703,6 +2006,18 @@ installable; CI is green.
 - **Tombstone** — a cached not-found marker for an entity.
 - **Optimistic layer** — an overlay of pending mutations over the base cache.
 - **Capability** — a Message a feature/Surface may produce; not authorization.
+- **Connection** — a normalized ordered structure of entity references with explicit
+  known boundaries, overlays, and live state.
+- **Segment / Boundary** — a contiguous run of known edges with `Terminal`/`Cursor`/
+  `Unknown` ends; boundaries make gaps explicit.
+- **Edge identity** — how an edge is identified (default `EntityRef`; optional
+  server `edgeKey`).
+- **Connection overlay** — an optimistic insertion held outside the server-known
+  segments until settled.
+- **LiveCursor / LiveEvent / ResumeUnavailable** — the monotonic per-stream position,
+  an ordered live fact, and the explicit "cannot resume" answer that forces a refetch.
+- **Live policy** — per-connection `visible`/`boundary`/`invalidate`/`ignore` for how
+  a live insertion interacts with pagination boundaries.
 
 ---
 
@@ -1728,3 +2043,9 @@ is amended with the architecture changes the failures imply.
 7. Is `foldkit-remote-drizzle` worth shipping, or is a generic `RemoteServer.entity`
    Source short enough? (Decide after Phase 7, with a real Drizzle probe.)
 8. Which Drizzle version/driver and which database for the first adapter?
+9. Live ordering scope (per stream vs per connection/topic) and server cursor
+   retention/expiry.
+10. Do live events carry invalidations, direct normalized patches, or both — and
+    under what conditions?
+11. Default live insertion policy, and whether `edgeKey` is ever inferable rather
+    than declared.
