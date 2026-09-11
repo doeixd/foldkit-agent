@@ -1527,7 +1527,7 @@ const TodoSync = Sync.make(App, "Todos", {
 - The low-level `defineSync({ message, shared, empty, durable, replay })` remains the
   protocol primitive and escape hatch; `Sync.make` compiles down to it.
 - `foldkit-durable` stays independent; Sync produces the replay contract via
-  `Sync.journalContract(TodoSync)` → `{ operation:{encode,decode},
+  `TodoSync.journalContract()` → `{ operation:{encode,decode},
   snapshot:{encode,decode}, empty, reduce }`.
 
 ### 10.2 Edge cases (carry forward from the current implementation — these are hard-won)
@@ -1598,7 +1598,7 @@ const TodoSync = Sync.make(App, "TodoSync", {
 })
 
 const journal = yield* makeJournal({
-  ...Sync.journalContract(TodoSync), file, opId, actorId, authorize,
+  ...TodoSync.journalContract(), file, opId, actorId, authorize,
 })
 ```
 
@@ -2173,8 +2173,9 @@ installable; CI is green.
 pagination acceptance against a real Postgres and decide whether the package
 ships or is dropped (open question 7); the Surface-based `Sync.make` on top of
 `Sync.project` landed as `5d5a2d3` (it adds an explicit `initial` Model, which the
-§10 sketch omitted); `Sync.journalContract` remains; work through the review
-findings and open questions below.
+§10 sketch omitted); the durable contract landed as `5be48f3` as a method —
+`TodoSync.journalContract()`, not `Sync.journalContract(TodoSync)`; work through
+the review findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
