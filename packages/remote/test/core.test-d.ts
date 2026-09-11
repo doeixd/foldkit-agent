@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { Surface } from 'foldkit-surface'
-import { Entity, Remote, Selection, type RemoteData } from '../src/index.js'
+import { Entity, Remote, RemoteData, Selection } from '../src/index.js'
 
 const User = Entity.make(
   'User',
@@ -49,3 +49,15 @@ Entity.patch(Project.ref('p1'), { status: 'archived' })
 Entity.patch(Project.ref('p1'), { banana: 1 })
 // @ts-expect-error `status` is a string, not a number
 Entity.patch(Project.ref('p1'), { status: 123 })
+
+// --- RemoteData.match is exhaustive ----------------------------------------
+
+const initial: RemoteData<number> = { _tag: 'Initial' }
+// @ts-expect-error `Failed` is a required match case
+RemoteData.match(initial, {
+  Initial: () => 0,
+  Loading: () => 0,
+  Ready: () => 0,
+  Refreshing: () => 0,
+  NotFound: () => 0,
+})
