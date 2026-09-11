@@ -18,6 +18,7 @@ import { SqlClient } from 'effect/unstable/sql'
 import type { Codec } from './codec.js'
 import { actorId as toActorId, type ActorId, type DocumentId, type OpId } from './ids.js'
 import {
+  CompactedCursorError,
   IdentityConflictError,
   InvalidCompactionError,
   InvalidCursorError,
@@ -116,7 +117,10 @@ export interface Journal<Operation, Snapshot, Principal> {
   readonly read: (
     key: DocumentId,
     after: number,
-  ) => Effect.Effect<ReadonlyArray<Committed<Operation>>, InvalidCursorError | JournalError>
+  ) => Effect.Effect<
+    ReadonlyArray<Committed<Operation>>,
+    InvalidCursorError | CompactedCursorError | JournalError
+  >
   /**
    * Commits an operation. A repeat of a known `opId` returns `Committed` with the
    * stored operation while its payload is retained, and `AlreadyCommitted`
@@ -340,7 +344,8 @@ const makeShape = <Operation, Snapshot, Principal>(
     yield* Effect.annotateCurrentSpan({ key, after })
     const documents = yield* sql<{
       readonly cursor: number
-    }>`SELECT cursor FROM documents WHERE key = ${key}`.pipe(
+      readonly compact_before: number
+    }>`SELECT cursor, compact_before FROM documents WHERE key = ${key}`.pipe(
       Effect.mapError(cause => journalError('Could not read the log', cause)),
     )
     const cursor = documents[0]?.cursor ?? 0
@@ -350,6 +355,18 @@ const makeShape = <Operation, Snapshot, Principal>(
           after,
           cursor,
           message: `Cursor ${after} is outside [0, ${cursor}]`,
+        }),
+      )
+    // Compaction removes the payloads a cursor below the floor would need. Fail
+    // closed rather than returning a tail that silently starts late.
+    const floor = documents[0]?.compact_before ?? 0
+    if (after < floor)
+      return yield* Effect.fail(
+        new CompactedCursorError({
+          after,
+          floor,
+          cursor,
+          message: `Cursor ${after} is below the compaction floor ${floor}`,
         }),
       )
     const rows =

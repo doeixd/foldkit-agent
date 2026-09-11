@@ -279,9 +279,19 @@ describe('a durable journal', () => {
 
       yield* journal.compact(todos, 2)
       expect(yield* journal.floor(todos)).toBe(2)
-      expect((yield* journal.read(todos, 0)).map(committed => committed.operation.opId)).toEqual([
+      // `read` fails closed below the floor instead of returning a late tail.
+      expect(yield* Effect.result(journal.read(todos, 0))).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'CompactedCursorError', after: 0, floor: 2, cursor: 3 },
+      })
+      expect(yield* Effect.result(journal.read(todos, 1))).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'CompactedCursorError' },
+      })
+      expect((yield* journal.read(todos, 2)).map(committed => committed.operation.opId)).toEqual([
         'a:3',
       ])
+      expect(yield* journal.read(todos, 3)).toEqual([])
       expect(yield* journal.load(todos)).toEqual(before)
 
       // A retransmission of a compacted operation is answered from its identity,

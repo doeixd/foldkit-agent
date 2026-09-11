@@ -25,6 +25,17 @@ export class InvalidCursorError extends Schema.TaggedError<InvalidCursorError>()
   },
 ) {}
 
+/** A read requested a position compaction has already discarded. */
+export class CompactedCursorError extends Schema.TaggedError<CompactedCursorError>()(
+  'CompactedCursorError',
+  {
+    after: Schema.Number,
+    floor: Schema.Number,
+    cursor: Schema.Number,
+    message: Schema.String,
+  },
+) {}
+
 /** A compaction cursor was not a forward step within the snapshot. */
 export class InvalidCompactionError extends Schema.TaggedError<InvalidCompactionError>()(
   'InvalidCompactionError',

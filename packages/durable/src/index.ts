@@ -9,6 +9,7 @@
 export type { Codec } from './codec.js'
 export { ActorId, DocumentId, OpId, actorId, documentId, opId } from './ids.js'
 export {
+  CompactedCursorError,
   IdentityConflictError,
   InvalidCompactionError,
   InvalidCursorError,

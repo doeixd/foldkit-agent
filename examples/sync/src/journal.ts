@@ -14,7 +14,14 @@ import {
   type Operation,
   type TransportClient,
 } from 'foldkit-sync'
-import { decodeShared, decodeMessage, replay, type Message, type Shared } from './app.js'
+import {
+  decodeShared,
+  decodeMessage,
+  encodeShared,
+  replay,
+  type Message,
+  type Shared,
+} from './app.js'
 import { Sync } from './sync.js'
 
 /** Supplied by a trusted transport, never decoded from an operation. */
@@ -234,11 +241,31 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
           await settle(toCommitted(result.committed, principal.documentId))
           acknowledged.push(result.committed.operation.opId)
         }
-        if (cursor < Effect.runSync(durable.floor(toDocumentId(principal.documentId)))) {
+        // A read below the floor means the client must adopt a checkpoint. The
+        // read decides that itself, so a compaction cannot slip between the
+        // floor check and the read and produce a gapped stream.
+        const caught = Effect.runSync(
+          durable.read(toDocumentId(principal.documentId), cursor).pipe(
+            Effect.map(rows => ({ rows })),
+            Effect.catchTag('CompactedCursorError', () =>
+              Effect.succeed({ checkpoint: true as const }),
+            ),
+          ),
+        )
+        if ('checkpoint' in caught) {
           const { cursor: at, model } = snapshot(principal.documentId)
-          return { checkpoint: { cursor: at, model }, operations: [], rejected, acknowledged }
+          return {
+            checkpoint: { cursor: at, model: encodeShared(model) },
+            operations: [],
+            rejected,
+            acknowledged,
+          }
         }
-        return { operations: read(principal.documentId, cursor), rejected, acknowledged }
+        return {
+          operations: caught.rows.map(committed => toCommitted(committed, principal.documentId)),
+          rejected,
+          acknowledged,
+        }
       },
     }),
     close: () => {

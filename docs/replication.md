@@ -87,7 +87,9 @@ It owns storage and ordering only, and gives you:
 - **Idempotent append.** A repeated `opId` is answered from the log; reusing it
   with different data is an `IdentityConflictError`. Retries are safe.
 - **Stable, gap-free order.** Each commit gets the next `sequence`; `read(key,
-  after)` returns what changed since a cursor.
+  after)` returns what changed since a cursor, or fails with
+  `CompactedCursorError` once the floor has passed `after`, so a caller adopts a
+  checkpoint rather than a partial tail.
 - **Snapshot + cursor written atomically**, so a replica can catch up from a
   cursor or adopt a `checkpoint`.
 - **Compaction** drops old payloads below a floor without changing what replaying

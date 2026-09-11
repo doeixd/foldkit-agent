@@ -6,6 +6,7 @@ const Todo = Schema.Struct({ id: Schema.String, title: Schema.String })
 export const Shared = Schema.Struct({ todos: Schema.Array(Todo) })
 export type Shared = typeof Shared.Type
 export const decodeShared = Schema.decodeUnknownSync(Shared, { onExcessProperty: 'error' })
+export const encodeShared = Schema.encodeSync(Shared)
 export const Model = Schema.Struct({
   ...Shared.fields,
   selectedTodoId: Schema.NullOr(Schema.String),
