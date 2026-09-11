@@ -19,6 +19,8 @@ export interface StyleValue {
   readonly conditions?: ReadonlyArray<StyleCondition>
   /** Rule-based appearance compiled to a deterministic class plus CSS. */
   readonly rules?: ReadonlyArray<StyleRule>
+  /** Class-independent CSS (keyframes, layers, global rules). */
+  readonly globalCss?: ReadonlyArray<string>
 }
 
 export interface StyleCondition {
@@ -36,6 +38,8 @@ export interface NamedStyle<Slots> {
   readonly mixin: MixinValue<never>
   /** Concatenated rule CSS for every static piece; identical rules share a class. */
   readonly css: string
+  /** Concatenated class-independent CSS (keyframes, layers, global rules). */
+  readonly globalCss: string
 }
 
 const tokens = (value: string): ReadonlyArray<string> =>
@@ -56,11 +60,13 @@ export const inline = (value: Readonly<Record<string, string>>): StyleValue =>
 export const compose = (...pieces: ReadonlyArray<StyleValue>): StyleValue => {
   const conditions = pieces.flatMap(piece => piece.conditions ?? [])
   const rules = pieces.flatMap(piece => piece.rules ?? [])
+  const globalCss = pieces.flatMap(piece => piece.globalCss ?? [])
   return Object.freeze({
     classes: Object.freeze(pieces.flatMap(piece => piece.classes)),
     style: Object.freeze(Object.assign(Object.create(null), ...pieces.map(piece => piece.style))),
     ...(conditions.length === 0 ? {} : { conditions: Object.freeze(conditions) }),
     ...(rules.length === 0 ? {} : { rules: Object.freeze(rules) }),
+    ...(globalCss.length === 0 ? {} : { globalCss: Object.freeze(globalCss) }),
   })
 }
 
@@ -116,6 +122,32 @@ export const nest = (
     rules: Object.freeze([Rules.nest(selector, declarations)]),
   })
 
+/**
+ * A deterministic `@keyframes` block. Compose `style` where the animation is
+ * declared and reference `name` in an `animation` declaration.
+ */
+export const keyframes = (
+  frames: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): { readonly name: string; readonly style: StyleValue } => {
+  const compiled = Rules.keyframes(frames)
+  return Object.freeze({
+    name: compiled.name,
+    style: Object.freeze({
+      classes: empty.classes,
+      style: empty.style,
+      globalCss: Object.freeze([compiled.css]),
+    }),
+  })
+}
+
+/** Raw class-independent CSS (a layer, a global rule). Prefer typed helpers. */
+export const global = (css: string): StyleValue =>
+  Object.freeze({
+    classes: empty.classes,
+    style: empty.style,
+    globalCss: Object.freeze([css]),
+  })
+
 /** A boolean known at authoring time. */
 export const when = (condition: boolean, piece: StyleValue): StyleValue =>
   condition ? piece : empty
@@ -156,17 +188,19 @@ interface CompiledStyle {
   readonly classes: ReadonlyArray<string>
   readonly style: Readonly<Record<string, string>>
   readonly css?: string
+  readonly globalCss?: string
 }
 
 /** A rule-bearing style gets one deterministic class and its CSS text. */
 const compileStyle = (style: StyleValue): CompiledStyle => {
   const rules = style.rules ?? []
-  if (rules.length === 0) return { classes: style.classes, style: style.style }
-  const generated = Rules.className(rules)
+  const globalCss = style.globalCss ?? []
+  const generated = rules.length === 0 ? undefined : Rules.className(rules)
   return {
-    classes: Object.freeze([...style.classes, generated]),
+    classes: generated === undefined ? style.classes : Object.freeze([...style.classes, generated]),
     style: style.style,
-    css: Rules.css(generated, rules),
+    ...(generated === undefined ? {} : { css: Rules.css(generated, rules) }),
+    ...(globalCss.length === 0 ? {} : { globalCss: globalCss.join('') }),
   }
 }
 
@@ -190,6 +224,7 @@ export const toContribution = (style: StyleValue): SlotContribution<never> => {
     classes: compiled.classes,
     style: compiled.style,
     ...(compiled.css === undefined ? {} : { css: compiled.css }),
+    ...(compiled.globalCss === undefined ? {} : { globalCss: compiled.globalCss }),
   }
   if ((style.conditions ?? []).length === 0) return Object.freeze(base)
   const contribution: InputContribution<never> = context => {
@@ -198,6 +233,7 @@ export const toContribution = (style: StyleValue): SlotContribution<never> => {
       classes: resolved.classes,
       style: resolved.style,
       ...(compiled.css === undefined ? {} : { css: compiled.css }),
+      ...(compiled.globalCss === undefined ? {} : { globalCss: compiled.globalCss }),
     })
   }
   return contribution
@@ -209,6 +245,7 @@ export const forSlots =
     const known = slots as unknown as Record<string, unknown>
     const contributions: Record<string, SlotContribution<never>> = Object.create(null)
     let css = ''
+    let globalCss = ''
     for (const [key, piece] of Object.entries(pieces as Record<string, StyleValue | undefined>)) {
       if (!Object.hasOwn(known, key)) {
         throw new DiagnosticError({
@@ -222,8 +259,9 @@ export const forSlots =
       if (piece !== undefined) {
         const contribution = toContribution(piece)
         contributions[key] = contribution
-        if (typeof contribution !== 'function' && contribution.css !== undefined) {
-          css += contribution.css
+        if (typeof contribution !== 'function') {
+          if (contribution.css !== undefined) css += contribution.css
+          if (contribution.globalCss !== undefined) globalCss += contribution.globalCss
         }
       }
     }
@@ -232,12 +270,14 @@ export const forSlots =
       pieces,
       mixin: Mixin.dynamic<never>(options?.name ?? 'Style', contributions),
       css,
+      globalCss,
     })
   }
 
-/** Concatenate the rule CSS of several styles for one `<style>` block. */
-export const stylesheet = (...styles: ReadonlyArray<{ readonly css: string }>): string =>
-  styles.map(style => style.css).join('')
+/** Concatenate global then scoped CSS for one `<style>` block. */
+export const stylesheet = (
+  ...styles: ReadonlyArray<{ readonly css: string; readonly globalCss: string }>
+): string => styles.map(style => `${style.globalCss}${style.css}`).join('')
 
 export const attach =
   <Slots>(style: NamedStyle<Slots>) =>
@@ -288,6 +328,8 @@ export const Style = {
   supports,
   container,
   nest,
+  keyframes,
+  global,
   empty,
   toContribution,
   forSlots,

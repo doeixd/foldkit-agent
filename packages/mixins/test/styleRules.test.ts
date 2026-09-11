@@ -108,4 +108,28 @@ describe('Style rule compiler', () => {
       ),
     ).toBe('style:conditional-rules-unsupported')
   })
+
+  it('compiles deterministic keyframes and puts them in globalCss', () => {
+    const Fade = Style.keyframes({ from: { opacity: '0' }, to: { opacity: '1' } })
+    expect(Fade.name).toMatch(/^kf-[a-z0-9]+$/)
+    const Reveal = Style.forSlots(RuleSlots)({
+      root: Style.compose(Fade.style, Style.inline({ animation: `${Fade.name} 200ms` })),
+    })
+    expect(Reveal.globalCss).toBe(`@keyframes ${Fade.name}{from{opacity:0}to{opacity:1}}`)
+    expect(Reveal.css).toBe('')
+    expect(Style.keyframes({ from: { opacity: '0' }, to: { opacity: '1' } }).name).toBe(Fade.name)
+    expect(Style.keyframes({ from: { opacity: '0' }, to: { opacity: '0.5' } }).name).not.toBe(
+      Fade.name,
+    )
+  })
+
+  it('carries raw global CSS and joins it before scoped rules', () => {
+    const Base = Style.forSlots(RuleSlots)({
+      root: Style.compose(Style.global('@layer base{}'), Style.pseudo(':hover', { color: 'red' })),
+    })
+    expect(Base.globalCss).toBe('@layer base{}')
+    const builders = SlotView.buildersFor(RuleSlots, [Base.mixin], { input: undefined, h })
+    const generated = classValue(builders.root.attrs())
+    expect(Style.stylesheet(Base)).toBe(`@layer base{}.${generated}:hover{color:red}`)
+  })
 })

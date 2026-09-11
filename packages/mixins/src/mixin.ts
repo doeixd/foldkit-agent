@@ -48,12 +48,14 @@ const mergeStatic = <Message>(
   right: StaticContribution<Message>,
 ): StaticContribution<Message> => {
   const css = `${left.css ?? ''}${right.css ?? ''}`
+  const globalCss = `${left.globalCss ?? ''}${right.globalCss ?? ''}`
   return Object.freeze({
     classes: Object.freeze([...(left.classes ?? []), ...(right.classes ?? [])]),
     style: Object.freeze({ ...(left.style ?? {}), ...(right.style ?? {}) }),
     attributes: Object.freeze([...(left.attributes ?? []), ...(right.attributes ?? [])]),
     mounts: Object.freeze([...(left.mounts ?? []), ...(right.mounts ?? [])]),
     ...(css === '' ? {} : { css }),
+    ...(globalCss === '' ? {} : { globalCss }),
   })
 }
 

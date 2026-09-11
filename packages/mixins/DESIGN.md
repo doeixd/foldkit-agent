@@ -318,21 +318,27 @@ text; collection stays caller-owned.
   authored in camelCase and emitted kebab-cased.
 - `Style.pseudo`/`media`/`supports`/`container`/`nest` produce a StyleValue
   carrying rules; `Style.compose` concatenates them.
-- Compilation is deterministic: declarations are sorted, rules keep authored
-  order, and the class name is an FNV-1a base36 hash of the canonical rule text.
-  Equal rules share a class; different rules differ.
+- `Style.keyframes(frames)` returns `{ name, style }` with a deterministic
+  `kf-<hash>` name and a global `@keyframes` block; `Style.global(css)` is the
+  raw escape hatch for layers and other global rules. Both ride a separate
+  `globalCss` channel (`NamedStyle.globalCss`), because they are not scoped to a
+  generated class.
+- Compilation is deterministic: declarations are sorted, rules/steps keep
+  authored order, and the class/keyframes name is an FNV-1a base36 hash of the
+  canonical text. Equal rules share a class; different rules differ.
 - **No render-time collection and no import-time DOM mutation.** The CSS text is
-  data (`NamedStyle.css`), so SSR and the browser derive the same class and the
-  same rules, and the application decides where to inject it. This is the honest
-  reading of "SSR collection": `Style.stylesheet([...styles])` concatenates
-  deduplicated rule text at build/list time, not from inside a render.
+  data (`NamedStyle.css`/`globalCss`), so SSR and the browser derive the same
+  class and rules, and the application decides where to inject it.
+  `Style.stylesheet([...styles])` concatenates global then scoped text at
+  build/list time, not from inside a render.
 - Rules under `Style.whenInput` are **rejected** in v1, because the class is
   static while the condition is not. The diagnostic is
-  `style:conditional-rules-unsupported`.
-- Not in v1: keyframes, layers, container queries, global rules, nested
-  selectors beyond `&`, animations. Style stays in `foldkit-mixins` for now;
-  extract `foldkit-style` only if the compiler grows a real AST and rule
-  registry.
+  `style:conditional-rules-unsupported`. Keyframes/global CSS under a condition
+  are allowed: the CSS is emitted either way and only the reference is
+  conditional.
+- Not in v1: a real rule registry / style extraction, `@font-face` sugar, and
+  animation-orchestration helpers. Style stays in `foldkit-mixins` for now;
+  extract `foldkit-style` only if the compiler grows a real AST and registry.
 
 ## Phase plan (this package)
 

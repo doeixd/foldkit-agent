@@ -74,6 +74,22 @@ const hash = (value: string): string => {
   return (state >>> 0).toString(36)
 }
 
+export interface Keyframes {
+  readonly name: string
+  readonly css: string
+}
+
+/** Deterministic `@keyframes`: step order is authored, declarations sorted. */
+export const keyframes = (
+  frames: Readonly<Record<string, Readonly<Record<string, string>>>>,
+): Keyframes => {
+  const body = Object.entries(frames)
+    .map(([step, declarations]) => `${step}{${declarationsText(declarations)}}`)
+    .join('')
+  const name = `kf-${hash(body)}`
+  return Object.freeze({ name, css: `@keyframes ${name}{${body}}` })
+}
+
 export const className = (rules: ReadonlyArray<StyleRule>): string =>
   `style-${hash(canonical(rules))}`
 

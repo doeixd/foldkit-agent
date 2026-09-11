@@ -17,6 +17,8 @@ export interface StaticContribution<Message> {
   readonly mounts?: ReadonlyArray<MountAction<Message, any>>
   /** Compiled rule CSS for a class this contribution introduces. */
   readonly css?: string
+  /** Class-independent CSS this contribution introduces (keyframes, layers). */
+  readonly globalCss?: string
 }
 
 export interface ContributionContext<Message> {
