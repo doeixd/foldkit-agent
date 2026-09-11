@@ -299,8 +299,10 @@ override even when a later attachment would otherwise win.
 - Started, not complete: runtime composition through `Surface.rootView` in a real
   application is covered by tests, and `SurfaceView.inspect(view)` returns
   serializable `{ name, slots, mixins }` (no functions), composing with
-  `Surface.inspect`'s observation/emit metadata. The `@foldkit/ui` + Surface
-  combination and a worked application example remain.
+  `Surface.inspect`'s observation/emit metadata. A stateless `@foldkit/ui`
+  component composes inside a SurfaceView — the Surface's Message subset flows
+  into the component config and a Mixin resolves around its bundle, proven with a
+  test-only edge to `foldkit-mixins-ui`. A worked application example remains.
 
 ## Phase plan (this package)
 

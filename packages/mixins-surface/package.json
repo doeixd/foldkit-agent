@@ -38,9 +38,11 @@
     "foldkit-surface": "workspace:^"
   },
   "devDependencies": {
+    "@foldkit/ui": "0.158.2",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
     "foldkit-mixins": "workspace:*",
+    "foldkit-mixins-ui": "workspace:*",
     "foldkit-surface": "workspace:*",
     "tsdown": "^0.23.0",
     "typescript": "^5.7.2"

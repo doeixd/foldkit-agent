@@ -8,9 +8,10 @@
     "noEmit": false,
     "paths": {
       "foldkit-mixins": ["../mixins/src/index.ts"],
+      "foldkit-mixins-ui": ["../mixins-ui/src/index.ts"],
       "foldkit-surface": ["../surface/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
-  "references": [{ "path": "../mixins" }, { "path": "../surface" }]
+  "references": [{ "path": "../mixins" }, { "path": "../mixins-ui" }, { "path": "../surface" }]
 }

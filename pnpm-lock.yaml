@@ -243,6 +243,9 @@ importers:
 
   packages/mixins-surface:
     devDependencies:
+      '@foldkit/ui':
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)(foldkit@0.158.2(effect@4.0.0-rc.112))
       effect:
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112
@@ -252,6 +255,9 @@ importers:
       foldkit-mixins:
         specifier: workspace:*
         version: link:../mixins
+      foldkit-mixins-ui:
+        specifier: workspace:*
+        version: link:../mixins-ui
       foldkit-surface:
         specifier: workspace:*
         version: link:../surface
