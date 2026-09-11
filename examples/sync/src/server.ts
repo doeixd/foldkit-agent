@@ -40,8 +40,8 @@ export const startSyncServer = async <Presence = unknown>(options: {
   readonly journal: Journal
   /** Maps a connection's token to a credential; `undefined` refuses the socket. */
   readonly authenticate: (token: string | null) => Authenticated | undefined
-  /** Optional presence hub; each accepted socket joins it. */
-  readonly presence?: PresenceHub<Presence> | undefined
+  /** Optional presence registry; a socket joins the hub for its document. */
+  readonly presence?: ((documentId: string) => PresenceHub<Presence>) | undefined
   readonly port?: number
 }): Promise<SyncServer> => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: options.port ?? 0 })
@@ -76,7 +76,11 @@ export const startSyncServer = async <Presence = unknown>(options: {
       }),
     ]
     if (options.presence !== undefined)
-      stops.push(servePresence(socketLike(socket), options.presence, { peerId: principal.actorId }))
+      stops.push(
+        servePresence(socketLike(socket), options.presence(principal.documentId), {
+          peerId: principal.actorId,
+        }),
+      )
     socket.on('close', () => {
       if (expiry !== undefined) clearTimeout(expiry)
       for (const stop of stops) stop()
