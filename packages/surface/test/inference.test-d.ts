@@ -108,6 +108,22 @@ const _listProjection: Projection<
   }
 > = listProjection
 
+const projectCards = Projection.array(ProjectSummary)
+const _projectCards: Projection<
+  ReadonlyArray<Schema.Schema.Type<typeof Project.schema>>,
+  ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    readonly owner: { readonly id: string; readonly name: string }
+  }>
+> = projectCards
+
+const maybeUser = Projection.option(UserSummary)
+const _maybeUser: Projection<
+  Option.Option<Schema.Schema.Type<typeof User.schema>>,
+  Option.Option<{ readonly id: string; readonly name: string }>
+> = maybeUser
+
 // --- case 3: Surface.view narrows the projected Model and Message set ------
 
 const ProjectCard = Surface.define(App, 'ProjectCard', {

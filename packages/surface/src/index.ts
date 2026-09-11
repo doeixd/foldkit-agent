@@ -209,6 +209,28 @@ export const Projection = {
     ) as unknown as Projection<EntryRoot<Entries[keyof Entries]>, StructValue<Entries>>
   },
 
+  /**
+   * Maps a Projection over an array: `array(p): Projection<ReadonlyArray<Root>,
+   * ReadonlyArray<Value>>`. Nesting is explicit (an array of arrays stays an
+   * array of arrays); there is no flatten or double-wrap.
+   */
+  array: <Root, Value>(
+    projection: Projection<Root, Value>,
+  ): Projection<ReadonlyArray<Root>, ReadonlyArray<Value>> => ({
+    Model: Schema.Array(projection.Model),
+    dependencies: projection.dependencies,
+    read: root => root.map(value => projection.read(value)),
+  }),
+
+  /** Maps a Projection inside an Option, preserving absence. */
+  option: <Root, Value>(
+    projection: Projection<Root, Value>,
+  ): Projection<Option.Option<Root>, Option.Option<Value>> => ({
+    Model: Schema.Option(projection.Model),
+    dependencies: projection.dependencies,
+    read: root => Option.map(root, value => projection.read(value)),
+  }),
+
   read: <Root, Value>(projection: Projection<Root, Value>, root: Root): Value =>
     projection.read(root),
 }

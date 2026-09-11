@@ -17,7 +17,7 @@ const example = {
   todos: [{ id: 't1', title: 'write the spike' }],
 }
 
-describe('Phase 0 runtime smoke', () => {
+describe('Surface runtime', () => {
   it('reads a nested ModelRef', () => {
     expect(App.model.session.user.name.read(example)).toBe('ada')
   })
@@ -63,6 +63,25 @@ describe('Phase 0 runtime smoke', () => {
     expect(new Set(reordered.dependencies.map(path => path.join('.')))).toEqual(
       new Set(['session', 'session.user.name']),
     )
+  })
+
+  it('maps a Projection over an array and an Option', () => {
+    const summary = Projection.of(User.schema)({ name: true })
+
+    const many = Projection.array(summary)
+    expect(many.read([{ id: 'u1', name: 'ada' }])).toEqual([{ name: 'ada' }])
+
+    const maybe = Projection.option(summary)
+    expect(maybe.read(Option.some({ id: 'u1', name: 'ada' }))).toEqual(Option.some({ name: 'ada' }))
+    expect(maybe.read(Option.none())).toEqual(Option.none())
+
+    // Explicit nesting: no flattening, no double-wrap.
+    const nested = Projection.array(Projection.array(summary))
+    expect(nested.read([[{ id: 'u1', name: 'ada' }]])).toEqual([[{ name: 'ada' }]])
+
+    // Dependencies pass through unchanged.
+    const selected = Projection.array(Projection.struct({ name: App.model.session.user.name }))
+    expect(selected.dependencies).toEqual([['session', 'user', 'name']])
   })
 
   it('starts a Remote selection as Initial', () => {
