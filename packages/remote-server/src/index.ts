@@ -43,6 +43,8 @@ export interface NormalizedPatch {
 export interface EntitySourceContext<P> {
   readonly ids: readonly string[]
   readonly fields: readonly string[]
+  /** A pagination window per requested relation field. */
+  readonly windows?: Readonly<Record<string, QueryWindow>> | undefined
   readonly principal: P
 }
 
@@ -195,12 +197,17 @@ export const RemoteServer = {
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
       const grouped = new Map<
         string,
-        { ids: string[]; seenIds: Set<string>; fields: Set<string> }
+        {
+          ids: string[]
+          seenIds: Set<string>
+          fields: Set<string>
+          windows: Map<string, QueryWindow>
+        }
       >()
       for (const request of payload.requests) {
         let group = grouped.get(request.entity)
         if (group === undefined) {
-          group = { ids: [], seenIds: new Set(), fields: new Set() }
+          group = { ids: [], seenIds: new Set(), fields: new Set(), windows: new Map() }
           grouped.set(request.entity, group)
         }
         if (!group.seenIds.has(request.id)) {
@@ -208,6 +215,9 @@ export const RemoteServer = {
           group.ids.push(request.id)
         }
         for (const field of request.fields) group.fields.add(field)
+        for (const [field, window] of Object.entries(request.windows ?? {})) {
+          group.windows.set(field, window)
+        }
       }
 
       const entities: Array<{
@@ -231,8 +241,18 @@ export const RemoteServer = {
         const allowed = requested.filter(field => permittedSet.has(field))
         if (allowed.length === 0) continue
 
+        // Only a field being read carries its window.
+        const allowedSet = new Set(allowed)
+        const windows = Object.fromEntries(
+          [...group.windows].filter(([field]) => allowedSet.has(field)),
+        )
         const records = yield* source
-          .read({ ids: group.ids, fields: allowed, principal })
+          .read({
+            ids: group.ids,
+            fields: allowed,
+            principal,
+            ...(Object.keys(windows).length === 0 ? {} : { windows }),
+          })
           .pipe(
             Effect.catchTag('RemoteServerError', error =>
               Effect.fail(new RemoteReadError({ message: error.message })),

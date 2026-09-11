@@ -1,6 +1,6 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
-import { Entity, Mutation, Query, RemoteRpc } from 'foldkit-remote'
+import { Entity, Mutation, Query, ReadBatch, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import { RemoteServer, RemoteServerError } from '../src/index.js'
 
@@ -419,5 +419,58 @@ describe('RemoteServer', () => {
 
     expect(result._tag).toBe('Failure')
     if (result._tag === 'Failure') expect(result.failure._tag).toBe('RemoteReadError')
+  })
+
+  const readWithWindows = async (requests: Schema.Schema.Type<typeof ReadBatch>['requests']) => {
+    const seen: Array<unknown> = []
+    const server = RemoteServer.make(
+      {},
+      {
+        entities: [
+          RemoteServer.entity<string>(User, {
+            read: ({ ids, fields, windows }) => {
+              seen.push(windows)
+              return Effect.succeed(
+                ids.map(id => ({
+                  id,
+                  values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
+                })),
+              )
+            },
+          }),
+        ],
+      },
+    )
+    const layer = RemoteRpc.toLayer({
+      ...RemoteServer.handlers(server, 'user'),
+      FoldkitRemoteLive: () => Stream.empty,
+    })
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteRead({ requests })
+        }),
+      ).pipe(Effect.provide(layer)),
+    )
+
+    return seen
+  }
+
+  it('passes a relation window to the source read', async () => {
+    expect(
+      await readWithWindows([
+        { entity: 'User', id: 'u1', fields: ['id', 'posts'], windows: { posts: { first: 10 } } },
+      ]),
+    ).toEqual([{ posts: { first: 10 } }])
+  })
+
+  it('drops a window for a field that is not read', async () => {
+    expect(
+      await readWithWindows([
+        { entity: 'User', id: 'u1', fields: ['id'], windows: { admin: { first: 5 } } },
+      ]),
+    ).toEqual([undefined])
   })
 })
