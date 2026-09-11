@@ -6,8 +6,7 @@
  */
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
 import type { BuildSchema } from 'drizzle-orm/effect-schema'
-import { getTableColumns, type AnyColumn, type SQL } from 'drizzle-orm'
-import type { PgTable } from 'drizzle-orm/pg-core'
+import { getTableColumns, type AnyColumn, type SQL, type Table as DrizzleTable } from 'drizzle-orm'
 import type { Schema } from 'effect'
 import type { OrderTerm } from './cursor.js'
 
@@ -15,7 +14,7 @@ import type { OrderTerm } from './cursor.js'
  * The Effect select schema Drizzle derives for a table. Naming it lets an
  * entity be built from a binding: `Entity.make(name, binding.Schema)`.
  */
-export type SelectSchema<Table extends PgTable> = BuildSchema<
+export type SelectSchema<Table extends DrizzleTable> = BuildSchema<
   'select',
   Table['_']['columns'],
   undefined
@@ -48,7 +47,7 @@ export interface ManyRelation extends RelationTarget {
  */
 export interface ManyToManyRelation extends RelationTarget {
   readonly kind: 'manyToMany'
-  readonly through: PgTable
+  readonly through: DrizzleTable
   readonly localColumn: AnyColumn
   readonly foreignColumn: AnyColumn
   /** Natural order of the loaded refs; defaults to the target id. */
@@ -84,7 +83,7 @@ export type RelationConfig =
   | {
       readonly kind: 'manyToMany'
       readonly entity: EntityBinding<any, any>
-      readonly through: PgTable
+      readonly through: DrizzleTable
       readonly localColumn: AnyColumn
       readonly foreignColumn: AnyColumn
       readonly orderBy?: readonly OrderTerm[] | undefined
@@ -116,7 +115,7 @@ export const many = (
 export const manyToMany = (
   entity: EntityBinding<any, any>,
   options: {
-    readonly through: PgTable
+    readonly through: DrizzleTable
     readonly localColumn: AnyColumn
     readonly foreignColumn: AnyColumn
     readonly orderBy?: readonly OrderTerm[] | undefined
@@ -158,7 +157,7 @@ const normalizeRelation = (config: RelationConfig): RelationBinding => {
   }
 }
 
-export interface EntityBinding<Name extends string, Table extends PgTable> {
+export interface EntityBinding<Name extends string, Table extends DrizzleTable> {
   readonly name: Name
   readonly table: Table
   readonly Schema: SelectSchema<Table>
@@ -167,7 +166,7 @@ export interface EntityBinding<Name extends string, Table extends PgTable> {
   readonly computed: Readonly<Record<string, ComputedConfig>>
 }
 
-export const entity = <const Name extends string, Table extends PgTable>(
+export const entity = <const Name extends string, Table extends DrizzleTable>(
   name: Name,
   table: Table,
   options?: {

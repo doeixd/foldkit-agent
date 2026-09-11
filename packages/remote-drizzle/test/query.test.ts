@@ -152,8 +152,8 @@ describe('RemoteDrizzle.query', () => {
   it('reverses the order for a backward window', async () => {
     const { database, calls } = fakeDatabase([
       [
-        { id: 'p5', created_at: 't5' },
         { id: 'p6', created_at: 't6' },
+        { id: 'p5', created_at: 't5' },
       ],
     ])
 

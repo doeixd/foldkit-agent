@@ -11,20 +11,19 @@
  * this tag lets an application provide a Drizzle database today and swap in the
  * Effect driver when the two versions agree.
  */
-import type { AnyColumn, SQL } from 'drizzle-orm'
-import type { PgTable } from 'drizzle-orm/pg-core'
+import type { AnyColumn, SQL, Table } from 'drizzle-orm'
 import { Context } from 'effect'
 
 export interface DrizzleStatement extends PromiseLike<ReadonlyArray<Record<string, unknown>>> {
   where(condition: SQL | undefined): DrizzleStatement
-  innerJoin(table: PgTable, on: SQL): DrizzleStatement
+  innerJoin(table: Table, on: SQL): DrizzleStatement
   groupBy(...columns: AnyColumn[]): DrizzleStatement
   orderBy(...order: SQL[]): DrizzleStatement
   limit(count: number): DrizzleStatement
 }
 
 export interface DrizzleSelect {
-  from(table: PgTable): DrizzleStatement
+  from(table: Table): DrizzleStatement
 }
 
 export interface DrizzleDatabaseService {

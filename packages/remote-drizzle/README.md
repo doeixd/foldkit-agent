@@ -280,6 +280,14 @@ one environment: if two sources need different services, annotate the union,
 `RemoteServer.make<P, A | B>(...)`. This is a compile error rather than a
 silently dropped requirement.
 
+## Dialect
+
+The compiler is table-agnostic (it accepts Drizzle's base `Table`), but its SQL
+semantics follow Postgres: keyset pagination assumes Postgres NULL ordering
+(ASC: nulls last, DESC: nulls first). The integration tests run against an
+in-process `node:sqlite` database as a compiler check; they exercise real SQL
+generation, joins, grouping and limits, but not Postgres NULL ordering.
+
 ## Limits
 
 - Singular, to-many, and many-to-many relations selected as refs work (above).

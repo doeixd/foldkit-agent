@@ -10,8 +10,7 @@
  * Keyset pagination and required-column projection are adapted from fate's
  * Drizzle integration (MIT); see `THIRD_PARTY_NOTICES.md`.
  */
-import { and, eq, inArray, sql, type AnyColumn, type SQL } from 'drizzle-orm'
-import type { PgTable } from 'drizzle-orm/pg-core'
+import { and, eq, inArray, sql, type AnyColumn, type SQL, type Table } from 'drizzle-orm'
 import { Effect } from 'effect'
 import type { QueryDescriptor, Selection } from 'foldkit-remote'
 import { Entity } from 'foldkit-remote'
@@ -167,11 +166,11 @@ export const reader =
 
 const selectRows = (
   database: DrizzleDatabaseService,
-  table: PgTable,
+  table: Table,
   columns: Record<string, AnyColumn | SQL>,
   options: {
     readonly where?: SQL | undefined
-    readonly innerJoin?: { readonly table: PgTable; readonly on: SQL } | undefined
+    readonly innerJoin?: { readonly table: Table; readonly on: SQL } | undefined
     readonly groupBy?: readonly AnyColumn[] | undefined
     readonly orderBy?: readonly SQL[] | undefined
     readonly limit?: number | undefined
@@ -201,6 +200,12 @@ const withFilters = (base: SQL, ...filters: ReadonlyArray<SQL | undefined>): SQL
   const conditions: SQL[] = [base]
   for (const filter of filters) if (filter !== undefined) conditions.push(filter)
   return conditions.length === 1 ? base : and(...conditions)!
+}
+
+/** A relation cursor is the last ref's key (`"Entity:id"`); the row key is the id. */
+const cursorId = (cursor: string): string => {
+  const parts = Entity.refParts(cursor)
+  return parts.id === '' ? cursor : parts.id
 }
 
 /**
@@ -288,7 +293,7 @@ export const source = <P = unknown>(
                     database,
                     relation.entity.table,
                     cursorSelection(order),
-                    { where: eq(targetId, shape.cursor), limit: 1 },
+                    { where: eq(targetId, cursorId(shape.cursor)), limit: 1 },
                   )
                   const cursorRow = cursorRows[0]
                   if (cursorRow === undefined) {
@@ -563,9 +568,10 @@ export const query = <P = unknown, Input = unknown>(
           orderBy: orderByTerms(options.orderBy, shape.traversal),
           limit: shape.pageSize + 1,
         })
+        const natural = shape.traversal === 'backward' ? [...rows].reverse() : rows
         return toQueryPage({
           entity: binding.name,
-          rows,
+          rows: natural,
           pageSize: shape.pageSize,
           traversal: shape.traversal,
           cursor: shape.cursor,
