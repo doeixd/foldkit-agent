@@ -307,24 +307,91 @@ describe('RemoteDrizzle execution', () => {
     expect(calls[1]!.limit).toBe(2)
   })
 
-  it('rejects a relation window that is not first-only', async () => {
-    const { database } = fakeDatabaseQueue([[{ id: 'p1', comments: 'p1' }], []])
+  it('loads the last page per parent for a last window', async () => {
+    // Backward: the query returns reversed rows; the adapter reverses them back.
+    const { database } = fakeDatabaseQueue([
+      [{ id: 'p1', comments: 'p1' }],
+      [
+        { child: 'c2', parent: 'p1' },
+        { child: 'c1', parent: 'p1' },
+      ],
+    ])
+
+    const records = await Effect.runPromise(
+      source(PostBinding)
+        .read({
+          ids: ['p1'],
+          fields: ['id', 'comments'],
+          principal: null,
+          windows: { comments: { last: 1 } },
+        })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records[0]!.values.comments).toEqual({
+      refs: ['Comment:c2'],
+      hasNext: false,
+      hasPrevious: true,
+    })
+  })
+
+  it('supports an after cursor for a single parent', async () => {
+    const { database, calls } = fakeDatabaseQueue([
+      [{ id: 'p1', comments: 'p1' }],
+      [{ body: 'zzz' }],
+      [
+        { child: 'c1', parent: 'p1' },
+        { child: 'c2', parent: 'p1' },
+      ],
+    ])
+
+    const records = await Effect.runPromise(
+      source(PostBinding)
+        .read({
+          ids: ['p1'],
+          fields: ['id', 'comments'],
+          principal: null,
+          windows: { comments: { first: 1, after: 'c0' } },
+        })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    expect(records[0]!.values.comments).toEqual({
+      refs: ['Comment:c1'],
+      hasNext: true,
+      hasPrevious: true,
+    })
+    expect(calls).toHaveLength(3)
+    expect(Object.keys(calls[1]!.selection)).toEqual(['body'])
+
+    const dialect = new PgDialect()
+    expect(dialect.sqlToQuery(calls[2]!.where as SQL).sql).toContain('"comments"."body" <')
+  })
+
+  it('rejects a relation cursor across multiple parents', async () => {
+    const { database } = fakeDatabaseQueue([
+      [
+        { id: 'p1', comments: 'p1' },
+        { id: 'p2', comments: 'p2' },
+      ],
+    ])
 
     const result = await Effect.runPromise(
       Effect.result(
         source(PostBinding)
           .read({
-            ids: ['p1'],
+            ids: ['p1', 'p2'],
             fields: ['id', 'comments'],
             principal: null,
-            windows: { comments: { last: 1 } },
+            windows: { comments: { first: 1, after: 'c0' } },
           })
           .pipe(Effect.provideService(DrizzleDatabase, database)),
       ),
     )
 
     expect(result._tag).toBe('Failure')
-    if (result._tag === 'Failure') expect(result.failure.message).toMatch(/only a first window/)
+    if (result._tag === 'Failure')
+      expect(result.failure.message).toMatch(/cursor needs a single parent/)
   })
 
   it('rejects a window on a singular relation', async () => {

@@ -10,7 +10,7 @@
  * Keyset pagination and required-column projection are adapted from fate's
  * Drizzle integration (MIT); see `THIRD_PARTY_NOTICES.md`.
  */
-import { and, asc, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
+import { and, eq, inArray, type AnyColumn, type SQL } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
 import { Effect } from 'effect'
 import type { QueryDescriptor, Selection } from 'foldkit-remote'
@@ -21,6 +21,7 @@ import { idColumn, projectsAny } from './columns.js'
 import { cursorSelection, keysetWhere, orderByTerms, type OrderTerm } from './cursor.js'
 import { DrizzleDatabase, type DrizzleDatabaseService } from './database.js'
 import { toQueryPage } from './page.js'
+import { buildPage } from './pagination.js'
 import { shapeWindow } from './window.js'
 
 export * from './binding.js'
@@ -239,30 +240,59 @@ export const source = <P = unknown>(
         }
 
         const targetId = idColumn(relation.entity)
-        const naturalOrder =
+        const order: ReadonlyArray<OrderTerm> =
           relation.orderBy === undefined || relation.orderBy.length === 0
-            ? [asc(targetId)]
-            : orderByTerms(relation.orderBy, 'forward')
+            ? [{ column: targetId, direction: 'asc' }]
+            : relation.orderBy
+        const naturalOrder = orderByTerms(order, 'forward')
         const parentKeys = [
           ...new Set(rows.map(row => row[field]).filter(key => key !== null && key !== undefined)),
         ]
 
         if (window !== undefined) {
-          if (
-            window.last !== undefined ||
-            window.before !== undefined ||
-            window.after !== undefined
-          ) {
+          const shape = shapeWindow(window, { defaultSize: 20 })
+          if (shape.cursor !== undefined && context.ids.length !== 1) {
             return yield* new RemoteServerError({
-              message: `Relation "${field}" supports only a first window`,
+              message: `Relation "${field}" cursor needs a single parent`,
             })
           }
-          const pageSize = shapeWindow(window, { defaultSize: 20 }).pageSize
           const empty = { refs: [] as ReadonlyArray<string>, hasNext: false, hasPrevious: false }
           const pages = yield* Effect.forEach(
             parentKeys,
             parentKey =>
               Effect.gen(function* () {
+                let cursorValues: ReadonlyArray<unknown> | undefined
+                if (shape.cursor !== undefined) {
+                  const cursorRows = yield* selectRows(
+                    database,
+                    relation.entity.table,
+                    cursorSelection(order),
+                    { where: eq(targetId, shape.cursor), limit: 1 },
+                  )
+                  const cursorRow = cursorRows[0]
+                  if (cursorRow === undefined) {
+                    return yield* new RemoteServerError({
+                      message: `Relation "${field}" cursor no longer resolves`,
+                    })
+                  }
+                  cursorValues = order.map(term => cursorRow[term.column.name])
+                }
+
+                const keyset =
+                  cursorValues === undefined
+                    ? undefined
+                    : keysetWhere(order, cursorValues, shape.traversal)
+                const parentWhere =
+                  relation.kind === 'many'
+                    ? eq(relation.foreignKey, parentKey)
+                    : eq(relation.localColumn, parentKey)
+                const conditions = [
+                  parentWhere,
+                  ...(relation.where === undefined ? [] : [relation.where]),
+                  ...(keyset === undefined ? [] : [keyset]),
+                ]
+                const where = conditions.length === 1 ? parentWhere : and(...conditions)
+
                 const childRows =
                   relation.kind === 'many'
                     ? yield* selectRows(
@@ -270,12 +300,9 @@ export const source = <P = unknown>(
                         relation.entity.table,
                         { child: targetId, parent: relation.foreignKey },
                         {
-                          where:
-                            relation.where === undefined
-                              ? eq(relation.foreignKey, parentKey)
-                              : and(eq(relation.foreignKey, parentKey), relation.where),
-                          orderBy: naturalOrder,
-                          limit: pageSize + 1,
+                          where,
+                          orderBy: orderByTerms(order, shape.traversal),
+                          limit: shape.pageSize + 1,
                         },
                       )
                     : yield* selectRows(
@@ -283,26 +310,34 @@ export const source = <P = unknown>(
                         relation.through,
                         { child: targetId, parent: relation.localColumn },
                         {
-                          where:
-                            relation.where === undefined
-                              ? eq(relation.localColumn, parentKey)
-                              : and(eq(relation.localColumn, parentKey), relation.where),
+                          where,
                           innerJoin: {
                             table: relation.entity.table,
                             on: eq(relation.foreignColumn, targetId),
                           },
-                          orderBy: naturalOrder,
-                          limit: pageSize + 1,
+                          orderBy: orderByTerms(order, shape.traversal),
+                          limit: shape.pageSize + 1,
                         },
                       )
-                const refs = childRows
-                  .slice(0, pageSize)
-                  .map(child =>
-                    Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
-                  )
+
+                const natural =
+                  shape.traversal === 'backward' ? [...childRows].reverse() : childRows
+                const page = buildPage({
+                  rows: natural,
+                  pageSize: shape.pageSize,
+                  traversal: shape.traversal,
+                  cursor: shape.cursor,
+                  cursorOf: row => String(row.child),
+                })
                 return [
                   String(parentKey),
-                  { refs, hasNext: childRows.length > pageSize, hasPrevious: false },
+                  {
+                    refs: page.rows.map(child =>
+                      Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
+                    ),
+                    hasNext: page.hasNext,
+                    hasPrevious: page.hasPrevious,
+                  },
                 ] as const
               }),
             { concurrency: 10 },

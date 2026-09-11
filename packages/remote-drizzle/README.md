@@ -200,9 +200,9 @@ const selection = Selection.make(ProjectEntity, {
 ```
 
 The read runs one bounded query per parent (concurrency 10) and emits
-`{ refs, hasNext, hasPrevious }`. Only a `first` window is supported; `last`,
-`after`, and `before` fail the read until cursoring lands. The window applies
-when the relation is fetched; changing it later needs the field invalidated.
+`{ refs, hasNext, hasPrevious }`. `first` and `last` page per parent; `after` and
+`before` cursors work when the read targets a single parent (a cursor across
+parents is ambiguous and fails). Changing the window refetches the relation.
 
 ## Mutation results
 
@@ -247,9 +247,9 @@ silently dropped requirement.
 - Singular, to-many, and many-to-many relations selected as refs work (above).
   A to-many relation loads its children in one `IN (...)`; a many-to-many joins
   the through table to the target. Both order by the target id. A `Selection.connection`
-  window loads one bounded page per parent (`first` only for now). Per-relation
-  cursoring and an embedded target object are not supported yet, and `reader`,
-  the injected-executor path, does not load children.
+  window loads one bounded page per parent (`first`/`last`, plus `after`/`before`
+  for a single parent). An embedded target object is not supported yet, and
+  `reader`, the injected-executor path, does not load children.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - No computed/aggregate selections yet.
 
