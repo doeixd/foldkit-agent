@@ -239,24 +239,46 @@ function mergeDependencies(dependencies: DependencyTree): DependencyTree {
 /**
  * A required slice of a remote entity, contributed by a remote `Projection`
  * node. This is dependency metadata, so it lives in Surface; Remote consumes it.
+ * `windows` carries a pagination window per relation field (Remote's
+ * `QueryWindow` is not visible here, so the shape is declared locally).
  */
+export interface Window {
+  readonly first?: number | undefined
+  readonly last?: number | undefined
+  readonly after?: string | undefined
+  readonly before?: string | undefined
+}
+
 export interface Requirement {
   readonly entity: string
   readonly id: string
   readonly fields: readonly string[]
+  readonly windows?: Readonly<Record<string, Window>> | undefined
 }
 
 /** Unions requirements for the same entity + id, dropping duplicate fields. */
 function mergeRequirements(requirements: readonly Requirement[]): readonly Requirement[] {
   const grouped = new Map<
     string,
-    { entity: string; id: string; fields: string[]; seen: Set<string> }
+    {
+      entity: string
+      id: string
+      fields: string[]
+      seen: Set<string>
+      windows: Map<string, Window>
+    }
   >()
   for (const requirement of requirements) {
     const key = `${requirement.entity}\u0000${requirement.id}`
     let group = grouped.get(key)
     if (group === undefined) {
-      group = { entity: requirement.entity, id: requirement.id, fields: [], seen: new Set() }
+      group = {
+        entity: requirement.entity,
+        id: requirement.id,
+        fields: [],
+        seen: new Set(),
+        windows: new Map(),
+      }
       grouped.set(key, group)
     }
     for (const field of requirement.fields) {
@@ -264,11 +286,16 @@ function mergeRequirements(requirements: readonly Requirement[]): readonly Requi
       group.seen.add(field)
       group.fields.push(field)
     }
+    // Later windows win; a duplicate is a caller bug, not a merge policy.
+    for (const [field, window] of Object.entries(requirement.windows ?? {})) {
+      group.windows.set(field, window)
+    }
   }
   return [...grouped.values()].map(group => ({
     entity: group.entity,
     id: group.id,
     fields: group.fields,
+    ...(group.windows.size === 0 ? {} : { windows: Object.fromEntries(group.windows) }),
   }))
 }
 
