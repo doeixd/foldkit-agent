@@ -1,22 +1,27 @@
 import { Surface } from 'foldkit-surface'
-import { documentId, make, project, type Sync as SyncContract } from 'foldkit-sync'
-import { Message, Model, initialModel, replay, type Shared } from './app.js'
+import { documentId, forApplication, type Sync as SyncContract } from 'foldkit-sync'
+import { Message, Model, initialModel, update, type Shared } from './app.js'
 
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message, initial: initialModel, update })
+
+const Todos = Surface.pick(App.fields.todos)
+const TodoChanges = Surface.messages(App, [
+  Message.CreatedTodo,
+  Message.RenamedTodo,
+  Message.DeletedTodo,
+])
 
 /**
- * The replicated-state contract for the todo document: `Sync.make` derives the
- * shared projection, the durable Message subset, and the initial snapshot from
- * the application, and exposes a read-only Surface over the same projection.
+ * The replicated-state contract for the todo document: `Sync.forApplication`
+ * derives the shared projection, the durable subset, the initial snapshot, and
+ * replay from one application declaration.
  *
  * Annotated with the low-level `Sync` type because this example emits
  * declarations: the inferred type contains `Schema.Schema.Type<MessageUnion<...>>`,
  * which expands a Foldkit-private alias that declaration emit cannot name.
  */
-export const Sync: SyncContract<Message, Shared> = make(App, 'TodoSync', {
+export const Sync: SyncContract<Message, Shared> = forApplication(App, {
   documentId: documentId('todos'),
-  initial: initialModel,
-  model: project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo],
-  replay,
+  shared: Todos,
+  durable: TodoChanges,
 })
