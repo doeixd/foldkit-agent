@@ -2178,8 +2178,10 @@ ships or is dropped (open question 7); the Surface-based `Sync.make` on top of
 now uses both, replacing its hand-written replica and journal contracts
 (`0cb9d0e`); `packages/sync/README.md` and `CHANGELOG.md` document the new layer
 (`717a28e`); the Foldkit runtime-binding gap and the proposed upstream hook are
-documented in `docs/sync-runtime-binding.md` (`fdd9789`); work through the review
-findings and open questions below.
+documented in `docs/sync-runtime-binding.md` (`fdd9789`); the reference-based
+selection from `packages/agent/DESIGN.md` started as `Surface.pick` over keyed,
+owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
+come next. Work through the review findings and open questions below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 
