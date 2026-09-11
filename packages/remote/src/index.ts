@@ -27,6 +27,7 @@ export * from './store.js'
 export * from './plan.js'
 export * from './connection.js'
 export * from './query.js'
+export * from './mutation.js'
 export * from './wire.js'
 
 // ===========================================================================
@@ -361,23 +362,47 @@ export const Remote = {
    * Executes the plan against the `RemoteClient` and returns a new store. Used
    * for SSR route prefetch, hover prefetch, and tests. Never called during render.
    */
-  prefetch: <AppModel, Store, Value>(
+  prefetch: Effect.fn('Remote.prefetch')(function* <AppModel, Store, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     projection: Projection<AppModel, Value>,
-  ) =>
-    Effect.gen(function* () {
-      const store = storeOf(bound, model)
-      const missing = plan(store, projection.requirements)
-      if (missing.length === 0) return store
-      const client = yield* RemoteClient
-      const result = yield* client.read({ requests: missing })
-      return result.entities.reduce(
-        (current, entity) =>
-          writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
-        store,
-      )
-    }),
+  ) {
+    const store = storeOf(bound, model)
+    const missing = plan(store, projection.requirements)
+    if (missing.length === 0) return store
+    yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
+    const client = yield* RemoteClient
+    const result = yield* client.read({ requests: missing })
+    return result.entities.reduce(
+      (current, entity) => writeEntity(current, entityKey(entity.entity, entity.id), entity.values),
+      store,
+    )
+  }),
+
+  /** Runs a mutation through `RemoteClient`, decoding its typed Output. */
+  mutate: Effect.fn('Remote.mutate')(function* <Name extends string, Input, Output>(
+    mutation: MutationDescriptor<Name, Input, Output>,
+    input: Input,
+    requestId: string,
+  ) {
+    yield* Effect.annotateCurrentSpan({ mutation: mutation.name, requestId })
+    const client = yield* RemoteClient
+    const encoded = yield* Schema.encodeUnknownEffect(mutation.Input)(input).pipe(
+      Effect.catchTag('SchemaError', error =>
+        Effect.fail(new RemoteMutationError({ message: error.message })),
+      ),
+    )
+    const result = yield* client.mutate({
+      requestId,
+      mutation: mutation.name,
+      input: encoded,
+    })
+    return yield* Schema.decodeUnknownEffect(mutation.Output)(result.output).pipe(
+      Effect.catchTag('SchemaError', error =>
+        Effect.fail(new RemoteMutationError({ message: error.message })),
+      ),
+    )
+  }),
 
   /**
    * A Foldkit Subscription entry that plans a Surface's missing fields from the
@@ -411,10 +436,10 @@ export const Remote = {
       requirements.length === 0
         ? Stream.empty
         : Stream.fromEffect(
-            Effect.gen(function* () {
+            Effect.fn('Remote.observe.read')(function* () {
               const client = yield* RemoteClient
               return yield* client.read({ requests: requirements })
-            }),
+            })(),
           ).pipe(Stream.map(toMessage), Stream.orDie),
   }),
 }
