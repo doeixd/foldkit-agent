@@ -258,7 +258,7 @@ persistence in the browser is an open dependency (§8.9, §17).
   `run`, `embed`, `hydrate` exist.
 - `foldkit/html`: `HtmlBuilder<Message> = MessageUniverse<Message> &
   HtmlElements<Message> & HtmlAttributes<Message> & {...}`; `h.OnClick(message:
-  Message, options?)`.
+  Message, options?)`. **Invariant in `Message`** — see §15 Phase 0 results.
 - `foldkit/command`: `define`, `mapEffect`, `mapMessage`, `mapMessages`,
   `Interruptible`.
 - `foldkit/subscription`: `make`, `aggregate`, `lift`, `persistent`, `fromEvent`,
@@ -546,10 +546,12 @@ narrows the `HtmlBuilder` to the declared Message set. `Surface.registry(App,
   scopes composed together.
 - A parameterized Surface used without params; a Surface whose projection is the
   whole Model; a Surface with zero dependencies.
-- `Surface.view`'s variance: `h.OnClick(message: Message)` is **contravariant** in
-  `Message` (a builder accepting a superset is usable where a subset is expected),
-  but `HtmlBuilder<M>` also contains `MessageUniverse<M>`/`HtmlElements<M>` which
-  may be covariant. The combined variance is the key Phase 0 risk (§15).
+- `Surface.view`'s variance (resolved in Phase 0): `HtmlBuilder<M>` is
+  **invariant** in `M`. `MessageUniverse<M>` is `(message: M) => M`, and
+  `HtmlAttributes.OnClick` both takes and returns the Message, so a superset
+  builder is **not** assignable to a subset builder. `Surface.view` narrows the
+  renderer and uses a sound cast internally; a Foldkit core seam is the durable
+  alternative (§15 Phase 0 results).
 - A child whose projected Model is a strict subset of what the child `model`
   callback reads: the `Surface.define` callback receives the **root** Model and
   returns a Projection, so the callback itself may read anything; the *view* is
@@ -1691,6 +1693,15 @@ directory (a probe from the repo root may resolve a different `effect`).
   errors. An unused directive is an error (`TS2578`).
 - To prove a type constraint, add a `@ts-expect-error` negative. A suite of
   positive cases proves nothing.
+- Matching a descriptor in an **invariant** position against `unknown` silently
+  yields `never`. `Optic.Optional`, `ModelRef`, and `EntityDescriptor` are
+  invariant in their focus/generic; pattern-match with `infer X, any`, not
+  `infer X, unknown` (`ModelRef<infer R, unknown>` collapsed
+  `Projection.struct`'s root to `never` in Phase 0).
+- `EntityDescriptor.ref(id: F['id'])` makes the descriptor **contravariant in
+  `F`**, so a `readonly EntityDescriptor<string, Fields>[]` constraint rejects
+  concrete entities. Use `readonly EntityDescriptor<any, any>[]` at collection
+  boundaries.
 - A mutation that survives usually means redundancy, not missing coverage; remove
   the redundant guard rather than testing a window that does not exist.
 - Vite 5 does not know `node:sqlite` as a builtin and rewrites a static import to
@@ -1701,8 +1712,10 @@ directory (a probe from the repo root may resolve a different `effect`).
 
 - Message constructors carry `_tag` and are callable Schemas; `subset`/`guards`/
   `isAnyOf`/`match` are available.
-- `HtmlBuilder<M>`'s `OnClick(message: M)` is contravariant in `M`; the rest of the
-  builder may be covariant. This mixed variance is the `Surface.view` risk.
+- `HtmlBuilder<M>` is **invariant** in `M` (the private `MessageUniverse` phantom
+  is `(message: M) => M`, and `OnClick` both takes and returns the Message). A
+  superset builder cannot be assigned to a subset builder; narrowing needs a sound
+  cast or a core seam (§15 Phase 0 results).
 - `Refreshable`/`refresh` is AsyncData revalidation, not a shared-state refresh;
   do not reuse it for sync.
 
@@ -1758,6 +1771,42 @@ each rejection has an `@ts-expect-error` that fails `tsc` when removed; `pnpm
 typecheck` and `pnpm test` pass. Record results in a "Phase 0 results" section here.
 **If a case cannot be made ergonomic, stop and amend this document** with the
 architecture change it implies before writing production code.
+
+#### Phase 0 results (completed — commit `eb14306`)
+
+Artifact: `packages/surface` (private `0.0.0`). `src/index.ts` is the minimal
+spike; `test/inference.test-d.ts` pins the type contract; `test/inference.test.ts`
+is a mutation-verified runtime smoke test. `format:check`, `typecheck`, `test`
+(608), `demo`, and `pack:check` are green.
+
+| Case | Result | Evidence |
+| --- | --- | --- |
+| 1. `App.model` tree | **Pass** | `App.model.session.user.name: ModelRef<Model, string>`; `.at`/`.index` yield `Option`; an unknown field is an error. No call-site generics or casts. |
+| 2. `Projection.of`/`.struct` | **Pass** | Unknown keys reject; a nested Projection on the wrong root rejects; `struct` infers the entry record from `ModelRef`s and `Projection`s. |
+| 3. `Surface.view` narrowing | **Pass, with a seam** | The projected Model narrows and an undeclared Message fails inside the renderer. But a superset builder is **not structurally assignable** to a subset builder, so the app-level view needs a cast or a core seam. |
+| 4. `Remote.make`/`select` | **Pass** | `Data.Model` embeds in a `Schema.Struct`; `App.model.remote` is typed (unknown, not `any`); `Remote.select` yields `RemoteData<…>`. |
+| 5. `Selection`/`Entity.patch` | **Pass** | `Selection.make` derives the picked Struct; `Entity.patch` rejects an unknown field and a mistyped field. |
+
+**Case 3 finding — the one architecture decision this gate produced.** `HtmlBuilder<Message>`
+is **invariant** in `Message` for two independent reasons: the private
+`MessageUniverse` phantom is `(message: Message) => Message` (invariant), and
+`HtmlAttributes.OnClick` is `(message: Message, options?) => { readonly message:
+Message; … }` — the Message is a contravariant parameter *and* a covariant return
+property. A `HtmlBuilder<AppMessage>` therefore cannot be assigned to a
+`HtmlBuilder<SurfaceMessage>` for a strict subset. `Surface.view` returns a
+function generic over the app's Message and performs a **sound narrowing cast**
+internally: the renderer can only construct Messages from the Surface subset, and
+the real builder accepts the superset, so passing the full builder where a
+narrowed one is expected is safe. The durable alternative is a small Foldkit core
+seam that retypes the builder singleton — `HtmlBuilder`'s runtime already has an
+`@internal __htmlBuilder<Message>()`, it is simply not exported. **Decision
+required before Phase 2** (open question 2): document the cast, or obtain the
+seam. The cast is sound, but it is still a cast in a load-bearing place.
+
+**Verdict:** Phase 0 passes. The only unresolved item is the builder seam (case
+3), which does not block Phase 1 (Surface core) but must be decided before
+Surface composition (Phase 2). The spike is a seed, not a final API: Phase 1
+replaces the Surface half and Phase 3 splits out `foldkit-remote`.
 
 ### Phase 1 — `foldkit-surface` core
 
@@ -1952,7 +2001,7 @@ installable; CI is green.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | Inference (ModelRef tree, nested Projections, Submodel Model, view subset) | **Critical** | Phase 0 gate before any architecture; negative type tests. |
-| `HtmlBuilder` subset variance (`Surface.view`) | High | Phase 0 case 3; fallback is a branded builder or a small Foldkit core seam. |
+| `HtmlBuilder` subset variance (`Surface.view`) | High | **Resolved in Phase 0**: the builder is invariant; `Surface.view` uses a sound narrowing cast, with a Foldkit core seam as the durable option (decide before Phase 2). |
 | `Remote.make` Model widening to `any` | High | Runtime registry + small scope brand over giant conditional unions; negative tests. |
 | Message union identity is structural | Medium | Provide all structural safety; decide on a hidden union brand early. |
 | Browser IndexedDB `KeyValueStore` missing | Medium | Resolve the platform dependency in Phase 12 before designing persistence. |
@@ -2023,17 +2072,20 @@ installable; CI is green.
 
 ## 20. Immediate next step and open questions
 
-**Next step:** Phase 0. Build the smallest inference spike (one scratch module plus
-`*.test-d.ts`) covering the five cases in §15, run `pnpm typecheck` and `pnpm test`,
-and record results under a new "Phase 0 results" section here. Do not begin Phase 1
-until every case infers without explicit generics or casts — or until this document
-is amended with the architecture changes the failures imply.
+**Next step:** Phase 0 is complete (commit `eb14306`; results in §15). Begin
+Phase 1: replace the `packages/surface/src/index.ts` spike with the real
+`ModelRef`/`Projection`/`Surface` implementation, keeping the Phase 0 type
+contract in `test/inference.test-d.ts` green. The builder-seam decision (open
+question 2) is not a Phase 1 blocker; record it before Phase 2 composition. The
+spike's sound cast is the working assumption.
 
-**Open questions to resolve during or before Phase 0:**
+**Open questions to resolve during or before Phase 1:**
 
 1. In-repo `foldkit-surface` (recommended) vs an upstream Foldkit proposal.
-2. Does `HtmlBuilder<Message>` support the subset narrowing `Surface.view` needs, or
-   is a Foldkit core seam required? (Variance analysis is in §6.3/§14.)
+2. **Answered in Phase 0: it does not.** `HtmlBuilder<M>` is invariant, so
+   narrowing needs a cast or a Foldkit core seam. Phase 1 may proceed with the
+   sound cast; the cast-vs-seam decision must be made before Phase 2
+   (§15 Phase 0 results).
 3. Do we attach a hidden union identity to Message constructors for nominal
    application isolation?
 4. Which existing example(s) become the Phase 2 validation target?
