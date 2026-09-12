@@ -38,3 +38,28 @@ Style.whenInput<PredicateInput>(input => input.dark, Style.class('dark'))
 
 // @ts-expect-error a predicate must return boolean.
 Style.whenInput<PredicateInput>(() => 1, Style.class('dark'))
+
+const CompoundRecipe = Style.recipe({
+  variants: {
+    intent: { primary: Style.class('p'), ghost: Style.class('g') },
+    size: { sm: Style.class('sm') },
+  },
+  compound: [{ when: { intent: 'primary', size: 'sm' }, style: Style.class('primary-sm') }],
+})
+void CompoundRecipe({ intent: 'primary', size: 'sm' })
+
+Style.recipe({
+  variants: { intent: { primary: Style.class('p') } },
+  compound: [
+    // @ts-expect-error unknown variant value in a compound.
+    { when: { intent: 'ghost' }, style: Style.class('x') },
+  ],
+})
+
+Style.recipe({
+  variants: { intent: { primary: Style.class('p') } },
+  compound: [
+    // @ts-expect-error unknown variant key in a compound.
+    { when: { colour: 'primary' }, style: Style.class('x') },
+  ],
+})

@@ -324,8 +324,8 @@ export const attach =
 export type RecipeVariantDef = Readonly<Record<string, StyleValue>>
 
 /** A combination style applied when every `when` entry matches the selection. */
-export interface RecipeCompound {
-  readonly when: Readonly<Record<string, string>>
+export interface RecipeCompound<Variants extends Readonly<Record<string, RecipeVariantDef>>> {
+  readonly when: Partial<{ readonly [K in keyof Variants]: keyof Variants[K] & string }>
   readonly style: StyleValue
 }
 
@@ -333,7 +333,7 @@ export interface RecipeDef<Variants extends Readonly<Record<string, RecipeVarian
   readonly base?: StyleValue
   readonly variants: Variants
   readonly defaults?: { readonly [K in keyof Variants]?: keyof Variants[K] & string }
-  readonly compound?: ReadonlyArray<RecipeCompound>
+  readonly compound?: ReadonlyArray<RecipeCompound<Variants>>
 }
 
 export type AnyRecipeDef = RecipeDef<Record<string, RecipeVariantDef>>
@@ -343,10 +343,11 @@ export type RecipeSelection<D extends AnyRecipeDef> = {
 }
 
 /** A recipe is just Style data: base, one piece per selected variant, then any
- *  matching compound. */
+ *  matching compound. `compound.when` is keyed by the recipe's variants, so a
+ *  typo is a compile error rather than a silently dead combination. */
 export const recipe =
-  <D extends AnyRecipeDef>(def: D) =>
-  (selection: RecipeSelection<D>): StyleValue => {
+  <Variants extends Readonly<Record<string, RecipeVariantDef>>>(def: RecipeDef<Variants>) =>
+  (selection: RecipeSelection<RecipeDef<Variants>>): StyleValue => {
     const pieces: Array<StyleValue> = []
     if (def.base !== undefined) pieces.push(def.base)
     const effective: Record<string, string> = {}
