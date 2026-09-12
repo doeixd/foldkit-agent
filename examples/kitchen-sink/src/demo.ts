@@ -4,7 +4,7 @@
  * The same `update` is driven by a server-derived read, a durable replicated
  * note, a human, and an agent; the four agent adapters project one contract.
  */
-import { Effect, Fiber, Stream } from 'effect'
+import { Effect, Fiber, Option, Stream } from 'effect'
 import { ConnectionChange, Entity, RemotePersistence } from 'foldkit-remote'
 import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
@@ -118,7 +118,7 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
 
   // A live subscription for the Board is registered with the server's hub
   // before the rename, so the mutation's `hub.changed` reaches it.
-  const liveEntry = Remote.live(AppRemote, BoardSurface, undefined, message => message)
+  const liveEntry = Remote.live(AppRemote, BoardSurface, undefined)
   const { renamed, liveEvent } = await Effect.runPromise(
     Effect.gen(function* () {
       const subscription = yield* Effect.forkChild(
@@ -164,7 +164,7 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
     ],
   })
   const visible = () =>
-    Remote.visibleItems(remote, ref.identity)
+    Remote.visibleItems(remote, ref)
       .map(edge => edge.ref.id)
       .join(', ')
   say(`optimistic insert: ${visible()}`)
@@ -181,6 +181,22 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   })
   say(`confirmed insert: ${visible()}`)
   say(`inspect: ${Remote.inspect(remote).entities.length} entities cached`)
+
+  // Retention: the Board reaches p1 and, through its ref, u1. With the
+  // projects connection listed as a root its edges stay too; without it, the
+  // other projects are collected.
+  const retentionOf = (connections: ReadonlyArray<typeof ref>) =>
+    Effect.gen(function* () {
+      const entry = Remote.retain([BoardSurface.projection(undefined)], undefined, { connections })
+      const message = yield* Stream.runHead(
+        entry.dependenciesToStream(entry.modelToDependencies({ ...renamed.model, remote })),
+      )
+      return Remote.inspect(Data.update(remote, Option.getOrThrow(message)))
+        .entities.map(entity => entity.key)
+        .join(', ')
+    })
+  say(`retained with the connection: ${await Effect.runPromise(retentionOf([ref]))}`)
+  say(`retained by the Board alone: ${await Effect.runPromise(retentionOf([]))}`)
 
   // Hydration: the store dehydrates to deterministic text (SSR would embed it)
   // and hydrates into a fresh Model with nothing left to fetch.

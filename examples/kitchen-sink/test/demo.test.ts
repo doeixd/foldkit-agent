@@ -15,6 +15,9 @@ describe('kitchen sink', () => {
     expect(lines).toContain('optimistic insert: p3, p2, p1')
     expect(lines).toContain('confirmed insert: p3, p2, p1')
     expect(lines).toContain('hydrated: Ready Apollo II, plan empty')
+    // p2 is an edge of the connection, never fetched, so it is not in the store.
+    expect(lines).toContain('retained with the connection: Project:p1, User:u1, Project:p3')
+    expect(lines).toContain('retained by the Board alone: Project:p1, User:u1')
 
     // foldkit-durable + foldkit-sync
     expect(lines).toContain('replicated (durable journal): First note')

@@ -8,6 +8,9 @@ describe('foldkit-remote example', () => {
     expect(lines).toContain('plan: Project:p1 [id,name,status]')
     expect(lines).toContain('before fetch: Initial')
     expect(lines).toContain('after fetch: Ready {"id":"p1","name":"Apollo","status":"active"}')
+    expect(lines).toContain(
+      'stale-while-revalidate: RefreshStarted, ReadReceived; Refreshing {"id":"p1","name":"Apollo","status":"active"} -> Ready {"id":"p1","name":"Apollo","status":"active"}',
+    )
     expect(lines).toContain('query connection: Project:p1')
     expect(lines).toContain('inspect: 1 entities, 1 connection, 1 registered queries')
     expect(lines).toContain('rendered classes: project-card')
@@ -16,6 +19,7 @@ describe('foldkit-remote example', () => {
     expect(lines).toContain(
       'after mutation: Ready {"id":"p1","name":"Apollo II","status":"active"}',
     )
+    expect(lines).toContain('retained: Project:p1; 1 entity and 1 connection collected')
     expect(lines).toContain('corrupt store: Failed DecodeError')
   })
 })
