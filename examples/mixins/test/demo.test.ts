@@ -12,6 +12,8 @@ describe('foldkit-mixins example', () => {
       'slots: root(Container), title(Container), status(Container), archive(Interactive)',
     )
     expect(lines).toContain('mixins: ProjectCardStyle, ArchiveBehavior')
+    expect(lines).toContain('a11y: ok')
+    expect(lines).toContain('a11y missing: a11y:missing-slot')
     expect(lines).toContain(
       'projected: {"project":{"name":"Apollo","archived":true},"selection":"p1"}',
     )

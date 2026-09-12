@@ -9,6 +9,7 @@ import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
 import {
+  A11y,
   Behavior,
   Capability,
   Event,
@@ -147,6 +148,15 @@ export const runDemo = (): ReadonlyArray<string> => {
       .join(', ')}`,
   )
   lines.push(`mixins: ${viewInfo.mixins.join(', ')}`)
+
+  const Accessibility = A11y.pattern({
+    root: { capability: Capability.Container },
+    archive: { capability: Capability.Interactive, events: [Event.Click] },
+  })
+  const diagnostics = A11y.validate(Accessibility, ProjectCardSlots)
+  lines.push(`a11y: ${diagnostics.length === 0 ? 'ok' : diagnostics.map(d => d.code).join(', ')}`)
+  const missing = A11y.validate(A11y.pattern({ legend: {} }), ProjectCardSlots)
+  lines.push(`a11y missing: ${missing.map(d => d.code).join(', ')}`)
 
   const h = inertHtml as unknown as HtmlBuilder<AppMessage>
   const rootView = Surface.rootView(ProjectCard, undefined, SurfaceView.toRenderer(ProjectCardView))
