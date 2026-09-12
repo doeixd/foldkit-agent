@@ -1,17 +1,21 @@
-import { Option, Schema } from 'effect'
+import { Effect, Layer, Option, Schema, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
   Query,
+  Remote,
+  RemoteClient,
   edge,
   emptyConnection,
   emptyStore,
   entityKey,
+  initialRemoteModel,
   items,
   merge,
   readField,
   segment,
   terminal,
+  updateRemote,
   writeEntity,
 } from '../src/index.js'
 
@@ -120,5 +124,37 @@ describe('Query and QueryRef', () => {
     expect(Optional.ref({ ownerId: 'u1' }).identity).toBe(
       Optional.ref({ ownerId: 'u1', tag: undefined }).identity,
     )
+  })
+})
+
+describe('Remote.query', () => {
+  it('encodes the input and sends the wire request', async () => {
+    const requests: Array<unknown> = []
+    const client = Layer.succeed(RemoteClient, {
+      read: () => Effect.die('unused'),
+      query: request =>
+        Effect.sync(() => {
+          requests.push(request)
+          return {
+            edges: [{ entity: 'Project', id: 'p1', key: 'Project:p1' }],
+            start: { _tag: 'Terminal' as const },
+            end: { _tag: 'Terminal' as const },
+          }
+        }),
+      mutate: () => Effect.die('unused'),
+      live: () => Stream.empty,
+    })
+
+    const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId: 'u1', sort: 'newest' }))
+    const result = await Effect.runPromise(
+      Remote.query(ProjectsByOwner, ref).pipe(Effect.provide(client)),
+    )
+    expect(requests).toEqual([
+      { query: 'ProjectsByOwner', input: { ownerId: 'u1', sort: 'newest' }, window: { first: 25 } },
+    ])
+
+    // The page merges into the connection keyed by the ref's identity.
+    const model = updateRemote(initialRemoteModel, Remote.queryMessage(ref, result))
+    expect(items(model.connections[ref.identity]!).map(value => value.key)).toEqual(['Project:p1'])
   })
 })

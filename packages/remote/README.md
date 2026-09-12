@@ -222,6 +222,31 @@ Remote.update(remote, { _tag: 'ConnectionMerged', connection: 'ProjectsByOwner(.
 marks a connection stale and `ConnectionRefreshed` clears it once a fresh page is
 adopted.
 
+## Queries
+
+A `QueryRef` is a server list/search operation with a canonical identity (the
+descriptor plus the encoded input, excluding the window). `Remote.query` runs it
+through `RemoteClient`, and `Remote.queryMessage` turns the page into a
+`ConnectionMerged` message for `Remote.update`:
+
+```ts
+const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId }))
+const page = yield* Remote.query(ProjectsByOwner, ref)
+yield* Effect.sync(() =>
+  dispatch({ _tag: 'GotRemote', message: Remote.queryMessage(ref, page) }),
+)
+```
+
+The connection key is `ref.identity`, so `first(25)` and `after(cursor).first(25)`
+merge into one connection.
+
+## Introspection
+
+`Remote.inspect(model)` returns a serializable summary of the cache — entities
+with their present/stale fields, connection keys, live streams, gaps, and the
+mutation ledger — and `Remote.inspectEntity(model, key)` returns one entity. Both
+are pure, so DevTools never reach into the private layout.
+
 ## Live data
 
 `Remote.live` consumes an Effect streaming RPC. Events carry a monotonic cursor
@@ -271,13 +296,10 @@ planner refetches.
 
 - The transport is not part of the package. Effect RPC is the wire; the
   application supplies the client and server protocol layers.
-- Live connection events are modeled on the client, but the wire `LivePatch`
-  currently carries entity patches only. A server live handler is entity-focused;
-  connection streaming over the wire is future work.
+- The wire `LiveChange` union carries entity patches, deletes, and connection
+  insert/remove/invalidate changes; the client adapter reconstructs a `LiveEvent`
+  from it. `RemoteServer.live` serves them as a stream.
 - Request-level in-flight dedupe is not modeled. `Remote.plan` returns missing
   fields, and the Subscription re-runs when the plan changes; there is no
   "request already in flight" set.
-- `Query` descriptors are declared and used by `foldkit-remote-drizzle`, but
-  there is no `Remote` client entry point that consumes a `QueryRef` yet;
-  `RemoteClient.query` takes the wire `QueryRequest`.
 - `RemoteData` is a closed union.

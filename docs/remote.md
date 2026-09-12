@@ -186,11 +186,11 @@ user edits; there is nothing to lose.
   suites: `pnpm exec vitest run packages/remote/test packages/remote-server/test`.
   The package README walks the full `make → at → select → observe → mutate →
   update` flow.
-- Live **connection** events are modeled on the client, but the wire
-  `LivePatch` carries entity patches only; connection streaming over the wire is
-  future work.
-- `Query` descriptors are declared and consumed by `foldkit-remote-drizzle`, but
-  there is no `Remote` client entry point that consumes a `QueryRef` yet.
+- Live **connection** events are represented on the wire: `LiveChange` carries
+  entity patches and deletes plus connection insert/remove/invalidate changes,
+  and `RemoteServer.live` streams them.
+- `Query` descriptors are consumed by `Remote.query`/`Remote.queryMessage` and by
+  `foldkit-remote-drizzle`.
 - There is no request-level in-flight dedupe: the planner returns missing fields
   and the Subscription re-runs when the plan changes.
 

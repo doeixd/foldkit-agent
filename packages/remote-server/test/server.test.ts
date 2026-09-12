@@ -462,7 +462,14 @@ describe('RemoteServer', () => {
       live: [
         RemoteServer.live<string>(User, {
           subscribe: ({ after }) =>
-            Stream.make({ cursor: after + 1, entity: 'User', id: 'u1', values: { name: 'ada' } }),
+            Stream.make({
+              _tag: 'EntityPatched' as const,
+              cursor: after + 1,
+              entity: 'User',
+              id: 'u1',
+              values: { name: 'ada' },
+              changed: ['name'],
+            }),
         }),
       ],
     })
@@ -471,7 +478,48 @@ describe('RemoteServer', () => {
       requirements: [{ entity: 'User', id: 'u1', fields: ['name'] }],
       after: 4,
     })
-    expect([...patches]).toEqual([{ cursor: 5, entity: 'User', id: 'u1', values: { name: 'ada' } }])
+    expect([...patches]).toEqual([
+      {
+        _tag: 'EntityPatched',
+        cursor: 5,
+        entity: 'User',
+        id: 'u1',
+        values: { name: 'ada' },
+        changed: ['name'],
+      },
+    ])
+  })
+
+  it('streams a connection change for the live wire', async () => {
+    const liveServer = RemoteServer.make({
+      entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
+      live: [
+        RemoteServer.live<string>(User, {
+          subscribe: () =>
+            Stream.make({
+              _tag: 'ConnectionInsert' as const,
+              cursor: 1,
+              connection: 'ProjectsByOwner(u1)',
+              position: 'prepend' as const,
+              edge: { entity: 'Project', id: 'p1', key: 'Project:p1' },
+            }),
+        }),
+      ],
+    })
+
+    const changes = await collectLive(liveServer, {
+      requirements: [{ entity: 'User', id: 'u1', fields: ['name'] }],
+      after: 0,
+    })
+    expect([...changes]).toEqual([
+      {
+        _tag: 'ConnectionInsert',
+        cursor: 1,
+        connection: 'ProjectsByOwner(u1)',
+        position: 'prepend',
+        edge: { entity: 'Project', id: 'p1', key: 'Project:p1' },
+      },
+    ])
   })
 
   it('emits nothing for an entity with no live source', async () => {

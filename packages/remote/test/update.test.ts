@@ -149,6 +149,23 @@ describe('Remote.update', () => {
     expect(ahead.live.s1!.cursor).toBe(1)
     expect(readField(ahead.entities, entityKey('User', 'u1'), 'name')).toEqual(Option.some('ada'))
   })
+
+  it('inspects the cache purely', () => {
+    const model = readReceived(initialRemoteModel, { name: 'ada' })
+    const inspection = Remote.inspect(model)
+    expect(inspection.entities).toEqual([
+      {
+        key: 'User:u1',
+        present: ['name'],
+        stale: [],
+        tombstone: false,
+        updatedAt: 0,
+        windows: {},
+      },
+    ])
+    expect(Remote.inspectEntity(model, 'User:u1')?.present).toEqual(['name'])
+    expect(Remote.inspectEntity(model, 'Missing:1')).toBeUndefined()
+  })
 })
 
 const RenameUser = Mutation.make('RenameUser', {

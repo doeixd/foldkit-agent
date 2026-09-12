@@ -62,12 +62,50 @@ export const LiveRequirement = Schema.Struct({
   after: Schema.Number,
 })
 
-export const LivePatch = Schema.Struct({
-  cursor: Schema.Number,
+export const LiveEdge = Schema.Struct({
   entity: Schema.String,
   id: Schema.String,
-  values: Schema.Record(Schema.String, Schema.Unknown),
+  key: Schema.String,
 })
+
+/**
+ * A live change. Entity changes update the store; connection changes alter
+ * membership and ordering; both carry a per-stream cursor.
+ */
+export const LiveChange = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal('EntityPatched'),
+    cursor: Schema.Number,
+    entity: Schema.String,
+    id: Schema.String,
+    values: Schema.Record(Schema.String, Schema.Unknown),
+    changed: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('EntityDeleted'),
+    cursor: Schema.Number,
+    entity: Schema.String,
+    id: Schema.String,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('ConnectionInsert'),
+    cursor: Schema.Number,
+    connection: Schema.String,
+    position: Schema.Union([Schema.Literal('prepend'), Schema.Literal('append')]),
+    edge: LiveEdge,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('ConnectionRemove'),
+    cursor: Schema.Number,
+    connection: Schema.String,
+    edge: LiveEdge,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal('ConnectionInvalidate'),
+    cursor: Schema.Number,
+    connection: Schema.String,
+  }),
+])
 
 export const Read = Rpc.make('FoldkitRemoteRead', {
   payload: ReadBatch,
@@ -83,7 +121,7 @@ export const Mutate = Rpc.make('FoldkitRemoteMutate', {
 
 export const Live = Rpc.make('FoldkitRemoteLive', {
   payload: LiveRequirement,
-  success: LivePatch,
+  success: LiveChange,
   error: RemoteLiveError,
   stream: true,
 })

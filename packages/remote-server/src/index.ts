@@ -18,7 +18,7 @@ import {
   RemoteReadError,
   type Boundary,
   type EntityDescriptor,
-  type LivePatch,
+  type LiveChange,
   type LiveRequirement,
   type MutationDescriptor,
   type NormalizedPatch,
@@ -101,7 +101,7 @@ export interface LiveSource<P, R = never> {
     readonly requirements: ReadonlyArray<Schema.Schema.Type<typeof ReadRequest>>
     readonly after: number
     readonly principal: P
-  }) => Stream.Stream<Schema.Schema.Type<typeof LivePatch>, RemoteServerError, R>
+  }) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteServerError, R>
 }
 
 export interface ServerDefinition<P, R = never> {
@@ -212,7 +212,7 @@ export const RemoteServer = {
     ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
     readonly FoldkitRemoteLive: (
       payload: Schema.Schema.Type<typeof LiveRequirement>,
-    ) => Stream.Stream<Schema.Schema.Type<typeof LivePatch>, RemoteLiveError, R>
+    ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError, R>
   } => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
       const grouped = new Map<

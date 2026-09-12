@@ -38,6 +38,7 @@ import {
   isTombstone,
   readField,
   writeEntity,
+  type EntityEntry,
   type EntityStore,
 } from './store.js'
 import { plan, windowKey, type PlanFreshness } from './plan.js'
@@ -56,7 +57,7 @@ import {
   RemoteReadError,
   RemoteRpc,
 } from './wire.js'
-import type { LivePolicy, QueryDescriptor, QueryWindow } from './query.js'
+import type { LivePolicy, QueryDescriptor, QueryRef, QueryWindow } from './query.js'
 
 type AnySchema = Schema.Schema<unknown>
 
@@ -772,6 +773,57 @@ const liveStreamKey = (requirements: readonly Requirement[]): string =>
     .sort()
     .join('|')
 
+/** A serializable summary of a RemoteModel for DevTools and diagnostics. */
+export interface RemoteInspection {
+  readonly entities: ReadonlyArray<{
+    readonly key: string
+    readonly present: ReadonlyArray<string>
+    readonly stale: ReadonlyArray<string>
+    readonly tombstone: boolean
+    readonly updatedAt: number
+    readonly windows: Readonly<Record<string, string>>
+  }>
+  readonly connections: ReadonlyArray<string>
+  readonly live: ReadonlyArray<string>
+  readonly gaps: ReadonlyArray<string>
+  readonly mutations: {
+    readonly pending: ReadonlyArray<string>
+    readonly failed: ReadonlyArray<string>
+    readonly applied: number
+  }
+}
+
+const inspectEntry = (key: string, entry: EntityEntry): RemoteInspection['entities'][number] => ({
+  key,
+  present: [...entry.present],
+  stale: [...entry.stale],
+  tombstone: entry.tombstone,
+  updatedAt: entry.updatedAt,
+  windows: entry.windows,
+})
+
+/** A pure, serializable view of the whole cache. */
+export const inspectRemote = (model: RemoteModel): RemoteInspection => ({
+  entities: Object.entries(model.entities).map(([key, entry]) => inspectEntry(key, entry)),
+  connections: Object.keys(model.connections),
+  live: Object.keys(model.live),
+  gaps: [...model.gaps],
+  mutations: {
+    pending: [...model.mutations.pending],
+    failed: [...model.mutations.failed],
+    applied: model.mutations.applied.size,
+  },
+})
+
+/** A pure, serializable view of one entity, or `undefined` if unknown. */
+export const inspectEntity = (
+  model: RemoteModel,
+  key: string,
+): RemoteInspection['entities'][number] | undefined => {
+  const entry = model.entities[key]
+  return entry === undefined ? undefined : inspectEntry(key, entry)
+}
+
 /**
  * `Remote.mutate` as a standalone effect, so `Remote.mutateInto` can reuse it
  * without the object literal referencing itself.
@@ -945,6 +997,46 @@ export const Remote = {
    * `requests` are the planned requirements the result answers.
    */
   writeRead,
+
+  /**
+   * Runs a `Query` through `RemoteClient`, encoding its input. Pair the result
+   * with `Remote.queryMessage` to merge the page into the RemoteModel.
+   */
+  query: Effect.fn('Remote.query')(function* <Name extends string, Input, Result>(
+    descriptor: QueryDescriptor<Name, Input, Result>,
+    ref: QueryRef<Name, Input>,
+  ) {
+    const client = yield* RemoteClient
+    const input = yield* Schema.encodeUnknownEffect(descriptor.Input)(ref.input).pipe(
+      Effect.catchTag('SchemaError', error =>
+        Effect.fail(new RemoteQueryError({ message: error.message })),
+      ),
+    )
+    return yield* client.query({ query: ref.query, input, window: ref.window })
+  }),
+
+  /** The `RemoteMessage` that merges a query page into its connection. */
+  queryMessage: <Name extends string, Input>(
+    ref: QueryRef<Name, Input>,
+    result: Schema.Schema.Type<typeof QueryResult>,
+  ): RemoteMessage => ({
+    _tag: 'ConnectionMerged',
+    connection: ref.identity,
+    page: {
+      edges: result.edges.map(edge => ({
+        key: edge.key,
+        ref: { entity: edge.entity, id: edge.id },
+      })),
+      start: result.start,
+      end: result.end,
+    },
+  }),
+
+  /** A pure, serializable view of the whole cache. */
+  inspect: inspectRemote,
+
+  /** A pure, serializable view of one entity, or `undefined` if unknown. */
+  inspectEntity,
 
   /**
    * Runs a mutation through `RemoteClient`, decoding its typed Output and

@@ -51,6 +51,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   instead of a callback the application cannot key. `Remote.prefetch` accepts a
   freshness window; the pure planners take `PlanFreshness`. `RemoteData.schema` is
   exported.
+- **Queries and introspection.** `Remote.query`/`Remote.queryMessage` consume a
+  `QueryRef` end to end, and `Remote.inspect`/`Remote.inspectEntity` expose a pure,
+  serializable cache view for DevTools.
 
 ### `foldkit-remote-server` (private)
 
@@ -58,6 +61,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   handler were missing; the server can now stream the client's live requirements.
   Two wire bugs are fixed with it: `LiveRequirement` was missing the resume cursor
   and `LivePatch.cursor` was a string while the client cursor is numeric.
+- **Typed live changes.** The live wire success is now a `LiveChange` union of
+  entity patches, deletes, and connection insert/remove/invalidate events, so a
+  connection change can travel over the wire instead of entity patches only.
 - **Less ceremony.** `RemoteServer.make` drops its unused domain argument, and the
   server imports the canonical `NormalizedPatch` instead of duplicating it.
 
