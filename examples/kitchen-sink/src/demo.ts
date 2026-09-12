@@ -5,7 +5,7 @@
  * note, a human, and an agent; the four agent adapters project one contract.
  */
 import { Effect, Fiber, Stream } from 'effect'
-import { Entity, Optimistic, dehydrate, hydrate } from 'foldkit-remote'
+import { Entity, Optimistic, RemotePersistence } from 'foldkit-remote'
 import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
@@ -184,11 +184,11 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
 
   // Hydration: the store dehydrates to deterministic text (SSR would embed it)
   // and hydrates into a fresh Model with nothing left to fetch.
-  const snapshot = dehydrate(remote.entities, { scope: 'u1' })!
-  const fresh = withStore(App.initial, hydrate(snapshot, { scope: 'u1' })!)
+  const snapshot = RemotePersistence.dehydrate(remote.entities, { scope: 'u1' })!
+  const fresh = withStore(App.initial, RemotePersistence.hydrate(snapshot, { scope: 'u1' })!)
   say(
     `hydrated: ${describeData(projection.read(fresh))}, plan ${
-      Remote.observeProjection(AppRemote, fresh, projection).length === 0 ? 'empty' : 'pending'
+      Remote.plan(AppRemote, fresh, projection).length === 0 ? 'empty' : 'pending'
     }`,
   )
 

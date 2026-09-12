@@ -11,7 +11,8 @@
  * never from ambient state; `force` plans every field.
  */
 import { Requirement, type RelationRequirement } from 'foldkit-surface'
-import { refsIn } from './relation.js'
+import { stableStringify } from './query.js'
+import { targetsOf } from './relation.js'
 import { entityKey, missingFields, readField, type EntityStore } from './store.js'
 
 export type { RelationRequirement, Requirement } from 'foldkit-surface'
@@ -19,13 +20,7 @@ export type { RelationRequirement, Requirement } from 'foldkit-surface'
 type Window = NonNullable<Requirement['windows']>[string]
 
 /** A stable key for a window, so two equal windows compare equal. */
-export const windowKey = (window: Window): string =>
-  JSON.stringify([
-    window.first ?? null,
-    window.last ?? null,
-    window.after ?? null,
-    window.before ?? null,
-  ])
+export const windowKey = (window: Window): string => stableStringify(window)
 
 export interface PlanFreshness {
   readonly now: number
@@ -53,15 +48,7 @@ const followRelation = (
   value: unknown,
   relation: RelationRequirement,
 ): ReadonlyArray<Requirement> =>
-  refsIn(value)
-    .filter(ref => ref.entity === relation.entity)
-    .map(ref => ({
-      entity: relation.entity,
-      id: ref.id,
-      fields: relation.fields,
-      ...(relation.windows === undefined ? {} : { windows: relation.windows }),
-      ...(relation.relations === undefined ? {} : { relations: relation.relations }),
-    }))
+  targetsOf(value, relation).map(ref => ({ ...relation, id: ref.id }))
 
 export const plan = (
   store: EntityStore,

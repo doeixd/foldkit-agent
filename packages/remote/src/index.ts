@@ -19,6 +19,7 @@ import {
 import { emptyConnection, merge, type Connection, type Edge, type Segment } from './connection.js'
 import {
   Optimistic,
+  connectionIdentity,
   emptyOptimistic,
   pruneOverlays,
   settleFailure,
@@ -26,6 +27,8 @@ import {
   visibleItems,
   visibleStore,
   type ConnectionChange,
+  type ConnectionIdentity,
+  type OptimisticState,
   type OptimisticOperation,
 } from './optimistic.js'
 import {
@@ -45,16 +48,16 @@ import {
   type NormalizedPatch,
 } from './mutation.js'
 import {
-  clearStale,
   entityKey,
   emptyStore,
   isFieldStale,
   isTombstone,
-  markStale,
   readField,
-  writeEntity,
+  setStale,
+  writeEntities,
   type EntityEntry,
   type EntityStore,
+  type EntityWrite,
 } from './store.js'
 import { plan, windowKey, type PlanOptions } from './plan.js'
 import { RemotePolicy } from './policy.js'
@@ -62,12 +65,14 @@ import {
   RelationAnnotation,
   RelationEntityAnnotation,
   isRefPage,
-  refsIn,
+  refParts,
   relationShape,
+  targetsOf,
+  type RefPageValue,
 } from './relation.js'
 import { coalesceReads, type CoalesceOptions } from './coalesce.js'
 import { gc, type RetentionRoots } from './retain.js'
-import { mergeStores, type MergePolicy } from './persistence.js'
+import { RemotePersistence, type MergePolicy } from './persistence.js'
 import {
   MutationRequest,
   MutationResult,
@@ -135,16 +140,6 @@ export interface EntityDescriptor<Name extends string, F extends Schema.Struct.F
   ref(id: Schema.Schema.Type<F['id']>): EntityRef<Name, F>
 }
 
-const encodeRef = (ref: { readonly entity: string; readonly id: string }): string =>
-  `${ref.entity}:${ref.id}`
-
-const decodeRef = (encoded: string): { readonly entity: string; readonly id: string } => {
-  const separator = encoded.indexOf(':')
-  return separator === -1
-    ? { entity: encoded, id: '' }
-    : { entity: encoded.slice(0, separator), id: encoded.slice(separator + 1) }
-}
-
 /**
  * Relations are **references**, never inline target schemas: a ref cannot
  * reconstruct a full entity, and dereferencing is a store concern. Because the
@@ -157,8 +152,8 @@ const refCodec = <Name extends string, F extends Schema.Struct.Fields>(
   Schema.Struct({ entity: Schema.String, id: Schema.String })
     .pipe(
       Schema.encodeTo(Schema.String, {
-        decode: SchemaGetter.transform(decodeRef),
-        encode: SchemaGetter.transform(encodeRef),
+        decode: SchemaGetter.transform(refParts),
+        encode: SchemaGetter.transform((ref: EntityRef<string>) => entityKey(ref.entity, ref.id)),
       }),
     )
     .annotate({
@@ -166,10 +161,14 @@ const refCodec = <Name extends string, F extends Schema.Struct.Fields>(
       [RelationEntityAnnotation]: entity,
     }) as unknown as Schema.Codec<EntityRef<Name, F>, string>
 
+/**
+ * A patch in wire shape: the values the store holds, so a relation is its ref
+ * key (`Entity.refKey`), not an `EntityRef`.
+ */
 export interface EntityPatch<Name extends string, F extends Schema.Struct.Fields> {
   readonly entity: Name
   readonly id: string
-  readonly values: Partial<Schema.Struct.Type<F>>
+  readonly values: Partial<Schema.Struct.Encoded<F>>
 }
 
 /**
@@ -239,10 +238,11 @@ export const Entity = {
    * The wire key a relation field carries (`"Entity:id"`). Adapters that read a
    * foreign key emit this so the ref codec can decode it on the client.
    */
-  refKey: (ref: { readonly entity: string; readonly id: string }): string => encodeRef(ref),
+  refKey: (ref: { readonly entity: string; readonly id: string }): string =>
+    entityKey(ref.entity, ref.id),
 
   /** Splits a ref key back into its entity and id. */
-  refParts: (key: string): { readonly entity: string; readonly id: string } => decodeRef(key),
+  refParts,
 
   /** A relation value of one authoritative page of refs. */
   refPage: <Name extends string, F extends Schema.Struct.Fields>(
@@ -256,9 +256,13 @@ export const Entity = {
     }
   > => refPageCodec<Name, F>(entity.name),
 
+  /**
+   * A normalized patch for an entity, typed against its fields' wire shape:
+   * write a relation as its ref key (`Entity.refKey`), as the server does.
+   */
   patch: <Name extends string, F extends Schema.Struct.Fields>(
     ref: EntityRef<Name, F>,
-    patch: Partial<Schema.Struct.Type<F>>,
+    patch: Partial<Schema.Struct.Encoded<F>>,
   ): EntityPatch<Name, F> => ({ entity: ref.entity, id: ref.id, values: patch }),
 }
 
@@ -294,8 +298,14 @@ export interface Selection<
   /** Present when this selection is itself a paginated relation. */
   readonly window?: QueryWindow | undefined
   /** Phantom: see `Shape`. */
-  readonly shape?: Shape
+  readonly shape?: Shape | undefined
 }
+
+/** Flattens a mapped type so hovers show the picked fields, not the machinery. */
+type Simplify<T> = T extends infer O ? { readonly [K in keyof O]: O[K] } : never
+
+/** The value a Selection reads: `Selection.Value<typeof ProjectCard>`. */
+export type SelectionValueOf<S> = S extends Selection<infer V, any, any> ? V : never
 
 /** The nested selections a relation field admits: of its target entity, in the shapes its value takes. */
 type NestedFor<Field> =
@@ -329,11 +339,11 @@ type NestedValue<Field, Sel> =
         >
       : never
 
-type SelectionValue<F extends Schema.Struct.Fields, Sel> = {
+type SelectionValue<F extends Schema.Struct.Fields, Sel> = Simplify<{
   readonly [K in keyof Sel & keyof F]: Sel[K] extends true
     ? Schema.Schema.Type<F[K]>
     : NestedValue<Schema.Schema.Type<F[K]>, Sel[K]>
-}
+}>
 
 const pageSchema = (item: AnySchema): AnySchema =>
   Schema.Struct({
@@ -422,21 +432,28 @@ export const Selection = {
     entity: EntityDescriptor<Name, F>,
     window: QueryWindow,
     selection?: Selection<Item, Name, 'entity'>,
-  ): Selection<RefPage<Name, F> | Page<Item>, Name, 'connection'> => ({
-    entity: entity.name,
-    fields: selection?.fields ?? [],
-    schema: (selection === undefined
-      ? Entity.refPage(entity)
-      : pageSchema(selection.schema as AnySchema)) as unknown as Schema.Codec<
-      RefPage<Name, F> | Page<Item>,
-      unknown,
-      never,
-      never
-    >,
-    window,
-    ...(selection?.connections === undefined ? {} : { connections: selection.connections }),
-    ...(selection?.relations === undefined ? {} : { relations: selection.relations }),
-  })) as {
+  ): Selection<RefPage<Name, F> | Page<Item>, Name, 'connection'> => {
+    if (selection !== undefined && selection.entity !== entity.name) {
+      throw new Error(
+        `Selection.connection: a page of "${entity.name}" cannot select "${selection.entity}"`,
+      )
+    }
+    return {
+      entity: entity.name,
+      fields: selection?.fields ?? [],
+      schema: (selection === undefined
+        ? Entity.refPage(entity)
+        : pageSchema(selection.schema as AnySchema)) as unknown as Schema.Codec<
+        RefPage<Name, F> | Page<Item>,
+        unknown,
+        never,
+        never
+      >,
+      window,
+      ...(selection?.connections === undefined ? {} : { connections: selection.connections }),
+      ...(selection?.relations === undefined ? {} : { relations: selection.relations }),
+    }
+  }) as {
     <Name extends string, F extends Schema.Struct.Fields>(
       entity: EntityDescriptor<Name, F>,
       window: QueryWindow,
@@ -444,7 +461,7 @@ export const Selection = {
     <Name extends string, F extends Schema.Struct.Fields, Item>(
       entity: EntityDescriptor<Name, F>,
       window: QueryWindow,
-      selection: Selection<Item, Name, 'entity'>,
+      selection: Selection<Item, NoInfer<Name>, 'entity'>,
     ): Selection<Page<Item>, Name, 'connection'>
   },
 }
@@ -564,7 +581,7 @@ export interface RemoteModel {
   /** Normalized ordered connections, keyed by connection identity. */
   readonly connections: Readonly<Record<string, Connection>>
   /** Optimistic entity layers and connection overlays over the base store. */
-  readonly optimistic: Optimistic
+  readonly optimistic: OptimisticState
   /** Live cursor and boundary state, keyed by the subscription's stream key. */
   readonly live: Readonly<Record<string, LiveState>>
   /** Mutation pending/applied/failed ledger. */
@@ -697,6 +714,11 @@ const remoteMessageSchema = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('ConnectionRefreshed'), connection: Schema.String }),
 ]) as unknown as Schema.Schema<RemoteMessage>
 
+const marksOf = (
+  requests: ReadonlyArray<Requirement>,
+): ReadonlyArray<readonly [string, ReadonlyArray<string>]> =>
+  requests.map(request => [entityKey(request.entity, request.id), request.fields] as const)
+
 const setConnectionStale = (
   connections: Readonly<Record<string, Connection>>,
   connection: string,
@@ -728,27 +750,16 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
       }
     case 'ReadFailed':
       // The refresh is over; the fields read as they did before it started.
-      return {
-        ...model,
-        entities: message.requests.reduce(
-          (store, request) =>
-            clearStale(store, entityKey(request.entity, request.id), request.fields),
-          model.entities,
-        ),
-      }
+      return { ...model, entities: setStale(model.entities, marksOf(message.requests), false) }
     case 'RetentionChanged':
       return { ...model, ...gc(model, message.roots) }
     case 'Hydrated':
-      return { ...model, entities: mergeStores(model.entities, message.entities, message.merge) }
-    case 'RefreshStarted':
       return {
         ...model,
-        entities: message.requests.reduce(
-          (store, request) =>
-            markStale(store, entityKey(request.entity, request.id), request.fields),
-          model.entities,
-        ),
+        entities: RemotePersistence.mergeStores(model.entities, message.entities, message.merge),
       }
+    case 'RefreshStarted':
+      return { ...model, entities: setStale(model.entities, marksOf(message.requests), true) }
     case 'MutationStarted':
       return {
         ...model,
@@ -886,7 +897,26 @@ const storeOf = <AppModel, Store extends RemoteModel, Names extends string>(
   model: AppModel,
 ): EntityStore => {
   const remote = bound.store.get(model)
-  return visibleStore(remote.entities, remote.optimistic)
+  return visibleStoreOf(remote.entities, remote.optimistic)
+}
+
+// The visible store is recomputed only when the base store or the layers
+// change, so reads and plans across renders of one Model share it.
+const visibleStores = new WeakMap<OptimisticState, WeakMap<EntityStore, EntityStore>>()
+
+const visibleStoreOf = (entities: EntityStore, optimistic: OptimisticState): EntityStore => {
+  if (optimistic.layers.length === 0) return entities
+  let byStore = visibleStores.get(optimistic)
+  if (byStore === undefined) {
+    byStore = new WeakMap()
+    visibleStores.set(optimistic, byStore)
+  }
+  let visible = byStore.get(entities)
+  if (visible === undefined) {
+    visible = visibleStore(entities, optimistic)
+    byStore.set(entities, visible)
+  }
+  return visible
 }
 
 /**
@@ -915,9 +945,17 @@ export class RemoteClient extends Context.Service<
   }
 >()('foldkit-remote/RemoteClient') {}
 
+export interface MutateOptions {
+  /** What the request changes before the server answers; released when it settles. */
+  readonly optimistic?: ReadonlyArray<OptimisticOperation> | undefined
+}
+
+/** The default `toMessage`: the application reduces `RemoteMessage` itself. */
+const identityMessage = (message: RemoteMessage): RemoteMessage => message
+
 export interface RetainOptions {
-  /** Query connection identities (`QueryRef.identity`) the application shows. */
-  readonly connections?: ReadonlyArray<string> | undefined
+  /** The query connections the application shows, by `QueryRef` or identity. */
+  readonly connections?: ReadonlyArray<ConnectionIdentity> | undefined
   /** How long the roots must be stable before collecting; default none. */
   readonly grace?: Duration.Input | undefined
 }
@@ -943,25 +981,25 @@ export interface ObserveOptions {
   readonly now?: (() => number) | undefined
 }
 
-interface WireRefPage {
-  readonly refs: ReadonlyArray<string>
-  readonly hasNext: boolean
-  readonly hasPrevious: boolean
+export interface LiveOptions {
+  /** The clock `LiveReceived` stamps events with; default `Date.now`. */
+  readonly now?: (() => number) | undefined
 }
 
 /** Appends (after) or prepends (before) an incoming page onto the stored one. */
 const mergeWireRefPages = (
-  current: WireRefPage,
-  next: WireRefPage,
+  current: RefPageValue,
+  next: RefPageValue,
   direction: 'after' | 'before',
-): WireRefPage => {
+): RefPageValue => {
   const refs =
     direction === 'after'
       ? [...new Set([...current.refs, ...next.refs])]
       : [...new Set([...next.refs, ...current.refs])]
+  // The far boundary is the incoming page's; the near one is still the stored page's.
   return direction === 'after'
-    ? { refs, hasNext: next.hasNext, hasPrevious: true }
-    : { refs, hasNext: true, hasPrevious: next.hasPrevious }
+    ? { refs, hasNext: next.hasNext, hasPrevious: current.hasPrevious }
+    : { refs, hasNext: current.hasNext, hasPrevious: next.hasPrevious }
 }
 
 /**
@@ -1007,8 +1045,7 @@ const writeRead = (
     const values = returned.get(key)
     if (values === undefined) return
     for (const [field, relation] of Object.entries(relations ?? {})) {
-      for (const ref of refsIn(values[field])) {
-        if (ref.entity !== relation.entity) continue
+      for (const ref of targetsOf(values[field], relation)) {
         record(entityKey(ref.entity, ref.id), relation.windows, relation.relations)
       }
     }
@@ -1017,17 +1054,20 @@ const writeRead = (
     record(entityKey(request.entity, request.id), request.windows, request.relations)
   }
 
-  return result.entities.reduce((current, entity) => {
+  const writes: EntityWrite[] = []
+  const pending = new Map<string, Record<string, unknown>>()
+  for (const entity of result.entities) {
     const key = entityKey(entity.entity, entity.id)
     const entry = byEntity.get(key)
     let values = entity.values
     if (entry !== undefined && entry.merge.size > 0) {
-      const previous = current[key]
+      // A cursor page merges onto the page stored (or written earlier in this result).
+      const previous = pending.get(key) ?? store[key]?.values
       if (previous !== undefined) {
         const merged: Record<string, unknown> = { ...values }
         for (const [field, direction] of entry.merge) {
           const incoming = values[field]
-          const existing = previous.values[field]
+          const existing = previous[field]
           if (isRefPage(incoming) && isRefPage(existing)) {
             merged[field] = mergeWireRefPages(existing, incoming, direction)
           }
@@ -1035,8 +1075,10 @@ const writeRead = (
         values = merged
       }
     }
-    return writeEntity(current, key, values, now, entry?.windows)
-  }, store)
+    pending.set(key, { ...pending.get(key), ...values })
+    writes.push({ key, values, windows: entry?.windows })
+  }
+  return writeEntities(store, writes, now)
 }
 
 interface Assembled {
@@ -1090,10 +1132,9 @@ const assembleRelation = (
   relation: RelationRequirement,
 ): Assembled | undefined => {
   if (value === null || value === undefined) return { values: null, refreshing: false }
-  const refs = refsIn(value)
   const targets: unknown[] = []
   let refreshing = false
-  for (const ref of refs) {
+  for (const ref of targetsOf(value, relation)) {
     const target = assembleTarget(store, ref, relation)
     if (target === undefined) return undefined
     if (target === 'absent') continue
@@ -1382,30 +1423,27 @@ export const Remote = {
       },
     }),
 
-  /** The pure plan for a projection against a store. */
-  planProjection: <Root, Value>(
-    store: EntityStore,
-    projection: Projection<Root, Value>,
-    options?: PlanOptions,
-  ): ReadonlyArray<Requirement> => plan(store, projection.requirements, options),
-
-  /** The pure plan for a projection against a Model, reading its remote store. */ observeProjection:
-    <AppModel, Store extends RemoteModel, Value>(
-      bound: BoundRemote<AppModel, Store>,
-      model: AppModel,
-      projection: Projection<AppModel, Value>,
-      options?: PlanOptions,
-    ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements, options),
-
-  /** The pure plan for a Surface's projection. */
-  planSurface: <AppModel, Store extends RemoteModel, Model, Message, Params>(
+  /**
+   * The pure plan for a projection against a Model: the requirements its
+   * remote store does not satisfy, under `options` (freshness, force). A
+   * Surface's projection is `surface.projection(params)`.
+   */
+  plan: <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
-    surface: Surface<AppModel, Model, Message, Params>,
-    params: Params,
+    projection: Projection<AppModel, Value>,
     options?: PlanOptions,
-  ): ReadonlyArray<Requirement> =>
-    plan(storeOf(bound, model), surface.projection(params).requirements, options),
+  ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements, options),
+
+  /**
+   * The store reads see: the base store under the pending optimistic layers.
+   * One store is shared by every read and plan of a Model whose remote state
+   * has not changed.
+   */
+  storeOf: <AppModel, Store extends RemoteModel>(
+    bound: BoundRemote<AppModel, Store>,
+    model: AppModel,
+  ): EntityStore => storeOf(bound, model),
 
   /**
    * Executes the plan against the `RemoteClient` and returns a new store. Used
@@ -1472,17 +1510,15 @@ export const Remote = {
    * it shows; anything else is collected once the roots have been stable for
    * `grace`, so a route transition that comes straight back does not thrash.
    */
-  retain: <AppModel, Store extends RemoteModel, Message>(
-    bound: BoundRemote<AppModel, Store>,
-    projections: ReadonlyArray<{ readonly requirements: readonly Requirement[] }>,
-    toMessage: (message: RemoteMessage) => Message,
+  retain: <AppModel, Message = RemoteMessage>(
+    projections: ReadonlyArray<Projection<AppModel, unknown>>,
+    toMessage: (message: RemoteMessage) => Message = identityMessage as never,
     options: RetainOptions = {},
   ): EntryWithoutKeepAlive<AppModel, Message, RetentionRoots, never> => {
     const roots: RetentionRoots = {
       requirements: Requirement.merge(projections.flatMap(projection => projection.requirements)),
-      connections: [...new Set(options.connections ?? [])].sort(),
+      connections: [...new Set((options.connections ?? []).map(connectionIdentity))].sort(),
     }
-    void bound
     return {
       dependenciesSchema: retentionRootsSchema,
       modelToDependencies: () => roots,
@@ -1533,13 +1569,15 @@ export const Remote = {
    * confirmed overlays placed around it, minus removed edges and edges whose
    * target is a tombstone.
    */
-  visibleItems: (model: RemoteModel, connection: string): ReadonlyArray<Edge> =>
-    visibleItems(
-      model.connections[connection] ?? emptyConnection,
-      connection,
+  visibleItems: (model: RemoteModel, connection: ConnectionIdentity): ReadonlyArray<Edge> => {
+    const identity = connectionIdentity(connection)
+    return visibleItems(
+      model.connections[identity] ?? emptyConnection,
+      identity,
       model.optimistic.overlays,
       model.entities,
-    ),
+    )
+  },
 
   /** A pure, serializable view of the whole cache. */
   inspect: inspectRemote,
@@ -1573,7 +1611,7 @@ export const Remote = {
     mutation: MutationDescriptor<Name, Input, Output>,
     input: Input,
     requestId: string,
-    options: { readonly optimistic?: ReadonlyArray<OptimisticOperation> | undefined } = {},
+    options: MutateOptions = {},
   ) {
     const started = updateRemote(bound.store.get(model), {
       _tag: 'MutationStarted',
@@ -1608,12 +1646,12 @@ export const Remote = {
     Model,
     SurfaceMessage,
     Params,
-    Message,
+    Message = RemoteMessage,
   >(
     bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    toMessage: (message: RemoteMessage) => Message,
+    toMessage: (message: RemoteMessage) => Message = identityMessage as never,
     options: ObserveOptions = {},
   ): EntryWithoutKeepAlive<
     AppModel,
@@ -1656,12 +1694,12 @@ export const Remote = {
       dependenciesToStream: ({ requirements }) =>
         requirements.length === 0
           ? Stream.empty
-          : RemotePolicy.refreshes(policy)
-            ? Stream.concat(
-                Stream.succeed(toMessage({ _tag: 'RefreshStarted', requests: requirements })),
-                Stream.fromEffect(read(requirements)),
-              )
-            : Stream.fromEffect(read(requirements)),
+          : Stream.concat(
+              RemotePolicy.refreshes(policy)
+                ? Stream.succeed(toMessage({ _tag: 'RefreshStarted', requests: requirements }))
+                : Stream.empty,
+              Stream.fromEffect(read(requirements)),
+            ),
     }
   },
 
@@ -1678,12 +1716,13 @@ export const Remote = {
     Model,
     SurfaceMessage,
     Params,
-    Message,
+    Message = RemoteMessage,
   >(
     bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    toMessage: (message: RemoteMessage) => Message,
+    toMessage: (message: RemoteMessage) => Message = identityMessage as never,
+    options: LiveOptions = {},
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
@@ -1716,7 +1755,7 @@ export const Remote = {
                 _tag: 'LiveReceived',
                 stream: liveStreamKey(requirements),
                 event,
-                now: Date.now(),
+                now: (options.now ?? Date.now)(),
               }),
             ),
             Stream.catchIf(

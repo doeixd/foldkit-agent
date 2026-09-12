@@ -47,18 +47,12 @@ const replace = (store: EntityStore, key: EntityKey, entry: EntityEntry): Entity
   [key]: entry,
 })
 
-/**
- * Merges known values. Every written field becomes present and non-stale; a
- * tombstone is cleared because the entity is evidently not absent.
- */
-export const writeEntity = (
-  store: EntityStore,
-  key: EntityKey,
+const written = (
+  previous: EntityEntry,
   values: Readonly<Record<string, unknown>>,
-  now = 0,
+  now: number,
   windows?: Readonly<Record<string, string>>,
-): EntityStore => {
-  const previous = store[key] ?? emptyEntry
+): EntityEntry => {
   const present = new Set(previous.present)
   const stale = new Set(previous.stale)
   const nextWindows: Record<string, string> = { ...previous.windows }
@@ -70,14 +64,74 @@ export const writeEntity = (
     if (requested !== undefined && requested !== '') nextWindows[field] = requested
     else delete nextWindows[field]
   }
-  return replace(store, key, {
+  return {
     values: { ...previous.values, ...values },
     present,
     stale,
     tombstone: false,
     updatedAt: now,
     windows: nextWindows,
-  })
+  }
+}
+
+export interface EntityWrite {
+  readonly key: EntityKey
+  readonly values: Readonly<Record<string, unknown>>
+  /** The canonical window each written relation field was fetched with. */
+  readonly windows?: Readonly<Record<string, string>> | undefined
+}
+
+/**
+ * Merges known values into many entities, copying the store once. Every
+ * written field becomes present and non-stale; a tombstone is cleared because
+ * the entity is evidently not absent.
+ */
+export const writeEntities = (
+  store: EntityStore,
+  writes: ReadonlyArray<EntityWrite>,
+  now = 0,
+): EntityStore => {
+  if (writes.length === 0) return store
+  const next: Record<EntityKey, EntityEntry> = { ...store }
+  for (const write of writes) {
+    next[write.key] = written(next[write.key] ?? emptyEntry, write.values, now, write.windows)
+  }
+  return next
+}
+
+/** `writeEntities` for one entity. */
+export const writeEntity = (
+  store: EntityStore,
+  key: EntityKey,
+  values: Readonly<Record<string, unknown>>,
+  now = 0,
+  windows?: Readonly<Record<string, string>>,
+): EntityStore => writeEntities(store, [{ key, values, windows }], now)
+
+/**
+ * Marks present fields stale (`true`) or ends their staleness (`false`) across
+ * many entities, copying the store once. A field never present stays missing;
+ * an unknown entity is left alone.
+ */
+export const setStale = (
+  store: EntityStore,
+  marks: ReadonlyArray<readonly [key: EntityKey, fields: Iterable<string>]>,
+  stale: boolean,
+): EntityStore => {
+  let next: Record<EntityKey, EntityEntry> | undefined
+  for (const [key, fields] of marks) {
+    const previous = (next ?? store)[key]
+    if (previous === undefined) continue
+    const staleFields = new Set(previous.stale)
+    for (const field of fields) {
+      if (stale) {
+        if (previous.present.has(field)) staleFields.add(field)
+      } else staleFields.delete(field)
+    }
+    next ??= { ...store }
+    next[key] = { ...previous, stale: staleFields }
+  }
+  return next ?? store
 }
 
 /** Marks present fields stale; fields that were never present stay missing. */
@@ -85,28 +139,14 @@ export const markStale = (
   store: EntityStore,
   key: EntityKey,
   fields: Iterable<string>,
-): EntityStore => {
-  const previous = store[key]
-  if (previous === undefined) return store
-  const stale = new Set(previous.stale)
-  for (const field of fields) {
-    if (previous.present.has(field)) stale.add(field)
-  }
-  return replace(store, key, { ...previous, stale })
-}
+): EntityStore => setStale(store, [[key, fields]], true)
 
 /** Ends a refresh that did not land: the fields are present again as they were. */
 export const clearStale = (
   store: EntityStore,
   key: EntityKey,
   fields: Iterable<string>,
-): EntityStore => {
-  const previous = store[key]
-  if (previous === undefined) return store
-  const stale = new Set(previous.stale)
-  for (const field of fields) stale.delete(field)
-  return replace(store, key, { ...previous, stale })
-}
+): EntityStore => setStale(store, [[key, fields]], false)
 
 /** Records that the entity is known to be absent, so it is not refetched. */
 export const tombstone = (store: EntityStore, key: EntityKey): EntityStore =>

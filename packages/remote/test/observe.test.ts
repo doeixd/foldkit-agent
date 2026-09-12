@@ -4,10 +4,12 @@ import { Projection, Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
+  Optimistic,
   Remote,
   RemoteClient,
   RemoteReadError,
   Selection,
+  emptyOptimistic,
   emptyStore,
   entityKey,
   initialRemoteModel,
@@ -101,10 +103,38 @@ describe('Remote observation', () => {
     const projection = Remote.select(AppRemote, UserSummary)('u1')
 
     expect(projection.read(model)).toEqual({ _tag: 'Initial' })
-    expect(Remote.observeProjection(AppRemote, model, projection)).toEqual([
+    expect(Remote.plan(AppRemote, model, projection)).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
     ])
     expect(calls).toHaveLength(0)
+  })
+
+  it('shares one visible store across plans of the same model', () => {
+    const start = {
+      ...initialRemoteModel,
+      entities: writeEntity(emptyStore, entityKey('User', 'u1'), { name: 'x' }, 0),
+      optimistic: Optimistic.begin(initialRemoteModel.optimistic, 'm1', [
+        { entity: 'User', id: 'u1', values: { name: 'ada' } },
+      ]),
+    }
+    const model = { remote: start, route: '/users/u1' }
+    const projection = Remote.select(AppRemote, NameOnly)('u1')
+
+    expect(Remote.plan(AppRemote, model, projection)).toEqual([])
+    expect(projection.read(model)).toEqual({ _tag: 'Ready', value: { name: 'ada' } })
+    const store = Remote.storeOf(AppRemote, model)
+    expect(store).toBe(Remote.storeOf(AppRemote, { ...model, remote: { ...start } }))
+    const patched = {
+      ...start,
+      optimistic: Optimistic.begin(start.optimistic, 'm2', [
+        { entity: 'User', id: 'u1', values: { name: 'bob' } },
+      ]),
+    }
+    expect(Remote.storeOf(AppRemote, { ...model, remote: patched })).not.toBe(store)
+    expect(Remote.storeOf(AppRemote, { ...model, remote: initialRemoteModel })).toBe(emptyStore)
+    expect(
+      Remote.storeOf(AppRemote, { ...model, remote: { ...start, optimistic: emptyOptimistic } }),
+    ).toBe(start.entities)
   })
 
   it('prefetches through the client and populates the store', async () => {
@@ -123,9 +153,7 @@ describe('Remote observation', () => {
     const store = writeEntity(emptyStore, entityKey('User', 'u1'), { id: 'u1', name: 'ada' })
     const model = root(store)
 
-    expect(
-      Remote.observeProjection(AppRemote, model, Remote.select(AppRemote, UserSummary)('u1')),
-    ).toEqual([])
+    expect(Remote.plan(AppRemote, model, Remote.select(AppRemote, UserSummary)('u1'))).toEqual([])
     await Effect.runPromise(
       Remote.prefetch(AppRemote, root(store), Remote.select(AppRemote, UserSummary)('u1')).pipe(
         Effect.provide(FakeClient),
@@ -136,10 +164,10 @@ describe('Remote observation', () => {
 
   it('derives requirements from the observed Surface', () => {
     const model = root()
-    expect(Remote.planSurface(AppRemote, model, UserPage, { userId: 'u1' })).toEqual([
+    expect(Remote.plan(AppRemote, model, UserPage.projection({ userId: 'u1' }))).toEqual([
       { entity: 'User', id: 'u1', fields: ['id', 'name'] },
     ])
-    expect(Remote.planSurface(AppRemote, model, NameCard, { userId: 'u1' })).toEqual([
+    expect(Remote.plan(AppRemote, model, NameCard.projection({ userId: 'u1' }))).toEqual([
       { entity: 'User', id: 'u1', fields: ['name'] },
     ])
   })

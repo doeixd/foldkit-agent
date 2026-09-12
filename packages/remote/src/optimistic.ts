@@ -49,36 +49,40 @@ const toOverlays = (id: string, changes: ReadonlyArray<ConnectionChange>): Conne
     position: change._tag === 'Insert' ? change.position : 'remove',
   }))
 
+/** A connection, by identity string or by anything that carries one (a `QueryRef`). */
+export type ConnectionIdentity = string | { readonly identity: string }
+
+export const connectionIdentity = (connection: ConnectionIdentity): string =>
+  typeof connection === 'string' ? connection : connection.identity
+
+const change = (
+  connection: ConnectionIdentity,
+  ref: { readonly entity: string; readonly id: string },
+  position: 'prepend' | 'append' | 'remove',
+): ConnectionChange =>
+  position === 'remove'
+    ? { _tag: 'Remove', connection: connectionIdentity(connection), edge: edge(ref) }
+    : { _tag: 'Insert', connection: connectionIdentity(connection), position, edge: edge(ref) }
+
 /** Constructors for the connection half of a request's optimistic operations. */
 export const Optimistic = {
+  /** Show `ref` at the front of the connection until the request settles. */
   prepend: (
-    connection: string | { readonly identity: string },
+    connection: ConnectionIdentity,
     ref: { readonly entity: string; readonly id: string },
-  ): ConnectionChange => ({
-    _tag: 'Insert',
-    connection: typeof connection === 'string' ? connection : connection.identity,
-    position: 'prepend',
-    edge: edge({ entity: ref.entity, id: ref.id }),
-  }),
+  ): ConnectionChange => change(connection, ref, 'prepend'),
 
+  /** Show `ref` at the end of the connection until the request settles. */
   append: (
-    connection: string | { readonly identity: string },
+    connection: ConnectionIdentity,
     ref: { readonly entity: string; readonly id: string },
-  ): ConnectionChange => ({
-    _tag: 'Insert',
-    connection: typeof connection === 'string' ? connection : connection.identity,
-    position: 'append',
-    edge: edge({ entity: ref.entity, id: ref.id }),
-  }),
+  ): ConnectionChange => change(connection, ref, 'append'),
 
+  /** Hide `ref` from the connection until the request settles. */
   remove: (
-    connection: string | { readonly identity: string },
+    connection: ConnectionIdentity,
     ref: { readonly entity: string; readonly id: string },
-  ): ConnectionChange => ({
-    _tag: 'Remove',
-    connection: typeof connection === 'string' ? connection : connection.identity,
-    edge: edge({ entity: ref.entity, id: ref.id }),
-  }),
+  ): ConnectionChange => change(connection, ref, 'remove'),
 
   /**
    * Applies a request's operations: its patches become one layer and its
@@ -86,10 +90,10 @@ export const Optimistic = {
    * removes every one of them together.
    */
   begin: (
-    optimistic: Optimistic,
+    optimistic: OptimisticState,
     requestId: string,
     operations: ReadonlyArray<OptimisticOperation>,
-  ): Optimistic => {
+  ): OptimisticState => {
     const patches = operations.filter(
       (operation): operation is NormalizedPatch => !isConnectionChange(operation),
     )
@@ -102,60 +106,64 @@ export const Optimistic = {
       overlays: [...optimistic.overlays, ...toOverlays(requestId, changes)],
     }
   },
-
-  /**
-   * Replaces a request's overlays with the server-confirmed changes, owned by
-   * `id`, in the position the request's overlays held, so a confirmed edge
-   * keeps its place among other pending inserts.
-   */
-  confirm: (
-    optimistic: Optimistic,
-    requestId: string,
-    id: string,
-    changes: ReadonlyArray<ConnectionChange>,
-  ): Optimistic => {
-    const confirmed = toOverlays(id, changes)
-    const at = optimistic.overlays.findIndex(overlay => overlay.id === requestId)
-    const others = optimistic.overlays.filter(overlay => overlay.id !== requestId)
-    return {
-      ...optimistic,
-      overlays:
-        at === -1
-          ? [...others, ...confirmed]
-          : [...others.slice(0, at), ...confirmed, ...others.slice(at)],
-    }
-  },
 }
 
-export interface Optimistic {
+/**
+ * Replaces a request's overlays with the server-confirmed changes, owned by
+ * `id`, in the position the request's overlays held, so a confirmed edge keeps
+ * its place among other pending inserts.
+ */
+const confirm = (
+  optimistic: OptimisticState,
+  requestId: string,
+  id: string,
+  changes: ReadonlyArray<ConnectionChange>,
+): OptimisticState => {
+  const confirmed = toOverlays(id, changes)
+  const at = optimistic.overlays.findIndex(overlay => overlay.id === requestId)
+  const others = optimistic.overlays.filter(overlay => overlay.id !== requestId)
+  return {
+    ...optimistic,
+    overlays:
+      at === -1
+        ? [...others, ...confirmed]
+        : [...others.slice(0, at), ...confirmed, ...others.slice(at)],
+  }
+}
+
+/** Pending entity layers and connection overlays over the base store. */
+export interface OptimisticState {
   readonly layers: ReadonlyArray<EntityLayer>
   readonly overlays: ReadonlyArray<ConnectionOverlay>
 }
 
-export const emptyOptimistic: Optimistic = { layers: [], overlays: [] }
+export const emptyOptimistic: OptimisticState = { layers: [], overlays: [] }
 
-export const addLayer = (optimistic: Optimistic, layer: EntityLayer): Optimistic => ({
+export const addLayer = (optimistic: OptimisticState, layer: EntityLayer): OptimisticState => ({
   ...optimistic,
   layers: [...optimistic.layers, layer],
 })
 
-export const removeLayer = (optimistic: Optimistic, id: string): Optimistic => ({
+export const removeLayer = (optimistic: OptimisticState, id: string): OptimisticState => ({
   ...optimistic,
   layers: optimistic.layers.filter(layer => layer.id !== id),
 })
 
-export const addOverlay = (optimistic: Optimistic, overlay: ConnectionOverlay): Optimistic => ({
+export const addOverlay = (
+  optimistic: OptimisticState,
+  overlay: ConnectionOverlay,
+): OptimisticState => ({
   ...optimistic,
   overlays: [...optimistic.overlays, overlay],
 })
 
-export const removeOverlay = (optimistic: Optimistic, id: string): Optimistic => ({
+export const removeOverlay = (optimistic: OptimisticState, id: string): OptimisticState => ({
   ...optimistic,
   overlays: optimistic.overlays.filter(overlay => overlay.id !== id),
 })
 
 /** Base store with every layer applied in order. Later layers win. */
-export const visibleStore = (base: EntityStore, optimistic: Optimistic): EntityStore =>
+export const visibleStore = (base: EntityStore, optimistic: OptimisticState): EntityStore =>
   optimistic.layers.reduce(
     (store, layer) =>
       layer.patches.reduce(
@@ -172,11 +180,11 @@ export const visibleStore = (base: EntityStore, optimistic: Optimistic): EntityS
  * left alone; they settle with the request.
  */
 export const pruneOverlays = (
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   connection: string,
   covered: ReadonlySet<string>,
   pending: ReadonlySet<string>,
-): Optimistic => ({
+): OptimisticState => ({
   ...optimistic,
   overlays: optimistic.overlays.flatMap(overlay => {
     if (overlay.connection !== connection || pending.has(overlay.id)) return [overlay]
@@ -186,7 +194,7 @@ export const pruneOverlays = (
 })
 
 /** Everything a request owns: its layer and its overlays. */
-const release = (optimistic: Optimistic, requestId: string): Optimistic =>
+const release = (optimistic: OptimisticState, requestId: string): OptimisticState =>
   removeOverlay(removeLayer(optimistic, requestId), requestId)
 
 /**
@@ -196,7 +204,7 @@ const release = (optimistic: Optimistic, requestId: string): Optimistic =>
  */
 export const settleSuccess = (
   base: EntityStore,
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   state: MutationState,
   requestId: string,
   entities: ReadonlyArray<NormalizedPatch>,
@@ -204,7 +212,7 @@ export const settleSuccess = (
 ): {
   readonly store: EntityStore
   readonly state: MutationState
-  readonly optimistic: Optimistic
+  readonly optimistic: OptimisticState
 } => {
   const reconciled = reconcileMutation(base, state, requestId, entities)
   return {
@@ -212,7 +220,7 @@ export const settleSuccess = (
     state: reconciled.state,
     optimistic: state.applied.has(requestId)
       ? release(optimistic, requestId)
-      : Optimistic.confirm(
+      : confirm(
           removeLayer(optimistic, requestId),
           requestId,
           `confirmed:${requestId}`,
@@ -222,7 +230,7 @@ export const settleSuccess = (
 }
 
 /** A failed request's layer and overlays are dropped; the base was never mutated. */
-export const settleFailure = (optimistic: Optimistic, requestId: string): Optimistic =>
+export const settleFailure = (optimistic: OptimisticState, requestId: string): OptimisticState =>
   release(optimistic, requestId)
 
 /**

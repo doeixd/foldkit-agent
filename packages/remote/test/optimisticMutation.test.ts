@@ -325,7 +325,7 @@ describe('a Surface reads through the optimistic layers', () => {
       optimistic: [Entity.patch(Comment.ref('tmp'), { id: 'tmp', body: 'draft' })],
     })
     const temporary = Remote.select(Remote2, Selection.make(Comment, { body: true }))('tmp')
-    expect(Remote.observeProjection(Remote2, { remote: pending }, temporary)).toEqual([])
+    expect(Remote.plan(Remote2, { remote: pending }, temporary)).toEqual([])
     expect(temporary.read({ remote: pending })).toEqual({ _tag: 'Ready', value: { body: 'draft' } })
   })
 })

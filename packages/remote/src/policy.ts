@@ -18,14 +18,17 @@ export type RemotePolicy =
   | { readonly _tag: 'NetworkOnly' }
 
 export const RemotePolicy = {
-  cacheFirst: { _tag: 'CacheFirst' } as RemotePolicy,
+  /** Fetch only what the store lacks. */
+  cacheFirst: { _tag: 'CacheFirst' } as const satisfies RemotePolicy,
 
+  /** Keep present values visible, read as `Refreshing`, and refetch an entry older than `maxAge` ms. */
   staleWhileRevalidate: (options: { readonly maxAge: number }): RemotePolicy => ({
     _tag: 'StaleWhileRevalidate',
     maxAge: options.maxAge,
   }),
 
-  networkOnly: { _tag: 'NetworkOnly' } as RemotePolicy,
+  /** Fetch every selected field regardless of coverage; cached values stay visible meanwhile. */
+  networkOnly: { _tag: 'NetworkOnly' } as const satisfies RemotePolicy,
 
   /** The planner options a policy compiles to at `now`. */
   toPlan: (policy: RemotePolicy, now: number): PlanOptions => {

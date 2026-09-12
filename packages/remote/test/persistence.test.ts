@@ -9,14 +9,11 @@ import {
   Remote,
   RemoteClient,
   Selection,
-  dehydrate,
   emptyStore,
   entityKey,
-  hydrate,
   initialRemoteModel,
   isTombstone,
   markStale,
-  mergeStores,
   readField,
   tombstone,
   updateRemote,
@@ -185,8 +182,8 @@ describe('snapshot hardening', () => {
       { id: 'u2', name: 'grace' },
       2,
     )
-    expect(dehydrate(store)).toBe(dehydrate(reversed))
-    expect(JSON.parse(dehydrate(store)!)).toEqual({
+    expect(RemotePersistence.dehydrate(store)).toBe(RemotePersistence.dehydrate(reversed))
+    expect(JSON.parse(RemotePersistence.dehydrate(store)!)).toEqual({
       version: REMOTE_CACHE_VERSION,
       scope: null,
       entities: expect.any(Object),
@@ -194,16 +191,28 @@ describe('snapshot hardening', () => {
   })
 
   it('hydrating the same text twice gives equal stores', () => {
-    const text = dehydrate(store)!
-    expect(hydrate(text)).toEqual(hydrate(text))
-    expect(hydrate(text)).toEqual(store)
+    const text = RemotePersistence.dehydrate(store)!
+    expect(RemotePersistence.hydrate(text)).toEqual(RemotePersistence.hydrate(text))
+    expect(RemotePersistence.hydrate(text)).toEqual(store)
   })
 
   it('a snapshot for another scope is discarded, and the key removed', async () => {
-    expect(hydrate(dehydrate(store, { scope: 'u1' }), { scope: 'u1' })).toEqual(store)
-    expect(hydrate(dehydrate(store, { scope: 'u1' }), { scope: 'u2' })).toBeUndefined()
-    expect(hydrate(dehydrate(store, { scope: 'u1' }))).toBeUndefined()
-    expect(hydrate(dehydrate(store), { scope: 'u1' })).toBeUndefined()
+    expect(
+      RemotePersistence.hydrate(RemotePersistence.dehydrate(store, { scope: 'u1' }), {
+        scope: 'u1',
+      }),
+    ).toEqual(store)
+    expect(
+      RemotePersistence.hydrate(RemotePersistence.dehydrate(store, { scope: 'u1' }), {
+        scope: 'u2',
+      }),
+    ).toBeUndefined()
+    expect(
+      RemotePersistence.hydrate(RemotePersistence.dehydrate(store, { scope: 'u1' })),
+    ).toBeUndefined()
+    expect(
+      RemotePersistence.hydrate(RemotePersistence.dehydrate(store), { scope: 'u1' }),
+    ).toBeUndefined()
 
     const result = await run(
       Effect.gen(function* () {
@@ -217,10 +226,12 @@ describe('snapshot hardening', () => {
   })
 
   it('an oversized snapshot is neither written nor read', async () => {
-    const size = new TextEncoder().encode(dehydrate(store)!).length
-    expect(dehydrate(store, { maxBytes: size })).toBeDefined()
-    expect(dehydrate(store, { maxBytes: size - 1 })).toBeUndefined()
-    expect(hydrate(dehydrate(store), { maxBytes: size - 1 })).toBeUndefined()
+    const size = new TextEncoder().encode(RemotePersistence.dehydrate(store)!).length
+    expect(RemotePersistence.dehydrate(store, { maxBytes: size })).toBeDefined()
+    expect(RemotePersistence.dehydrate(store, { maxBytes: size - 1 })).toBeUndefined()
+    expect(
+      RemotePersistence.hydrate(RemotePersistence.dehydrate(store), { maxBytes: size - 1 }),
+    ).toBeUndefined()
 
     const result = await run(
       Effect.gen(function* () {
@@ -243,11 +254,11 @@ describe('snapshot hardening', () => {
       { id: 'u3' },
       9,
     )
-    const replaced = mergeStores(current, store, 'replace')
+    const replaced = RemotePersistence.mergeStores(current, store, 'replace')
     expect(readField(replaced, user, 'name')).toEqual(Option.some('ada'))
     expect(Object.keys(replaced).sort()).toEqual(['User:u1', 'User:u2', 'User:u3'])
 
-    const preserved = mergeStores(current, store, 'preserve-existing')
+    const preserved = RemotePersistence.mergeStores(current, store, 'preserve-existing')
     expect(readField(preserved, user, 'name')).toEqual(Option.some('newer'))
     expect(readField(preserved, entityKey('User', 'u2'), 'name')).toEqual(Option.some('grace'))
     expect(Object.keys(preserved).sort()).toEqual(['User:u1', 'User:u2', 'User:u3'])
@@ -313,15 +324,15 @@ describe('snapshot hardening', () => {
         Effect.provide(Client),
       ),
     )
-    const html = dehydrate(serverStore, { scope: 'u1' })!
+    const html = RemotePersistence.dehydrate(serverStore, { scope: 'u1' })!
 
     // Client: hydrate into a fresh model; the plan is empty and the read is Ready.
     const client = updateRemote(initialRemoteModel, {
       _tag: 'Hydrated',
-      entities: hydrate(html, { scope: 'u1' })!,
+      entities: RemotePersistence.hydrate(html, { scope: 'u1' })!,
       merge: 'replace',
     })
-    expect(Remote.observeProjection(AppRemote, { remote: client }, projection)).toEqual([])
+    expect(Remote.plan(AppRemote, { remote: client }, projection)).toEqual([])
     expect(projection.read({ remote: client })).toEqual({
       _tag: 'Ready',
       value: { id: 'u1', name: 'ada' },

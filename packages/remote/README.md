@@ -179,12 +179,11 @@ the refetched fields stale, so `Remote.select` reads them as `Refreshing` until
 (`RemotePolicy.toPlan`); the planner stays pure, and the clock it reads is the
 `now` option (default `Date.now`), so tests inject time.
 
-Lower-level, pure planning is available when a Surface is not the right unit:
+The pure plan is available when a Subscription is not the right unit (a
+Surface's projection is `ProjectPage.projection(params)`):
 
 ```ts
-Remote.planProjection(store, projection, options?)  // -> Requirement[]
-Remote.observeProjection(AppRemote, model, projection, options?)
-Remote.planSurface(AppRemote, model, ProjectPage, params, options?)
+Remote.plan(AppRemote, model, projection, options?) // -> Requirement[]
 ```
 
 `options` is a `PlanOptions`: `freshness` (`{ now, freshness }`) refreshes an
@@ -228,8 +227,8 @@ const subscriptions = (model: Model) => {
   const page = ProjectPage.projection({ projectId: model.route.projectId })
   return [
     Remote.observe(AppRemote, ProjectPage, { projectId: model.route.projectId }, toMessage),
-    Remote.retain(AppRemote, [page], toMessage, {
-      connections: [projectsRef.identity],
+    Remote.retain([page], toMessage, {
+      connections: [projectsRef],
       grace: '5 seconds',
     }),
   ]

@@ -4,10 +4,18 @@
  * follows them into the store; the server follows them into the next read.
  */
 import type { Schema } from 'effect'
+import type { RelationRequirement } from 'foldkit-surface'
 
 export interface RefParts {
   readonly entity: string
   readonly id: string
+}
+
+/** A page of refs as the wire and the store hold it. */
+export interface RefPageValue {
+  readonly refs: ReadonlyArray<string>
+  readonly hasNext: boolean
+  readonly hasPrevious: boolean
 }
 
 /** Marks the codec `Entity.ref`/`Entity.refPage` produce, so a Selection can tell the field's shape. */
@@ -23,7 +31,8 @@ export interface RelationShape {
   readonly entity: string
 }
 
-const refParts = (encoded: string): RefParts => {
+/** Splits a ref key (`"Entity:id"`, the store key too) back into its parts. */
+export const refParts = (encoded: string): RefParts => {
   const separator = encoded.indexOf(':')
   return separator === -1
     ? { entity: encoded, id: '' }
@@ -44,14 +53,11 @@ export const refsIn = (value: unknown): ReadonlyArray<RefParts> => {
   return []
 }
 
-/** A page of refs as the wire and the store hold it. */
-export const isRefPage = (
-  value: unknown,
-): value is {
-  readonly refs: ReadonlyArray<string>
-  readonly hasNext: boolean
-  readonly hasPrevious: boolean
-} => {
+/** The refs in a relation value that name the relation's target entity, and no other. */
+export const targetsOf = (value: unknown, relation: RelationRequirement): ReadonlyArray<RefParts> =>
+  refsIn(value).filter(ref => ref.entity === relation.entity)
+
+export const isRefPage = (value: unknown): value is RefPageValue => {
   if (value === null || typeof value !== 'object') return false
   const page = value as Record<string, unknown>
   return (

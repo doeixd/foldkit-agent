@@ -62,9 +62,39 @@ describe('Remote.writeRead', () => {
       page(['Comment:c3'], false, true),
     )
 
+    // hasNext comes from the new page; hasPrevious stays the stored page's.
     expect(commentsOf(second)).toEqual(
-      page(['Comment:c1', 'Comment:c2', 'Comment:c3'], false, true),
+      page(['Comment:c1', 'Comment:c2', 'Comment:c3'], false, false),
     )
+  })
+
+  it('merges cursor pages onto a page written earlier in the same result', () => {
+    const first = writePage(emptyStore, { first: 1 }, page(['Comment:c1'], true, false))
+    const both = Remote.writeRead(
+      first,
+      [
+        {
+          entity: 'Project',
+          id: 'p1',
+          fields: ['comments'],
+          windows: { comments: { first: 1, after: 'Comment:c1' } },
+        },
+        {
+          entity: 'Project',
+          id: 'p1',
+          fields: ['comments'],
+          windows: { comments: { first: 1, after: 'Comment:c2' } },
+        },
+      ],
+      {
+        entities: [
+          { entity: 'Project', id: 'p1', values: { comments: page(['Comment:c2'], true, true) } },
+          { entity: 'Project', id: 'p1', values: { comments: page(['Comment:c3'], false, true) } },
+        ],
+      },
+    )
+
+    expect(commentsOf(both)).toEqual(page(['Comment:c1', 'Comment:c2', 'Comment:c3'], false, false))
   })
 
   it('prepends a before page ahead of the stored page', () => {
@@ -79,8 +109,9 @@ describe('Remote.writeRead', () => {
       page(['Comment:c1', 'Comment:c2'], true, false),
     )
 
+    // hasPrevious comes from the new page; hasNext stays the stored page's.
     expect(commentsOf(prepended)).toEqual(
-      page(['Comment:c1', 'Comment:c2', 'Comment:c3', 'Comment:c4'], true, false),
+      page(['Comment:c1', 'Comment:c2', 'Comment:c3', 'Comment:c4'], false, false),
     )
   })
 

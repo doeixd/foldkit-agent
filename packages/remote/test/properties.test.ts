@@ -30,7 +30,7 @@ import {
   type EntityStore,
   type LiveEvent,
   type LiveState,
-  type Optimistic as OptimisticState,
+  type OptimisticState,
   type Segment,
 } from '../src/index.js'
 

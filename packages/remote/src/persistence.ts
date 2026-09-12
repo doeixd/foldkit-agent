@@ -55,7 +55,7 @@ const sorted = <T>(values: Iterable<T>): T[] => [...values].sort()
  * field sets are sorted here, so equal stores give byte-equal snapshots
  * whatever order they were built in.
  */
-export const serializeStore = (store: EntityStore, scope?: string): SerializedStore => ({
+const serializeStore = (store: EntityStore, scope?: string): SerializedStore => ({
   version: REMOTE_CACHE_VERSION,
   scope: scope ?? null,
   entities: Object.fromEntries(
@@ -104,7 +104,7 @@ const parseEntry = (value: unknown): EntityEntry => {
   }
 }
 
-export const deserializeStore = (serialized: SerializedStore): EntityStore =>
+const deserializeStore = (serialized: SerializedStore): EntityStore =>
   Object.fromEntries(
     Object.entries(serialized.entities).map(([key, entry]) => [key, parseEntry(entry)]),
   )
@@ -113,27 +113,34 @@ export const deserializeStore = (serialized: SerializedStore): EntityStore =>
  * The snapshot text, or `undefined` when it would exceed `maxBytes`. Only the
  * entity store goes in; pass `model.entities`, never the whole `RemoteModel`.
  */
-export const dehydrate = (
-  store: EntityStore,
-  options: SnapshotOptions = {},
-): string | undefined => {
+const dehydrate = (store: EntityStore, options: SnapshotOptions = {}): string | undefined => {
   const text = stableStringify(serializeStore(store, options.scope))
-  return options.maxBytes !== undefined && byteLength(text) > options.maxBytes ? undefined : text
+  return exceeds(text, options.maxBytes) ? undefined : text
 }
 
-const byteLength = (text: string): number => new TextEncoder().encode(text).length
+/**
+ * Whether the UTF-8 size of `text` exceeds `maxBytes`. A character is one to
+ * three bytes, so most texts are decided from their length alone; only the
+ * rest are measured.
+ */
+const exceeds = (text: string, maxBytes: number | undefined): boolean => {
+  if (maxBytes === undefined) return false
+  if (text.length > maxBytes) return true
+  if (text.length * 3 <= maxBytes) return false
+  return new TextEncoder().encode(text).length > maxBytes
+}
 
 /**
  * The store a snapshot text holds, or `undefined` when the text is missing,
  * oversized, not this version, for another scope, or malformed. Hydrating the
  * same text twice yields equal stores.
  */
-export const hydrate = (
+const hydrate = (
   raw: string | undefined | null,
   options: SnapshotOptions = {},
 ): EntityStore | undefined => {
   if (raw === undefined || raw === null) return undefined
-  if (options.maxBytes !== undefined && byteLength(raw) > options.maxBytes) return undefined
+  if (exceeds(raw, options.maxBytes)) return undefined
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -163,15 +170,18 @@ export const hydrate = (
  * an entry the current store already has (it is at least as fresh as a
  * snapshot taken earlier). Either way, keys only the current store has stay.
  */
-export const mergeStores = (
+const mergeStores = (
   current: EntityStore,
   snapshot: EntityStore,
   policy: MergePolicy,
 ): EntityStore => (policy === 'replace' ? { ...current, ...snapshot } : { ...snapshot, ...current })
 
 export const RemotePersistence = {
+  /** The snapshot text, or `undefined` when it would exceed `maxBytes`. */
   dehydrate,
+  /** The store a snapshot text holds, or `undefined` when it is refused. */
   hydrate,
+  /** A snapshot brought into a store by policy. */
   mergeStores,
 
   /**

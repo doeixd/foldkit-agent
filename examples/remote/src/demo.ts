@@ -194,7 +194,7 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
 
   const initial = App.initial
   const projection = Remote.select(AppRemote, ProjectSummary)('p1')
-  const requirements = Remote.planSurface(AppRemote, initial, ProjectPage, { projectId: 'p1' })
+  const requirements = Remote.plan(AppRemote, initial, ProjectPage.projection({ projectId: 'p1' }))
   lines.push(
     `plan: ${requirements.map(entry => `${entry.entity}:${entry.id} [${entry.fields.join(',')}]`).join(', ')}`,
   )

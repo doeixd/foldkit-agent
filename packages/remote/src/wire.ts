@@ -5,7 +5,7 @@
  */
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/unstable/rpc'
-import type { RelationRequirement } from 'foldkit-surface'
+import type { RelationRequirement, Requirement } from 'foldkit-surface'
 
 /**
  * The read/live protocol version. A batch names the version it speaks and the
@@ -40,31 +40,43 @@ export const WindowSchema = Schema.Struct({
   before: Schema.optional(Schema.String),
 })
 
-/** The slice required of a relation's target; the ids come from the parent's refs. */
-export const RelationRequest: Schema.Codec<RelationRequirement, RelationRequirement> =
-  Schema.Struct({
-    entity: Schema.String,
-    fields: Schema.Array(Schema.String),
-    windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
-    relations: Schema.optional(
-      Schema.Record(
-        Schema.String,
-        Schema.suspend(
-          (): Schema.Codec<RelationRequirement, RelationRequirement> => RelationRequest,
-        ),
-      ),
-    ),
-  })
+/** A request may not name more fields of one entity than this; a selection never does. */
+export const MAX_FIELDS_PER_REQUEST = 256
+/** A selection may not nest relations deeper than this; the wire refuses more. */
+export const MAX_RELATION_DEPTH = 8
 
-export const ReadRequest = Schema.Struct({
+const Fields = Schema.Array(Schema.String).check(Schema.isMaxLength(MAX_FIELDS_PER_REQUEST))
+
+/**
+ * The slice required of a relation's target; the ids come from the parent's
+ * refs. Built as `MAX_RELATION_DEPTH` nested structs rather than a recursive
+ * schema, so a deeper selection is refused at decode with a schema error.
+ */
+const relationLevel = (depth: number): Schema.Codec<RelationRequirement, RelationRequirement> => {
+  const slice = {
+    entity: Schema.String,
+    fields: Fields,
+    windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
+  }
+  return (depth === 0
+    ? Schema.Struct(slice)
+    : Schema.Struct({
+        ...slice,
+        relations: Schema.optional(Schema.Record(Schema.String, relationLevel(depth - 1))),
+      })) as unknown as Schema.Codec<RelationRequirement, RelationRequirement>
+}
+
+export const RelationRequest = relationLevel(MAX_RELATION_DEPTH - 1)
+
+export const ReadRequest: Schema.Codec<Requirement, Requirement> = Schema.Struct({
   entity: Schema.String,
   id: Schema.String,
-  fields: Schema.Array(Schema.String),
+  fields: Fields,
   /** Pagination window per relation field. */
   windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
   /** The slice required of each relation field's target, resolved in the same read. */
   relations: Schema.optional(Schema.Record(Schema.String, RelationRequest)),
-})
+}) as unknown as Schema.Codec<Requirement, Requirement>
 
 export const ReadBatch = Schema.Struct({
   version: Schema.Number,

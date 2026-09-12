@@ -115,7 +115,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `ReadBatch`, union overlapping fields, join a requirement already in flight,
   and release it when the read fails; built on Effect's `RequestResolver`
   with an optional `window` (#65, section 2).
-- **Cache retention.** `Remote.retain(bound, projections, toMessage, {
+- **Cache retention.** `Remote.retain(projections, toMessage?, {
   connections, grace })` is a Subscription entry whose dependencies are the
   retention roots; it emits the new `RetentionChanged` Message after `grace`,
   and `Remote.update` applies the pure `gc(state, roots)`, keeping what the
@@ -307,7 +307,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 ### `foldkit-remote-example` (example)
 
 - **Remote-backed trace.** A `ProjectPage` Surface selects a project out of a
-  `foldkit-remote` store; `Remote.planSurface` reports the requirement,
+  `foldkit-remote` store; `Remote.plan` reports the requirement,
   `Remote.prefetch` fills it against an in-process `RemoteClient`, the projected
   `RemoteData` moves `Initial → Ready`, a SurfaceView styles and decorates it, a
   `Remote.mutateInto` rename is visible through the same projection, and a

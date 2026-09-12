@@ -221,10 +221,12 @@ describe('Remote.retain', () => {
   const root = (projectId: string) => ({ remote: model(), projectId })
   const entryFor = (grace?: Duration.Input) => (appModel: ReturnType<typeof root>) =>
     Remote.retain(
-      AppRemote,
       [Page.projection({ projectId: appModel.projectId })],
       (message: RemoteMessage) => message,
-      { connections: ['Projects()', 'Projects()'], ...(grace === undefined ? {} : { grace }) },
+      {
+        connections: ['Projects()', { identity: 'Projects()' }],
+        ...(grace === undefined ? {} : { grace }),
+      },
     )
 
   it('its dependencies are the merged, sorted roots', () => {

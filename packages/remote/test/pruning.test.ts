@@ -27,7 +27,8 @@ const known = merge(
   ),
 )
 const model = (): RemoteModel => ({ ...initialRemoteModel, connections: { [feed]: known } })
-const visible = (state: RemoteModel) => Remote.visibleItems(state, feed).map(item => item.ref.id)
+const visible = (state: RemoteModel) =>
+  Remote.visibleItems(state, { identity: feed }).map(item => item.ref.id)
 const live = (state: RemoteModel, event: LiveEvent) =>
   updateRemote(state, { _tag: 'LiveReceived', stream: 's', event, now: 0 })
 const removeC1 = (at: number): LiveEvent => ({

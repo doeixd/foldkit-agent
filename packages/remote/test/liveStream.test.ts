@@ -100,6 +100,25 @@ describe('Remote live subscription', () => {
     expect([...messages]).toEqual([{ _tag: 'Patched', cursor: 1 }])
   })
 
+  it('emits RemoteMessage itself by default, stamped with the injected clock', async () => {
+    const client = Layer.succeed(RemoteClient, {
+      read: () => Effect.die('unused'),
+      query: () => Effect.die('unused'),
+      mutate: () => Effect.die('unused'),
+      live: () => Stream.make(patched),
+    })
+    const plain = Remote.live(AppRemote, UserPage, { userId: 'u1' }, undefined, { now: () => 42 })
+
+    const messages = await Effect.runPromise(
+      Stream.runCollect(plain.dependenciesToStream(plain.modelToDependencies(root))).pipe(
+        Effect.provide(client),
+      ),
+    )
+    expect([...messages]).toEqual([
+      { _tag: 'LiveReceived', stream: expect.any(String), event: patched, now: 42 },
+    ])
+  })
+
   it('emits a ResumeUnavailable message instead of failing the stream', async () => {
     const client = Layer.succeed(RemoteClient, {
       read: () => Effect.die('unused'),

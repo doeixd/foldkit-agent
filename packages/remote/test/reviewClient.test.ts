@@ -134,10 +134,11 @@ describe('review: nested relation windows', () => {
         { entity: 'Reply', id: 'r3', values: { body: 'c' } },
       ],
     })
+    // The far boundary is the new page's; the near one stays the stored page's.
     expect(next[entityKey('Comment', 'c1')]?.values.replies).toEqual({
       refs: ['Reply:r1', 'Reply:r2', 'Reply:r3'],
       hasNext: false,
-      hasPrevious: true,
+      hasPrevious: false,
     })
   })
 })

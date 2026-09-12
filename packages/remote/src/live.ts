@@ -5,7 +5,7 @@
  * Subscriptions are selection-aware and driven by active Surfaces.
  */
 import { type Connection, type Edge, hasNext, hasPrevious } from './connection.js'
-import { addOverlay, type ConnectionOverlay, type Optimistic } from './optimistic.js'
+import { addOverlay, type ConnectionOverlay, type OptimisticState } from './optimistic.js'
 import type { LiveInsertion, LivePolicy } from './query.js'
 import { entityKey, tombstone, writeEntity, type EntityStore } from './store.js'
 
@@ -128,15 +128,15 @@ export const applyEntityEvent = (
 
 export interface ConnectionApplied {
   readonly state: LiveState
-  readonly optimistic: Optimistic
+  readonly optimistic: OptimisticState
   readonly outcome: LiveOutcome
 }
 
 const removeEdgeOverlays = (
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   connection: string,
   key: string,
-): Optimistic => ({
+): OptimisticState => ({
   ...optimistic,
   overlays: optimistic.overlays.map(overlay =>
     overlay.connection !== connection || overlay.position === 'remove'
@@ -147,7 +147,7 @@ const removeEdgeOverlays = (
 
 export const applyConnectionEvent = (
   state: LiveState,
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   event: Extract<
     LiveEvent,
     { _tag: 'ConnectionInsert' | 'ConnectionRemove' | 'ConnectionInvalidate' }

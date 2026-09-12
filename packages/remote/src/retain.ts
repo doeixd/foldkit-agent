@@ -8,7 +8,7 @@ import type { Requirement } from 'foldkit-surface'
 import { refsIn } from './relation.js'
 import { entityKey, readField, type EntityKey, type EntityStore } from './store.js'
 import type { Connection } from './connection.js'
-import type { Optimistic } from './optimistic.js'
+import type { OptimisticState } from './optimistic.js'
 import type { MutationState } from './mutation.js'
 
 export interface RetentionRoots {
@@ -20,7 +20,7 @@ export interface RetentionRoots {
 export interface Retained {
   readonly entities: EntityStore
   readonly connections: Readonly<Record<string, Connection>>
-  readonly optimistic: Optimistic
+  readonly optimistic: OptimisticState
 }
 
 /**
@@ -31,7 +31,7 @@ export const reachable = (
   store: EntityStore,
   roots: RetentionRoots,
   connections: Readonly<Record<string, Connection>>,
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   pending: ReadonlySet<string>,
 ): ReadonlySet<EntityKey> => {
   const kept = new Set<EntityKey>()
@@ -101,7 +101,7 @@ export const gc = (
   const connections = Object.fromEntries(
     Object.entries(state.connections).filter(([identity]) => keptConnections.has(identity)),
   )
-  const optimistic: Optimistic = {
+  const optimistic: OptimisticState = {
     layers: state.optimistic.layers,
     overlays: state.optimistic.overlays.filter(
       overlay => pending.has(overlay.id) || keptConnections.has(overlay.connection),
