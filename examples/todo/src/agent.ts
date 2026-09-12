@@ -15,7 +15,7 @@ const App = Surface.application({
   update: (model, message) => ({ model: update(model, message) }),
 })
 
-const TodoAgent = Agent.forApplication<Principal>()(App)
+const TodoAgent = Agent.forApplication(App).withPrincipal<Principal>()
 
 /**
  * The agent contract: what an agent may see, and what an agent may do.

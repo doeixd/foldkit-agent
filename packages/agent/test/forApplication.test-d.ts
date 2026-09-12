@@ -31,3 +31,24 @@ TodoAgent.make({
 const Changes = Surface.messages(App, [MessageUnion.RequestedCreateTodo])
 // @ts-expect-error RequestedDeleteTodo is not in the subset
 Agent.exposeSubset(Changes, { RequestedDeleteTodo: 'Delete' })
+
+// `withPrincipal` fixes the principal `authorize` sees; the Model stays inferred.
+const AdminAgent = Agent.forApplication(App).withPrincipal<{ readonly role: 'admin' | 'user' }>()
+AdminAgent.make({
+  context: Surface.pick(App.fields.todos),
+  messages: AdminAgent.expose(MessageUnion, {
+    RequestedDeleteTodo: {
+      description: 'Delete',
+      authorize: ({ principal, model }) => principal.role === 'admin' && model.todos.length > 0,
+    },
+  }),
+})
+AdminAgent.make({
+  messages: AdminAgent.expose(MessageUnion, {
+    RequestedDeleteTodo: {
+      description: 'Delete',
+      // @ts-expect-error `owner` is not a field of the fixed principal
+      authorize: ({ principal }) => principal.owner === 'alice',
+    },
+  }),
+})

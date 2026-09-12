@@ -124,7 +124,7 @@ principal must be given a `principal` provider of the matching type.
 | `Agent.variant(config)` | A mapped variant whose callbacks are inferred from its `input`. |
 | `Agent.resource(name, options)` | A named read-only projection of Model state. |
 | `Agent.make({ context, messages, resources })` | The protocol-neutral contract; `context` is any Surface projection. |
-| `Agent.forApplication(App)` / `Agent.forApplication<Principal>()(App)` | The above, with `Model` inferred from a `Surface.application`; the curried form supplies a `Principal`. |
+| `Agent.forApplication(App)` / `Agent.forApplication(App).withPrincipal<Principal>()` | The above, with `Model` inferred from a `Surface.application`; `withPrincipal` fixes the `Principal` type. |
 | `Agent.forModel<Model>()` | The same, when only a Model (no application) is available. |
 | `Agent.bind({ definition, host })` | Binds the contract to a live Runtime. |
 | `Agent.schema/messages/resources/contextSchema` | Introspection, as plain data. |

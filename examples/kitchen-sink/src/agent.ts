@@ -16,7 +16,7 @@ export interface AgentPrincipal {
   readonly canWrite: boolean
 }
 
-const BoardAgent = Agent.forApplication<AgentPrincipal>()(App)
+const BoardAgent = Agent.forApplication(App).withPrincipal<AgentPrincipal>()
 
 export const AppAgent = BoardAgent.make({
   // What an agent may see: the replicated notes and the current selection.

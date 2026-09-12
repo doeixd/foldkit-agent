@@ -220,9 +220,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Subset exposure and a curried principal.** `Agent.exposeSubset(subset,
   variants)` exposes only the variants of a `Surface.messages` subset, and
   `Surface.unionMessages` composes disjoint subsets. `Agent.forApplication` infers
-  the Model, so a `Principal` is supplied by the curried
-  `Agent.forApplication<Principal>()(App)` — TypeScript cannot infer Model beside
-  an explicit principal. A `Surface.application` now takes optional
+  the Model, so a `Principal` is supplied by
+  `Agent.forApplication(App).withPrincipal<Principal>()` — TypeScript cannot
+  infer Model beside an explicit principal, and the chained form keeps one entry
+  point instead of the curried `forApplication<Principal>()(App)` (#60). A `Surface.application` now takes optional
   `initial`/`update` and accepts resource-carrying Commands.
 - **Subset ownership is enforced.** `Agent.forApplication(App).exposeSubset`
   refuses a subset whose owner token belongs to a different application, matching
