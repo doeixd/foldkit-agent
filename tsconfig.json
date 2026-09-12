@@ -18,6 +18,7 @@
     { "path": "./examples/todo" },
     { "path": "./examples/sync" },
     { "path": "./examples/mixins" },
-    { "path": "./examples/remote" }
+    { "path": "./examples/remote" },
+    { "path": "./examples/kitchen-sink" }
   ]
 }

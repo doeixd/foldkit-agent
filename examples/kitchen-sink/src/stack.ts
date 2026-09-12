@@ -9,7 +9,7 @@
  *   replicates them, exchanging through a `TransportClient`.
  * - `foldkit-agent` (and its adapters) project the same Model and Messages.
  */
-import { DatabaseSync } from 'node:sqlite'
+import { createRequire } from 'node:module'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
@@ -56,6 +56,12 @@ import {
 // ---------------------------------------------------------------------------
 // The Drizzle-backed Remote domain
 // ---------------------------------------------------------------------------
+
+// Vite 5's builtin list predates `node:sqlite`, so a static import is rewritten
+// to `sqlite` and fails to load under Vitest; let Node resolve it directly.
+const { DatabaseSync } = createRequire(import.meta.url)(
+  'node:sqlite',
+) as typeof import('node:sqlite')
 
 export const sqlite = new DatabaseSync(':memory:')
 sqlite.exec(`
@@ -134,7 +140,7 @@ const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-const Message = defineMessageUnion({
+export const Message = defineMessageUnion({
   Ping: {},
   GotRemote: { message: Data.Message },
   RequestedCreateNote: { id: Schema.String, body: Schema.String },
