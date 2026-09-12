@@ -369,10 +369,10 @@ session and never appear in one.
 
 ```ts
 // SSR: the server prefetches, dehydrates for the page, the client hydrates.
-const html = dehydrate(serverStore, { scope: userId })
+const html = RemotePersistence.dehydrate(serverStore, { scope: userId })
 Data.update(model.remote, {
   _tag: 'Hydrated',
-  entities: hydrate(html, { scope: userId }) ?? emptyStore,
+  entities: RemotePersistence.hydrate(html, { scope: userId }) ?? emptyStore,
   merge: 'preserve-existing',
 })
 
