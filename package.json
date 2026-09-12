@@ -24,6 +24,7 @@
     "demo": "pnpm build && pnpm --filter foldkit-agent-example-todo demo && pnpm --filter foldkit-agent-example-sync demo && pnpm --filter foldkit-mixins-example demo && pnpm --filter foldkit-remote-example demo && pnpm exec tsx packages/remote-drizzle/example/nested.ts && pnpm --filter foldkit-kitchen-sink-example demo",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
+    "typecheck:force": "tsc -b --force",
     "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm demo && pnpm pack:check",
     "format": "prettier --write \"**/*.{ts,json,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,json,yaml}\"",

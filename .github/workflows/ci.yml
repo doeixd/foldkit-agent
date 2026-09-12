@@ -24,7 +24,8 @@ jobs:
 
       - run: pnpm format:check
 
-      - run: pnpm typecheck
+      # Forced, so a warm `.tsbuild` cannot hide a project-graph change.
+      - run: pnpm typecheck:force
 
       - run: pnpm test
 
