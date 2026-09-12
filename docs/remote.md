@@ -164,7 +164,9 @@ Live data is an Effect streaming RPC. Each stream has a monotonic cursor:
 duplicates are ignored, and an event **ahead** of the cursor is a gap — it is not
 applied, and the stream is recorded so the host can resync rather than silently
 miss facts. Entity events update the store; connection events change membership
-and ordering.
+and ordering. A deleted entity is a tombstone that every connection listing it
+skips, a live removal hides a known edge until a fresh page brings it back, and
+a merged page prunes the settled overlays it supersedes.
 
 ## One owner per datum
 

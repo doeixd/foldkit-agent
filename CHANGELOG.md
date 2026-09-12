@@ -74,6 +74,12 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
   `relations`, and a version mismatch fails with `RemoteProtocolError`
   (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
+- **Live pruning.** A live `ConnectionRemove` hides a server-known edge (a
+  `remove` overlay), not only a pending insert; `ConnectionMerged` prunes the
+  settled overlays a page supersedes and leaves a pending request's alone;
+  `visibleItems` skips an edge whose target is a tombstone when given the
+  store, and `Remote.visibleItems(model, connection)` reads all of it (#65,
+  section 7).
 - **A mutation owns its optimistic operations.** `MutationStarted { requestId,
   optimistic }` applies entity patches (`Entity.patch`) and connection changes
   (`Optimistic.prepend`/`append`/`remove`, new) as a layer and overlays owned

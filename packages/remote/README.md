@@ -304,8 +304,14 @@ Remote.update(remote, { _tag: 'ConnectionMerged', connection: 'ProjectsByOwner(.
 ```
 
 `items`, `hasNext`, `hasPrevious`, and `isGapped` read the server-known region;
-`visibleItems` places optimistic overlays outside it. `ConnectionInvalidated`
-marks a connection stale and `ConnectionRefreshed` clears it once a fresh page is
+`Remote.visibleItems(model, connection)` is what a view shows: overlays placed
+around it, minus edges a live removal or an optimistic remove hid and edges
+whose target is a tombstone, so a deleted entity never dangles in a list. A
+merged page is newer than the settled overlays it covers: it drops a live
+insert it carries and a live removal it contradicts, and leaves a pending
+request's overlays alone. A replayed live event is a duplicate by cursor and
+changes nothing. `ConnectionInvalidated` marks a connection stale while it keeps
+showing its items, and `ConnectionRefreshed` clears it once a fresh page is
 adopted.
 
 ## Queries
