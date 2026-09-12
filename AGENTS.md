@@ -268,6 +268,12 @@ installed `.d.ts` before reaching for a remembered API.
 - **`pnpm ci` is a pnpm builtin, not your script.** A root script named `ci`
   never runs (`ERR_PNPM_CI_NOT_IMPLEMENTED`). The full-check script is `check`:
   run `pnpm check`.
+- **Map every workspace dep in a composite example's `paths`.** A package's
+  `tsconfig.build.json` emits to `.tsbuild/build`, not `dist`, so resolving an
+  import through `exports` fails on a clean checkout; a stale local `dist` hides
+  it and only CI's `typecheck:force` goes red. `examples/kitchen-sink` omitted
+  `foldkit-remote-drizzle` and failed with `Cannot find module` plus cascading
+  `unknown` types. Diff the example's `paths` against its `workspace:` deps.
 
 ## Repository
 

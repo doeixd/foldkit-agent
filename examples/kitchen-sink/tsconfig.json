@@ -17,6 +17,7 @@
       "foldkit-mixins-surface": ["../../packages/mixins-surface/src/index.ts"],
       "foldkit-mixins-ui": ["../../packages/mixins-ui/src/index.ts"],
       "foldkit-remote": ["../../packages/remote/src/index.ts"],
+      "foldkit-remote-drizzle": ["../../packages/remote-drizzle/src/index.ts"],
       "foldkit-remote-server": ["../../packages/remote-server/src/index.ts"],
       "foldkit-sync": ["../../packages/sync/src/index.ts"],
       "foldkit-surface": ["../../packages/surface/src/index.ts"]
