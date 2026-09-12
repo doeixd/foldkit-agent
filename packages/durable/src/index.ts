@@ -43,5 +43,7 @@ export {
   type EffectStatus,
   type Journal,
   type JournalOptions,
+  type RecoveryIntent,
+  type RecoveryOptions,
   type ValidationRequest,
 } from './journal.js'

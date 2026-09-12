@@ -661,6 +661,80 @@ describe('the journal surface', () => {
     }))
 })
 
+describe('the recovery worker', () => {
+  it("runs each operation's intents once and advances the cursor", () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      let runs = 0
+      const options = {
+        key: todos,
+        from: cursor(0),
+        intents: () => [
+          {
+            key: 'effect-1',
+            run: Effect.sync(() => {
+              runs += 1
+            }),
+          },
+        ],
+      }
+      expect(yield* journal.recover(options)).toBe(1)
+      expect(runs).toBe(1)
+      // A second pass reuses the recorded success rather than re-running.
+      expect(yield* journal.recover(options)).toBe(1)
+      expect(runs).toBe(1)
+    }))
+
+  it('stops before a failed intent and retries it on a later pass', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      let runs = 0
+      const failing = () => [
+        {
+          key: 'effect-1',
+          run: Effect.flatMap(
+            Effect.sync(() => {
+              runs += 1
+            }),
+            () => Effect.fail(new Error('down')),
+          ),
+        },
+      ]
+      expect(yield* journal.recover({ key: todos, from: cursor(0), intents: failing })).toBe(0)
+      expect(runs).toBe(1)
+      expect(
+        yield* journal.recover({
+          key: todos,
+          from: cursor(0),
+          intents: () => [{ key: 'effect-1', run: Effect.succeed('ok') }],
+        }),
+      ).toBe(1)
+      expect(runs).toBe(1)
+    }))
+
+  it('does not advance past an intent the caller is not ready to retry', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      let runs = 0
+      expect(
+        yield* journal.recover({
+          key: todos,
+          from: cursor(0),
+          intents: () => [
+            {
+              key: 'effect-1',
+              run: Effect.sync(() => {
+                runs += 1
+              }),
+            },
+          ],
+          onUnresolved: () => 'skip',
+        }),
+      ).toBe(0)
+      expect(runs).toBe(0)
+    }))
+})
+
 describe('the effect ledger', () => {
   it('runs an effect once per key and returns the recorded result', () =>
     withJournal(function* (journal) {

@@ -248,6 +248,11 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   operations' `payload_hash` from canonical JSON, so a payload compacted after
   the upgrade compares canonically rather than rejecting a reordered retry. A
   payload already compacted before schema 3 keeps its legacy hash.
+- **A recovery worker.** `journal.recover({ key, from, intents, onUnresolved })`
+  runs the scan/reconcile loop the README described: it replays committed
+  operations after `from`, derives their effect intents, reuses recorded
+  successes, and stops before an operation whose intent failed or was skipped,
+  returning the cursor it settled so the caller can persist it.
 
 ### `foldkit-sync`
 

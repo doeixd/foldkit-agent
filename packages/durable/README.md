@@ -184,7 +184,14 @@ intents, and scheduling recovery on startup. `journal.unfinished()` lists every
 pending and failed record, `journal.keys()` enumerates the documents, and
 `journal.clearEffect(key)` drops a record once it is resolved. A subscription is
 only a wake-up signal; it cannot recover missed commits by itself. There is no
-atomic append-and-enqueue API or built-in recovery worker today.
+atomic append-and-enqueue API today.
+
+`journal.recover({ key, from, intents, onUnresolved })` runs the scan/reconcile
+loop: it reads the committed operations after `from`, derives each one's effect
+intents, reuses recorded successes, and stops before any operation whose intent
+failed or was skipped. It returns the cursor up to which every intent settled, so
+the caller persists it and resumes. Scheduling and discovery stay with the
+application.
 
 ### Execution ownership
 

@@ -10,6 +10,7 @@ import {
   Metric,
   Option,
   PubSub,
+  Result,
   Stream,
   SynchronizedRef,
   type Scope,
@@ -118,6 +119,28 @@ export interface EffectRecord {
   readonly error?: string
 }
 
+/** One effect a committed operation requires. `key` must be stable across restarts. */
+export interface RecoveryIntent {
+  readonly key: string
+  readonly run: Effect.Effect<unknown, unknown>
+}
+
+export interface RecoveryOptions<Operation> {
+  readonly key: DocumentId
+  /** The application's recovery cursor; operations at or before it are settled. */
+  readonly from: Cursor
+  /** The effect intents an operation declares, in the order they must run. */
+  readonly intents: (operation: Operation) => ReadonlyArray<RecoveryIntent>
+  /**
+   * Whether to retry an unresolved intent, or skip it and stop advancing. Defaults
+   * to `retry`; use `skip` for an intent awaiting manual resolution.
+   */
+  readonly onUnresolved?: (
+    intent: RecoveryIntent,
+    record: Option.Option<EffectRecord>,
+  ) => 'retry' | 'skip'
+}
+
 export type AppendError =
   InvalidOperationError | OperationRejectedError | IdentityConflictError | JournalError
 
@@ -192,6 +215,16 @@ export interface Journal<Operation, Snapshot, Principal, OperationEncoded = unkn
   ) => Effect.Effect<Result, E | JournalError | EffectFailedError>
   /** Removes an effect record so the next `runEffect` treats it as new work. */
   readonly clearEffect: (key: string) => Effect.Effect<void, JournalError>
+  /**
+   * Runs the effect intents of a document's committed operations after `from`,
+   * reusing recorded successes and stopping before any operation whose intent
+   * failed or was skipped. Returns the cursor up to which every intent settled,
+   * so a caller can persist it and resume. The journal does not schedule this;
+   * the application owns discovery and startup.
+   */
+  readonly recover: (
+    options: RecoveryOptions<Operation>,
+  ) => Effect.Effect<Cursor, InvalidCursorError | CompactedCursorError | JournalError>
   /** Drops a document's snapshot, operations, and effect records. */
   readonly reset: (key: DocumentId) => Effect.Effect<void, JournalError>
   /**
@@ -886,6 +919,31 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
       )
     })
 
+  const recover: Shape['recover'] = Effect.fn('Journal.recover')(function* (options) {
+    const operations = yield* read(options.key, options.from)
+    let settled = options.from
+    let frozen = false
+    for (const committed of operations) {
+      if (frozen) break
+      for (const intent of options.intents(committed.operation)) {
+        const recorded = yield* effect(intent.key)
+        if (Option.isSome(recorded) && recorded.value.status === 'succeeded') continue
+        const decision = options.onUnresolved?.(intent, recorded) ?? 'retry'
+        if (decision === 'skip') {
+          frozen = true
+          break
+        }
+        const result = yield* Effect.result(runEffect(intent.key, intent.run))
+        if (Result.isFailure(result)) {
+          frozen = true
+          break
+        }
+      }
+      if (!frozen) settled = toCursor(Number(committed.sequence))
+    }
+    return settled
+  })
+
   const subscribe: Shape['subscribe'] = Stream.fromPubSub(changes)
 
   return {
@@ -901,6 +959,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
     runEffect,
     clearEffect,
     reset,
+    recover,
     subscribe,
   }
 }
