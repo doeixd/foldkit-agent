@@ -111,7 +111,7 @@ describe('effect recovery after process termination', () => {
             Effect.gen(function* () {
               const journal = yield* makeJournal(journalOptions(file))
               expect(yield* journal.read(document, 0)).toEqual([
-                { operation, sequence: 1, actorId: 'owner' },
+                { operation, opId: operation, sequence: 1, actorId: 'owner' },
               ])
               const record = Option.getOrElse(yield* journal.effect(key), () => undefined)
               expect(record).toEqual(

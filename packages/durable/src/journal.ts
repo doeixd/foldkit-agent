@@ -16,7 +16,14 @@ import {
 } from 'effect'
 import { SqlClient } from 'effect/unstable/sql'
 import type { Codec } from './codec.js'
-import { actorId as toActorId, type ActorId, type DocumentId, type OpId } from './ids.js'
+import {
+  actorId as toActorId,
+  documentId as toDocumentId,
+  opId as toOpId,
+  type ActorId,
+  type DocumentId,
+  type OpId,
+} from './ids.js'
 import {
   CompactedCursorError,
   IdentityConflictError,
@@ -42,6 +49,7 @@ export const journalMetrics = {
 /** An operation as the journal committed it, with its authoritative order and actor. */
 export interface Committed<Operation> {
   readonly operation: Operation
+  readonly opId: OpId
   readonly sequence: number
   readonly actorId: ActorId
 }
@@ -63,22 +71,28 @@ export interface AuthorizationRequest<Operation, Snapshot, Principal> {
   readonly snapshot: Snapshot
 }
 
-export interface JournalOptions<Operation, Snapshot, Principal> {
+export interface JournalOptions<Operation, Snapshot, Principal, OperationEncoded = unknown> {
   /**
    * A `node:sqlite` path, or `:memory:`. A `Config` lets an application supply
    * the path as a layer instead of a literal.
    */
   readonly file: string | Config.Config<string>
-  readonly operation: Codec<Operation>
+  readonly operation: Codec<Operation, OperationEncoded>
   readonly snapshot: Codec<Snapshot>
   readonly empty: () => Snapshot
-  /** Deterministic: the application's own reducer, not the journal's. */
+  /** Deterministic and fast: it runs inside the append transaction. */
   readonly reduce: (snapshot: Snapshot, operation: Operation) => Snapshot
   /** Stable identity; a repeat is answered idempotently. */
   readonly opId: (operation: Operation) => OpId
   /** The trusted actor recorded for the commit. */
   readonly actorId: (principal: Principal) => ActorId
+  /**
+   * Synchronous structural checks, run inside the append transaction before
+   * `authorize`. An `Effect` cannot be used here; keep policy local to the
+   * snapshot.
+   */
   readonly validate?: (request: ValidationRequest<Operation, Snapshot, Principal>) => void
+  /** Synchronous policy decision, run inside the append transaction. */
   readonly authorize?: (request: AuthorizationRequest<Operation, Snapshot, Principal>) => boolean
 }
 
@@ -109,7 +123,7 @@ export type AppendResult<Operation> =
       readonly actorId: ActorId
     }
 
-export interface Journal<Operation, Snapshot, Principal> {
+export interface Journal<Operation, Snapshot, Principal, OperationEncoded = unknown> {
   readonly load: (
     key: DocumentId,
   ) => Effect.Effect<{ readonly snapshot: Snapshot; readonly cursor: number }, JournalError>
@@ -131,13 +145,23 @@ export interface Journal<Operation, Snapshot, Principal> {
    */
   readonly append: (
     key: DocumentId,
-    input: unknown,
+    input: OperationEncoded,
     principal: Principal,
   ) => Effect.Effect<AppendResult<Operation>, AppendError>
+  /** Commits several operations in order, in one transaction. */
+  readonly appendAll: (
+    key: DocumentId,
+    inputs: ReadonlyArray<OperationEncoded>,
+    principal: Principal,
+  ) => Effect.Effect<ReadonlyArray<AppendResult<Operation>>, AppendError>
   readonly compact: (
     key: DocumentId,
     through: number,
   ) => Effect.Effect<void, InvalidCompactionError | JournalError>
+  /** The document keys that have a snapshot or a committed operation. */
+  readonly keys: () => Effect.Effect<ReadonlyArray<DocumentId>, JournalError>
+  /** Every recorded effect that is not `succeeded`, for recovery. */
+  readonly unfinished: () => Effect.Effect<ReadonlyArray<EffectRecord>, JournalError>
   /** The recorded effect for a key, if it has ever run. */
   readonly effect: (key: string) => Effect.Effect<Option.Option<EffectRecord>, JournalError>
   /**
@@ -153,6 +177,10 @@ export interface Journal<Operation, Snapshot, Principal> {
     key: string,
     run: Effect.Effect<Result, E>,
   ) => Effect.Effect<Result, E | JournalError>
+  /** Removes an effect record so the next `runEffect` treats it as new work. */
+  readonly clearEffect: (key: string) => Effect.Effect<void, JournalError>
+  /** Drops a document's snapshot, operations, and effect records. */
+  readonly reset: (key: DocumentId) => Effect.Effect<void, JournalError>
   /**
    * The document keys a commit changed. Subscription is a `Stream`, so a
    * subscriber never fails or slows a commit; a caller that needs a callback
@@ -194,9 +222,12 @@ const asJournalError =
  * the application's own transition function. The SQLite connection is released
  * when the effect's scope closes.
  */
-export const makeJournal = Effect.fn('Journal.make')(function* <Operation, Snapshot, Principal>(
-  options: JournalOptions<Operation, Snapshot, Principal>,
-) {
+export const makeJournal = Effect.fn('Journal.make')(function* <
+  Operation,
+  Snapshot,
+  Principal,
+  OperationEncoded = unknown,
+>(options: JournalOptions<Operation, Snapshot, Principal, OperationEncoded>) {
   const file = yield* resolveFile(options.file)
   // Build the driver into the journal's own scope, not the transient scope of
   // this effect, so the connection outlives `makeJournal`.
@@ -206,33 +237,46 @@ export const makeJournal = Effect.fn('Journal.make')(function* <Operation, Snaps
 
 /**
  * The journal as a service, so an application composes it with `Effect.provide`
- * instead of threading the shape through its own wiring.
+ * instead of threading the shape through its own wiring. Pass the codec's
+ * `Encoded` type as the fourth parameter when it is not `unknown`, and use a
+ * distinct `key` if the application runs more than one journal.
  */
-export const JournalService = <Operation, Snapshot, Principal>() =>
+export const JournalService = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
+  key = 'foldkit-durable/Journal',
+) =>
   Context.Service<
-    Journal<Operation, Snapshot, Principal>,
-    Journal<Operation, Snapshot, Principal>
-  >()('foldkit-durable/Journal')
+    Journal<Operation, Snapshot, Principal, OperationEncoded>,
+    Journal<Operation, Snapshot, Principal, OperationEncoded>
+  >()(key)
 
 /** Provides the journal as a scoped layer, releasing the database when the layer closes. */
-export const makeJournalLayer = <Operation, Snapshot, Principal>(
-  options: JournalOptions<Operation, Snapshot, Principal>,
+export const makeJournalLayer = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
+  options: JournalOptions<Operation, Snapshot, Principal, OperationEncoded>,
+  key = 'foldkit-durable/Journal',
 ): Layer.Layer<
-  Journal<Operation, Snapshot, Principal>,
+  Journal<Operation, Snapshot, Principal, OperationEncoded>,
   JournalError | UnsupportedJournalVersionError
-> => Layer.effect(JournalService<Operation, Snapshot, Principal>(), makeJournal(options))
+> =>
+  Layer.effect(
+    JournalService<Operation, Snapshot, Principal, OperationEncoded>(key),
+    makeJournal(options),
+  )
 
-const makeShapeEffect = <Operation, Snapshot, Principal>(
-  options: JournalOptions<Operation, Snapshot, Principal>,
+const makeShapeEffect = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
+  options: JournalOptions<Operation, Snapshot, Principal, OperationEncoded>,
 ): Effect.Effect<
-  Journal<Operation, Snapshot, Principal>,
+  Journal<Operation, Snapshot, Principal, OperationEncoded>,
   JournalError | UnsupportedJournalVersionError,
   SqlClient.SqlClient | Scope.Scope
 > =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* migrate(sql)
-    const changes = yield* PubSub.unbounded<string>()
+    // A sliding change stream: publishing never blocks a commit, and a slow
+    // subscriber drops the oldest keys instead of growing memory without bound.
+    // A dropped key is a missed wake-up, not missed data; subscribers reconcile
+    // from their own cursor.
+    const changes = yield* PubSub.sliding<string>(1024)
     // Ending the journal ends its subscription stream, so a forked subscriber
     // cannot outlive the connection.
     yield* Effect.addFinalizer(() => PubSub.shutdown(changes))
@@ -294,8 +338,8 @@ const migrate = (
           )
         }
         // A literal, not a bound parameter: SQLite rejects a placeholder in a
-        // PRAGMA assignment. Keep in step with SCHEMA_VERSION.
-        yield* sql`PRAGMA user_version = 2`
+        // PRAGMA assignment. Built from SCHEMA_VERSION so the two cannot drift.
+        yield* sql.unsafe(`PRAGMA user_version = ${SCHEMA_VERSION}`)
       }),
     )
   }).pipe(Effect.catchTag('SqlError', asJournalError('Could not migrate the journal')))
@@ -308,6 +352,7 @@ interface DocumentRow {
 
 interface OperationRow {
   readonly actor_id: string
+  readonly op_id: string
   readonly sequence: number
   readonly input: string | null
   readonly payload_hash: string | null
@@ -320,13 +365,13 @@ interface EffectRow {
   readonly error: string | null
 }
 
-const makeShape = <Operation, Snapshot, Principal>(
+const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
   sql: SqlClient.SqlClient,
-  options: JournalOptions<Operation, Snapshot, Principal>,
+  options: JournalOptions<Operation, Snapshot, Principal, OperationEncoded>,
   changes: PubSub.PubSub<string>,
   inFlight: SynchronizedRef.SynchronizedRef<Map<string, Deferred.Deferred<unknown, unknown>>>,
-): Journal<Operation, Snapshot, Principal> => {
-  type Shape = Journal<Operation, Snapshot, Principal>
+): Journal<Operation, Snapshot, Principal, OperationEncoded> => {
+  type Shape = Journal<Operation, Snapshot, Principal, OperationEncoded>
 
   const decodeSnapshot = (row: DocumentRow | undefined): { snapshot: Snapshot; cursor: number } =>
     row === undefined
@@ -388,13 +433,14 @@ const makeShape = <Operation, Snapshot, Principal>(
         }),
       )
     const rows =
-      yield* sql<OperationRow>`SELECT actor_id, sequence, input FROM operations WHERE key = ${key} AND sequence > ${after} AND input IS NOT NULL ORDER BY sequence`.pipe(
+      yield* sql<OperationRow>`SELECT actor_id, op_id, sequence, input FROM operations WHERE key = ${key} AND sequence > ${after} AND input IS NOT NULL ORDER BY sequence`.pipe(
         Effect.catchTag('SqlError', asJournalError('Could not read the log')),
       )
     return yield* Effect.try({
       try: () =>
         rows.map(row => ({
           operation: options.operation.decode(JSON.parse(String(row.input))),
+          opId: toOpId(String(row.op_id)),
           sequence: Number(row.sequence),
           actorId: toActorId(String(row.actor_id)),
         })),
@@ -402,129 +448,174 @@ const makeShape = <Operation, Snapshot, Principal>(
     })
   })
 
-  const append: Shape['append'] = Effect.fn('Journal.append')(function* (
+  interface PreparedOperation {
+    readonly operation: Operation
+    readonly opId: OpId
+    readonly actorId: ActorId
+    readonly encoded: string
+    readonly payloadHash: string
+  }
+
+  interface AppendOutcome {
+    readonly result: AppendResult<Operation>
+    readonly changed: boolean
+  }
+
+  const prepare = (
     key: DocumentId,
-    input: unknown,
+    input: OperationEncoded,
     principal: Principal,
-  ) {
-    const operation = yield* Effect.try({
-      try: () => options.operation.decode(input),
-      catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-    })
-    const opId = yield* Effect.try({
-      try: () => options.opId(operation),
-      catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-    })
-    yield* Effect.annotateCurrentSpan({ key, opId })
-    const actorId = yield* Effect.try({
-      try: () => options.actorId(principal),
-      catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-    })
-    const encoded = yield* Effect.try({
-      try: () => JSON.stringify(options.operation.encode(operation)),
-      catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-    })
-
-    const payloadHash = hashPayload(encoded)
-    const conflict = (): IdentityConflictError =>
-      new IdentityConflictError({
-        opId,
-        message: `Operation "${opId}" was reused with different data or actor`,
+  ): Effect.Effect<PreparedOperation, InvalidOperationError> =>
+    Effect.gen(function* () {
+      const operation = yield* Effect.try({
+        try: () => options.operation.decode(input),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
       })
+      const opId = yield* Effect.try({
+        try: () => options.opId(operation),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      const actorId = yield* Effect.try({
+        try: () => options.actorId(principal),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      const encoded = yield* Effect.try({
+        try: () => JSON.stringify(options.operation.encode(operation)),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      return { operation, opId, actorId, encoded, payloadHash: hashPayload(encoded) }
+    })
 
-    const outcome = yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const prior =
-            yield* sql<OperationRow>`SELECT actor_id, sequence, input, payload_hash FROM operations WHERE key = ${key} AND op_id = ${opId}`
-          if (prior.length > 0) {
-            const row = prior[0]!
-            const sequence = Number(row.sequence)
-            const priorActor = toActorId(String(row.actor_id))
-            if (row.input !== null) {
-              // The payload is retained, so the committed operation is canonical.
-              if (row.input !== encoded || priorActor !== actorId)
-                return yield* Effect.fail(conflict())
-              const operation = yield* Effect.try({
-                try: () => options.operation.decode(JSON.parse(String(row.input))),
-                catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-              })
-              return {
-                result: {
-                  _tag: 'Committed' as const,
-                  committed: { operation, sequence, actorId: priorActor },
-                },
-                changed: false,
-              }
-            }
-            // The payload was compacted away. Answer idempotently from the stored
-            // identity, but never rebuild a committed operation from the
-            // retransmitted content: it may not be what was committed.
-            if (
-              priorActor !== actorId ||
-              (row.payload_hash !== null && row.payload_hash !== payloadHash)
-            )
-              return yield* Effect.fail(conflict())
-            return {
-              result: { _tag: 'AlreadyCommitted' as const, opId, sequence, actorId: priorActor },
-              changed: false,
-            }
-          }
-          const documents =
-            yield* sql<DocumentRow>`SELECT cursor, snapshot FROM documents WHERE key = ${key}`
-          const { snapshot, cursor } = yield* Effect.try({
-            try: () => decodeSnapshot(documents[0]),
+  /** Commits one prepared operation. Runs inside a transaction and never publishes. */
+  const commitPrepared = (key: DocumentId, prepared: PreparedOperation, principal: Principal) =>
+    Effect.gen(function* () {
+      const { operation, opId, actorId, encoded, payloadHash } = prepared
+      const conflict = (): IdentityConflictError =>
+        new IdentityConflictError({
+          opId,
+          message: `Operation "${opId}" was reused with different data or actor`,
+        })
+      const prior =
+        yield* sql<OperationRow>`SELECT actor_id, op_id, sequence, input, payload_hash FROM operations WHERE key = ${key} AND op_id = ${opId}`
+      if (prior.length > 0) {
+        const row = prior[0]!
+        const sequence = Number(row.sequence)
+        const priorActor = toActorId(String(row.actor_id))
+        if (row.input !== null) {
+          // The payload is retained, so the committed operation is canonical.
+          if (row.input !== encoded || priorActor !== actorId) return yield* Effect.fail(conflict())
+          const stored = yield* Effect.try({
+            try: () => options.operation.decode(JSON.parse(String(row.input))),
             catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
           })
-          yield* Effect.try({
-            try: () => options.validate?.({ key, principal, operation, snapshot, cursor }),
-            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-          })
-          const allowed = yield* Effect.try({
-            try: () => options.authorize?.({ key, principal, operation, snapshot }) ?? true,
-            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-          })
-          if (!allowed)
-            return yield* Effect.fail(
-              new OperationRejectedError({
-                opId,
-                message: `Operation "${opId}" was refused by authorization`,
-              }),
-            )
-          const reduced = yield* Effect.try({
-            try: () => options.reduce(snapshot, operation),
-            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-          })
-          const sequence = cursor + 1
-          const encodedSnapshot = yield* Effect.try({
-            try: () => JSON.stringify(options.snapshot.encode(reduced)),
-            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
-          })
-          yield* sql`INSERT INTO operations (key, op_id, sequence, actor_id, input, payload_hash) VALUES (${key}, ${opId}, ${sequence}, ${actorId}, ${encoded}, ${payloadHash})`
-          yield* sql`INSERT INTO documents (key, cursor, snapshot) VALUES (${key}, ${sequence}, ${encodedSnapshot}) ON CONFLICT(key) DO UPDATE SET cursor = excluded.cursor, snapshot = excluded.snapshot`
           return {
             result: {
               _tag: 'Committed' as const,
-              committed: { operation, sequence, actorId },
+              committed: { operation: stored, opId, sequence, actorId: priorActor },
             },
-            changed: true,
+            changed: false,
           }
+        }
+        // The payload was compacted away. Answer idempotently from the stored
+        // identity, but never rebuild a committed operation from the
+        // retransmitted content: it may not be what was committed.
+        if (
+          priorActor !== actorId ||
+          (row.payload_hash !== null && row.payload_hash !== payloadHash)
+        )
+          return yield* Effect.fail(conflict())
+        return {
+          result: { _tag: 'AlreadyCommitted' as const, opId, sequence, actorId: priorActor },
+          changed: false,
+        }
+      }
+      const documents =
+        yield* sql<DocumentRow>`SELECT cursor, snapshot FROM documents WHERE key = ${key}`
+      const { snapshot, cursor } = yield* Effect.try({
+        try: () => decodeSnapshot(documents[0]),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      yield* Effect.try({
+        try: () => options.validate?.({ key, principal, operation, snapshot, cursor }),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      const allowed = yield* Effect.try({
+        try: () => options.authorize?.({ key, principal, operation, snapshot }) ?? true,
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      if (!allowed)
+        return yield* Effect.fail(
+          new OperationRejectedError({
+            opId,
+            message: `Operation "${opId}" was refused by authorization`,
+          }),
+        )
+      const reduced = yield* Effect.try({
+        try: () => options.reduce(snapshot, operation),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      const sequence = cursor + 1
+      const encodedSnapshot = yield* Effect.try({
+        try: () => JSON.stringify(options.snapshot.encode(reduced)),
+        catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+      })
+      yield* sql`INSERT INTO operations (key, op_id, sequence, actor_id, input, payload_hash) VALUES (${key}, ${opId}, ${sequence}, ${actorId}, ${encoded}, ${payloadHash})`
+      yield* sql`INSERT INTO documents (key, cursor, snapshot) VALUES (${key}, ${sequence}, ${encodedSnapshot}) ON CONFLICT(key) DO UPDATE SET cursor = excluded.cursor, snapshot = excluded.snapshot`
+      return {
+        result: {
+          _tag: 'Committed' as const,
+          committed: { operation, opId, sequence, actorId },
+        },
+        changed: true,
+      }
+    })
+
+  // Publish and observe only after the transaction committed, so a subscriber
+  // never sees a change that could still roll back.
+  const announce = (key: DocumentId, outcome: AppendOutcome): Effect.Effect<void> =>
+    outcome.changed && outcome.result._tag === 'Committed'
+      ? Effect.all([
+          Metric.update(journalMetrics.appends, 1),
+          Effect.logDebug('journal append', {
+            key,
+            opId: outcome.result.committed.opId,
+            sequence: outcome.result.committed.sequence,
+          }),
+          PubSub.publish(changes, key),
+        ]).pipe(Effect.asVoid)
+      : Effect.void
+
+  const append: Shape['append'] = Effect.fn('Journal.append')(function* (
+    key: DocumentId,
+    input: OperationEncoded,
+    principal: Principal,
+  ) {
+    const prepared = yield* prepare(key, input, principal)
+    yield* Effect.annotateCurrentSpan({ key, opId: prepared.opId })
+    const outcome = yield* sql
+      .withTransaction(commitPrepared(key, prepared, principal))
+      .pipe(Effect.catchTag('SqlError', asJournalError('Could not append the operation')))
+    yield* announce(key, outcome)
+    return outcome.result
+  })
+
+  const appendAll: Shape['appendAll'] = Effect.fn('Journal.appendAll')(function* (
+    key: DocumentId,
+    inputs: ReadonlyArray<OperationEncoded>,
+    principal: Principal,
+  ) {
+    if (inputs.length === 0) return []
+    const prepared = yield* Effect.forEach(inputs, input => prepare(key, input, principal))
+    // One transaction, so the batch commits atomically and in order.
+    const outcomes = yield* sql
+      .withTransaction(
+        Effect.forEach(prepared, entry => commitPrepared(key, entry, principal), {
+          concurrency: 1,
         }),
       )
-      .pipe(Effect.catchTag('SqlError', asJournalError('Could not append the operation')))
-
-    // Publish and observe only after the transaction committed, so a subscriber
-    // never sees a change that could still roll back.
-    if (outcome.changed && outcome.result._tag === 'Committed') {
-      yield* Metric.update(journalMetrics.appends, 1)
-      yield* Effect.logDebug('journal append', {
-        key,
-        opId,
-        sequence: outcome.result.committed.sequence,
-      })
-      yield* PubSub.publish(changes, key)
-    }
-    return outcome.result
+      .pipe(Effect.catchTag('SqlError', asJournalError('Could not append the operations')))
+    yield* Effect.forEach(outcomes, outcome => announce(key, outcome), { discard: true })
+    return outcomes.map(outcome => outcome.result)
   })
 
   const compact: Shape['compact'] = Effect.fn('Journal.compact')(function* (
@@ -543,6 +634,8 @@ const makeShape = <Operation, Snapshot, Principal>(
         return yield* Effect.fail(
           new InvalidCompactionError({
             through,
+            cursor,
+            floor: compactBefore,
             message: `Cannot compact "${key}" through ${through}`,
           }),
         )
@@ -557,6 +650,13 @@ const makeShape = <Operation, Snapshot, Principal>(
     yield* Effect.logDebug('journal compact', { key, through })
   })
 
+  const toEffectRecord = (row: EffectRow): EffectRecord => ({
+    key: String(row.key),
+    status: String(row.status) as EffectStatus,
+    ...(row.result === null ? {} : { result: JSON.parse(String(row.result)) }),
+    ...(row.error === null ? {} : { error: String(row.error) }),
+  })
+
   const effect: Shape['effect'] = Effect.fn('Journal.effect')(function* (key: string) {
     yield* Effect.annotateCurrentSpan({ key })
     const rows =
@@ -566,15 +666,54 @@ const makeShape = <Operation, Snapshot, Principal>(
     const row = rows[0]
     if (row === undefined) return Option.none<EffectRecord>()
     return yield* Effect.try({
-      try: () =>
-        Option.some({
-          key: String(row.key),
-          status: String(row.status) as EffectStatus,
-          ...(row.result === null ? {} : { result: JSON.parse(String(row.result)) }),
-          ...(row.error === null ? {} : { error: String(row.error) }),
-        }),
+      try: () => Option.some(toEffectRecord(row)),
       catch: cause => journalError('Could not read the effect record', cause),
     })
+  })
+
+  const keys: Shape['keys'] = Effect.fn('Journal.keys')(function* () {
+    const rows = yield* sql<{
+      readonly key: string
+    }>`SELECT key FROM documents UNION SELECT key FROM operations ORDER BY key`.pipe(
+      Effect.catchTag('SqlError', asJournalError('Could not list journal keys')),
+    )
+    return yield* Effect.try({
+      try: () => rows.map(row => toDocumentId(String(row.key))),
+      catch: cause => journalError('Could not list journal keys', cause),
+    })
+  })
+
+  const unfinished: Shape['unfinished'] = Effect.fn('Journal.unfinished')(function* () {
+    const rows =
+      yield* sql<EffectRow>`SELECT key, status, result, error FROM effects WHERE status != 'succeeded' ORDER BY key`.pipe(
+        Effect.catchTag('SqlError', asJournalError('Could not read unfinished effects')),
+      )
+    return yield* Effect.try({
+      try: () => rows.map(toEffectRecord),
+      catch: cause => journalError('Could not read unfinished effects', cause),
+    })
+  })
+
+  const clearEffect: Shape['clearEffect'] = Effect.fn('Journal.clearEffect')(function* (
+    key: string,
+  ) {
+    yield* sql`DELETE FROM effects WHERE key = ${key}`.pipe(
+      Effect.catchTag('SqlError', asJournalError('Could not clear the effect record')),
+    )
+  })
+
+  // The effect ledger is keyed globally and is not reachable by document alone,
+  // so `reset` drops the document's snapshot and operations only. Clear the
+  // effects a document owns with `clearEffect`, using their full keys.
+  const reset: Shape['reset'] = Effect.fn('Journal.reset')(function* (key: DocumentId) {
+    yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* sql`DELETE FROM operations WHERE key = ${key}`
+          yield* sql`DELETE FROM documents WHERE key = ${key}`
+        }),
+      )
+      .pipe(Effect.catchTag('SqlError', asJournalError('Could not reset the document')))
   })
 
   const record = (
@@ -652,5 +791,19 @@ const makeShape = <Operation, Snapshot, Principal>(
 
   const subscribe: Shape['subscribe'] = Stream.fromPubSub(changes)
 
-  return { load, floor, read, append, compact, effect, runEffect, subscribe }
+  return {
+    load,
+    floor,
+    read,
+    append,
+    appendAll,
+    compact,
+    keys,
+    unfinished,
+    effect,
+    runEffect,
+    clearEffect,
+    reset,
+    subscribe,
+  }
 }

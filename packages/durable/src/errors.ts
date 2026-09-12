@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { OpId } from './ids.js'
 
 /** A storage or database failure, not something the caller did. */
 export class JournalError extends Schema.TaggedError<JournalError>()('JournalError', {
@@ -51,6 +52,8 @@ export class InvalidCompactionError extends Schema.TaggedError<InvalidCompaction
   'InvalidCompactionError',
   {
     through: Schema.Number,
+    cursor: Schema.Number,
+    floor: Schema.Number,
     message: Schema.String,
   },
 ) {}
@@ -59,7 +62,7 @@ export class InvalidCompactionError extends Schema.TaggedError<InvalidCompaction
 export class OperationRejectedError extends Schema.TaggedError<OperationRejectedError>()(
   'OperationRejectedError',
   {
-    opId: Schema.String,
+    opId: OpId,
     message: Schema.String,
   },
 ) {}
@@ -68,7 +71,7 @@ export class OperationRejectedError extends Schema.TaggedError<OperationRejected
 export class IdentityConflictError extends Schema.TaggedError<IdentityConflictError>()(
   'IdentityConflictError',
   {
-    opId: Schema.String,
+    opId: OpId,
     message: Schema.String,
   },
 ) {}

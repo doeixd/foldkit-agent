@@ -530,6 +530,63 @@ describe('a durable journal', () => {
     }))
 })
 
+describe('the journal surface', () => {
+  it('reports the committed opId', () =>
+    withJournal(function* (journal) {
+      const committed = appendCommitted(yield* journal.append(todos, add(1, 'a'), principal))
+      expect(committed.opId).toBe('a:1')
+      expect((yield* journal.read(todos, 0))[0]?.opId).toBe('a:1')
+    }))
+
+  it('appends a batch in order in one transaction', () =>
+    withJournal(function* (journal) {
+      const results = yield* journal.appendAll(todos, [add(1, 'a'), add(2, 'b')], principal)
+      expect(results.map(result => result._tag)).toEqual(['Committed', 'Committed'])
+      expect((yield* journal.read(todos, 0)).map(row => row.sequence)).toEqual([1, 2])
+      expect((yield* journal.load(todos)).snapshot).toEqual({ ids: ['a', 'b'] })
+    }))
+
+  it('rolls back the whole batch when one operation is refused', () =>
+    withJournal(
+      function* (journal) {
+        const result = yield* Effect.result(
+          journal.appendAll(todos, [add(1, 'a'), add(2, 'b'), add(3, 'c')], principal),
+        )
+        expect(result._tag).toBe('Failure')
+        expect((yield* journal.load(todos)).cursor).toBe(0)
+        expect(yield* journal.read(todos, 0)).toEqual([])
+      },
+      {
+        validate: ({ operation }) => {
+          if (operation.id === 'b') throw new Error('refused')
+        },
+      },
+    ))
+
+  it('lists document keys and resets one without touching the others', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      yield* journal.append(docA, add(1, 'b'), principal)
+
+      expect(yield* journal.keys()).toEqual(['a', 'todos'])
+      yield* journal.reset(docA)
+      expect(yield* journal.keys()).toEqual(['todos'])
+      expect(yield* journal.load(docA)).toEqual({ snapshot: { ids: [] }, cursor: 0 })
+      expect((yield* journal.load(todos)).cursor).toBe(1)
+    }))
+
+  it('lists unfinished effects and clears one', () =>
+    withJournal(function* (journal) {
+      yield* Effect.result(journal.runEffect('k', Effect.fail(new Error('down'))))
+      yield* journal.runEffect('ok', Effect.succeed('done'))
+
+      expect((yield* journal.unfinished()).map(record => record.key)).toEqual(['k'])
+      yield* journal.clearEffect('k')
+      expect(yield* journal.unfinished()).toEqual([])
+      expect(Option.isNone(yield* journal.effect('k'))).toBe(true)
+    }))
+})
+
 describe('the effect ledger', () => {
   it('runs an effect once per key and returns the recorded result', () =>
     withJournal(function* (journal) {
