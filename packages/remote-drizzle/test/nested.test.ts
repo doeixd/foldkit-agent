@@ -9,6 +9,7 @@ import {
   emptyStore,
   type BoundRemote,
   type RemoteModel,
+  initialRemoteModel,
 } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
@@ -91,7 +92,7 @@ const readCards = async (count: number) => {
     )
     const store = Remote.writeRead(emptyStore, requests, result)
     const bound = {
-      store: { get: () => ({ ...store, entities: store }) },
+      store: { get: () => ({ ...initialRemoteModel, entities: store }) },
     } as unknown as BoundRemote<unknown, RemoteModel>
     return {
       statements: statements.length,
@@ -124,7 +125,7 @@ const readPaged = async (count: number) => {
     )
     const store = Remote.writeRead(emptyStore, requests, result)
     const bound = {
-      store: { get: () => ({ ...store, entities: store }) },
+      store: { get: () => ({ ...initialRemoteModel, entities: store }) },
     } as unknown as BoundRemote<unknown, RemoteModel>
     return {
       statements: statements.length,

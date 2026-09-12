@@ -24,6 +24,7 @@ import {
   settleFailure,
   settleSuccess,
   visibleItems,
+  visibleStore,
   type ConnectionChange,
   type OptimisticOperation,
 } from './optimistic.js'
@@ -875,10 +876,18 @@ export interface BoundRemote<AppModel, Store extends RemoteModel, Names extends 
   readonly [boundRemoteNames]?: Names
 }
 
+/**
+ * The store a read or plan sees: the base with every pending optimistic layer
+ * applied, so a request's patches show until it settles and a temporary id is
+ * not planned as a fetch.
+ */
 const storeOf = <AppModel, Store extends RemoteModel, Names extends string>(
   bound: BoundRemote<AppModel, Store, Names>,
   model: AppModel,
-): EntityStore => bound.store.get(model).entities
+): EntityStore => {
+  const remote = bound.store.get(model)
+  return visibleStore(remote.entities, remote.optimistic)
+}
 
 /**
  * The transport boundary. `foldkit-remote` never talks to a transport directly;

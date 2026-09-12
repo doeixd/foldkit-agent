@@ -10,6 +10,7 @@ import {
   Query,
   Remote,
   RemoteClient,
+  Selection,
   cursor,
   edge,
   emptyConnection,
@@ -22,6 +23,7 @@ import {
   updateRemote,
   visibleItems,
   visibleStore,
+  writeEntity,
   type LiveEvent,
   type RemoteModel,
 } from '../src/index.js'
@@ -283,5 +285,47 @@ describe('Remote.mutateInto with optimistic operations', () => {
       ],
     }
     expect(Schema.decodeUnknownSync(MutationResult)(result)).toEqual(result)
+  })
+})
+
+describe('a Surface reads through the optimistic layers', () => {
+  const Data2 = Remote.make({ entities: [Comment] })
+  const App2 = Surface.application({
+    Model: Schema.Struct({ remote: Data2.Model }),
+    Message: defineMessageUnion({ Ping: {} }),
+  })
+  const Remote2 = Remote.at(Data2, App2.model.remote)
+  const projection = Remote.select(Remote2, Selection.make(Comment, { body: true }))('c1')
+
+  it('shows a pending patch and reverts it on failure', () => {
+    const base: RemoteModel = {
+      ...initialRemoteModel,
+      entities: writeEntity(initialRemoteModel.entities, entityKey('Comment', 'c1'), {
+        body: 'old',
+      }),
+    }
+    const pending = updateRemote(base, {
+      _tag: 'MutationStarted',
+      requestId: 'r',
+      optimistic: [Entity.patch(Comment.ref('c1'), { body: 'new' })],
+    })
+    expect(projection.read({ remote: pending })).toEqual({ _tag: 'Ready', value: { body: 'new' } })
+    const failed = updateRemote(pending, {
+      _tag: 'MutationFailed',
+      requestId: 'r',
+      error: { _tag: 'Boom', message: 'no' },
+    })
+    expect(projection.read({ remote: failed })).toEqual({ _tag: 'Ready', value: { body: 'old' } })
+  })
+
+  it('does not plan a fetch for a temporary entity a pending patch holds', () => {
+    const pending = updateRemote(initialRemoteModel, {
+      _tag: 'MutationStarted',
+      requestId: 'r',
+      optimistic: [Entity.patch(Comment.ref('tmp'), { id: 'tmp', body: 'draft' })],
+    })
+    const temporary = Remote.select(Remote2, Selection.make(Comment, { body: true }))('tmp')
+    expect(Remote.observeProjection(Remote2, { remote: pending }, temporary)).toEqual([])
+    expect(temporary.read({ remote: pending })).toEqual({ _tag: 'Ready', value: { body: 'draft' } })
   })
 })

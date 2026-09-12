@@ -7,6 +7,7 @@ import {
   type BoundRemote,
   type RemoteModel,
   REMOTE_PROTOCOL_VERSION,
+  initialRemoteModel,
 } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
@@ -71,7 +72,7 @@ describe('RemoteDrizzle end to end', () => {
     const store = Remote.writeRead(emptyStore, [request], result)
     const bound = {
       store: {
-        get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),
+        get: () => ({ ...initialRemoteModel, entities: store }),
       },
     } as unknown as BoundRemote<unknown, RemoteModel>
 
@@ -116,7 +117,7 @@ describe('RemoteDrizzle end to end', () => {
     const store = Remote.writeRead(emptyStore, [request], result)
     const bound = {
       store: {
-        get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),
+        get: () => ({ ...initialRemoteModel, entities: store }),
       },
     } as unknown as BoundRemote<unknown, RemoteModel>
 

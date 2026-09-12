@@ -1,6 +1,13 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Entity, Remote, Selection, type BoundRemote, type RemoteModel } from '../src/index.js'
+import {
+  Entity,
+  Remote,
+  Selection,
+  type BoundRemote,
+  type RemoteModel,
+  initialRemoteModel,
+} from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 
@@ -123,7 +130,7 @@ describe('Remote core', () => {
       comments: Selection.connection(Comment, { first: 5 }),
     })
     const bound = {
-      store: { get: () => ({ entities: {}, connections: {}, requests: {}, mutations: {} }) },
+      store: { get: () => initialRemoteModel },
     } as unknown as BoundRemote<unknown, RemoteModel>
 
     expect(Remote.select(bound, selection)('p1').requirements).toEqual([
