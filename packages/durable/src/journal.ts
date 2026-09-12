@@ -199,6 +199,31 @@ const describe = (cause: unknown): string =>
 /** A compacted operation keeps this instead of its payload, so identity is provable. */
 const hashPayload = (encoded: string): string => createHash('sha256').update(encoded).digest('hex')
 
+/**
+ * Canonical JSON with sorted object keys. `append` compares encoded bytes for
+ * idempotency, so two logically equal operations must encode identically;
+ * otherwise a retry with a different key order looks like a conflicting reuse.
+ * Non-plain objects are left to `JSON.stringify` (a `Date`'s `toJSON` still runs).
+ */
+const canonicalJson = (value: unknown): string | undefined => {
+  const build = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(build)
+    if (input !== null && typeof input === 'object') {
+      const proto = Object.getPrototypeOf(input)
+      if (proto === Object.prototype || proto === null) {
+        const out: Record<string, unknown> = {}
+        for (const key of Object.keys(input).sort()) {
+          out[key] = build((input as Record<string, unknown>)[key])
+        }
+        return out
+      }
+    }
+    return input
+  }
+  const stable = build(value)
+  return stable === undefined ? undefined : JSON.stringify(stable)
+}
+
 const journalError = (message: string, cause: unknown): JournalError =>
   new JournalError({ message, cause })
 
@@ -484,7 +509,11 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
       })
       const encoded = yield* Effect.try({
-        try: () => JSON.stringify(options.operation.encode(operation)),
+        try: () => {
+          const json = canonicalJson(options.operation.encode(operation))
+          if (json === undefined) throw new Error('operation encoded to no JSON value')
+          return json
+        },
         catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
       })
       return { operation, opId, actorId, encoded, payloadHash: hashPayload(encoded) }
@@ -506,8 +535,15 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         const sequence = toSequence(Number(row.sequence))
         const priorActor = toActorId(String(row.actor_id))
         if (row.input !== null) {
-          // The payload is retained, so the committed operation is canonical.
-          if (row.input !== encoded || priorActor !== actorId) return yield* Effect.fail(conflict())
+          // Compare canonical forms, so a retransmission with a different key
+          // order is the same operation and rows written before canonicalization
+          // still match.
+          const storedJson = yield* Effect.try({
+            try: () => canonicalJson(JSON.parse(String(row.input))),
+            catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
+          })
+          if (storedJson !== encoded || priorActor !== actorId)
+            return yield* Effect.fail(conflict())
           const stored = yield* Effect.try({
             try: () => options.operation.decode(JSON.parse(String(row.input))),
             catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),

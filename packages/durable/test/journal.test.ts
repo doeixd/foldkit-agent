@@ -565,6 +565,31 @@ describe('the journal surface', () => {
       },
     ))
 
+  it('treats a reordered but logically equal payload as the same operation', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const journal = yield* makeJournal<Record<string, unknown>, Snapshot, Principal>({
+            file: ':memory:',
+            operation: {
+              encode: value => value,
+              decode: value => value as Record<string, unknown>,
+            },
+            snapshot,
+            empty: () => ({ ids: [] }),
+            reduce: (state, op) => ({ ids: [...state.ids, String(op.id)] }),
+            opId: op => opId(String(op.opId)),
+            actorId: (value: Principal) => actorId(value.actorId),
+          })
+          yield* journal.append(todos, { opId: 'a:1', id: 'a' }, principal)
+          const again = yield* journal.append(todos, { id: 'a', opId: 'a:1' }, principal)
+          if (again._tag !== 'Committed') throw new Error('Expected a committed operation')
+          expect(again.committed.sequence).toBe(1)
+          expect((yield* journal.load(todos)).snapshot).toEqual({ ids: ['a'] })
+        }),
+      ),
+    ))
+
   it('lists document keys and resets one without touching the others', () =>
     withJournal(function* (journal) {
       yield* journal.append(todos, add(1, 'a'), principal)
