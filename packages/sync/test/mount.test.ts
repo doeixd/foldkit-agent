@@ -144,6 +144,26 @@ describe('Sync.mount', () => {
     expect(app.model().selectedTodoId).toBe('a')
   })
 
+  it('reports transitions and the Messages the runtime applies, for an agent host', async () => {
+    const app = await open()
+    let transitions = 0
+    const seen: string[] = []
+    const stopModel = app.subscribe(() => {
+      transitions += 1
+    })
+    const stopMessages = app.observe(message => seen.push(message._tag))
+
+    app.dispatch(Message.RequestedRename({ id: 'a', title: 'B' }))
+    await vi.waitFor(() => expect(seen).toEqual(['RequestedRename', 'RenamedTodo']))
+    expect(transitions).toBeGreaterThanOrEqual(2)
+
+    stopModel()
+    stopMessages()
+    app.dispatch(Message.SelectedTodo({ id: 'a' }))
+    await vi.waitFor(() => expect(text()).toContain('Selection: a'))
+    expect(seen).toEqual(['RequestedRename', 'RenamedTodo'])
+  })
+
   it('lets a Command from update settle into a durable fact without wrapping', async () => {
     const app = await open()
     app.dispatch(Message.CreatedTodo({ id: 'a', title: 'Milk' }))

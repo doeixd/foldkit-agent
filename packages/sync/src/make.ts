@@ -6,16 +6,18 @@
  */
 import { Schema } from 'effect'
 import {
+  MessageSet,
+  Projection,
   Surface,
   type AppScope,
   type Contract,
-  type MessageSet,
-  type Projection,
+  type MergeConstructors,
+  type MergeFields,
   type RunnableApplication,
   type WritableProjection,
 } from 'foldkit-surface'
 import type { DocumentId } from './ids.js'
-import { defineSync, type Sync } from './sync.js'
+import { defineSync, type JournalContract, type Operation, type Sync } from './sync.js'
 
 type MessageConstructor<Message> = (...args: never[]) => Message
 
@@ -37,19 +39,62 @@ const messageTag = (constructor: unknown): string | undefined => {
   return typeof literal === 'string' ? literal : undefined
 }
 
-export interface MakeOptions<
-  AppModel,
+/** The `_tag` literal of the Message a constructor produces. */
+type TagOf<C> = C extends (...args: never[]) => infer M
+  ? M extends { readonly _tag: infer T extends string }
+    ? T
+    : never
+  : never
+
+/**
+ * A journal contract that also carries the declared authorization policy, in
+ * the shape `makeJournal` takes, so `makeJournal({ ...contract })` applies it.
+ */
+export interface PolicyJournalContract<Operation, Shared, Principal> extends JournalContract<
+  Operation,
+  Shared
+> {
+  readonly authorize?: (request: {
+    readonly principal: Principal
+    readonly operation: Operation
+    readonly snapshot: Shared
+  }) => boolean
+}
+
+/** What a per-variant `authorize` rule sees before the journal commits. */
+export interface AuthorizeRequest<Principal, Message, Shared> {
+  readonly principal: Principal
+  readonly message: Message
+  readonly shared: Shared
+}
+
+/**
+ * Per-variant policy, keyed by durable tag: `message` is that variant exactly,
+ * `shared` the authoritative snapshot. A variant without a rule is allowed; the
+ * server may still refuse on its own grounds.
+ */
+export type AuthorizePolicy<
+  Principal,
   Fields extends Schema.Struct.Fields,
-  Subset,
-  Ms extends readonly MessageConstructor<any>[],
+  Ms extends readonly unknown[],
+> = {
+  readonly [K in TagOf<Ms[number]>]?: (
+    request: AuthorizeRequest<
+      Principal,
+      Extract<MsgOf<Ms>, { readonly _tag: K }>,
+      Schema.Struct.Type<Fields>
+    >,
+  ) => boolean
+}
+
+interface BaseOptions<
+  Principal,
+  Fields extends Schema.Struct.Fields,
+  Ms extends readonly unknown[],
 > {
   readonly documentId: DocumentId
   /** Name for the generated `surface`; defaults to the document id. */
   readonly name?: string
-  /** The writable projection of the shared fields. */
-  readonly shared: WritableProjection<AppModel, Fields>
-  /** The Message subset the replica durably records and replays. */
-  readonly durable: MessageSet<AppModel, any, Subset, Ms>
   /**
    * Replaces the replay derived from the application's `update`. It is a pure
    * reducer over the shared subset; only durable Messages reach it, and it runs
@@ -57,10 +102,59 @@ export interface MakeOptions<
    * author owns its agreement with `update`.
    */
   readonly replay?: (
-    shared: Schema.Struct.Type<Fields>,
-    message: MsgOf<Ms>,
-  ) => Schema.Struct.Type<Fields>
+    shared: Schema.Struct.Type<NoInfer<Fields>>,
+    message: MsgOf<NoInfer<Ms>>,
+  ) => Schema.Struct.Type<NoInfer<Fields>>
+  /** Authorization the server journal applies before committing; see `AuthorizePolicy`. */
+  readonly authorize?: AuthorizePolicy<Principal, NoInfer<Fields>, NoInfer<Ms>>
 }
+
+export interface MakeOptions<
+  AppModel,
+  Fields extends Schema.Struct.Fields,
+  Subset,
+  Ms extends readonly MessageConstructor<any>[],
+  Principal = unknown,
+> extends BaseOptions<Principal, Fields, Ms> {
+  /** The writable projection of the shared fields. */
+  readonly shared: WritableProjection<AppModel, Fields>
+  /** The Message subset the replica durably records and replays. */
+  readonly durable: MessageSet<AppModel, any, Subset, Ms>
+}
+
+/**
+ * One feature's contribution to a document: the fields it shares and the
+ * Messages it records. `compose` merges fragments into one, to spread into
+ * `make`; a field declared twice with a different codec or a tag declared twice
+ * is rejected there.
+ */
+export interface SyncFragment<
+  AppModel,
+  Fields extends Schema.Struct.Fields,
+  Subset,
+  Ms extends readonly MessageConstructor<any>[],
+> {
+  readonly shared: WritableProjection<AppModel, Fields>
+  readonly durable: MessageSet<AppModel, any, Subset, Ms>
+}
+
+type SharedOf<Fs extends readonly SyncFragment<any, any, any, any>[]> = {
+  readonly [K in keyof Fs]: Fs[K]['shared']
+}
+type DurableOf<Fs extends readonly SyncFragment<any, any, any, any>[]> = {
+  readonly [K in keyof Fs]: Fs[K]['durable']
+}
+/** The merged shared fields of several fragments. */
+export type FragmentFields<Fs extends readonly SyncFragment<any, any, any, any>[]> = MergeFields<
+  SharedOf<Fs>
+>
+/** The concatenated durable constructors of several fragments. */
+export type FragmentConstructors<Fs extends readonly SyncFragment<any, any, any, any>[]> =
+  MergeConstructors<DurableOf<Fs>>
+
+/** The union of Messages several fragments record. */
+export type FragmentMessages<Fs extends readonly SyncFragment<any, any, any, any>[]> =
+  Fs[number] extends SyncFragment<any, any, infer V, any> ? V : never
 
 /**
  * The value `make` returns: the low-level `Sync` protocol plus the writable
@@ -72,12 +166,19 @@ export interface DefinedSync<
   Fields extends Schema.Struct.Fields,
   Message,
   Ms extends readonly unknown[],
+  Principal = unknown,
 > extends Sync<Message, Schema.Struct.Type<Fields>> {
   readonly surface: Surface<AppModel, Schema.Struct.Type<Fields>, MsgOf<Ms>, void>
   readonly projection: WritableProjection<AppModel, Fields>
   readonly messages: Ms
   /** For `Module`: this contract owns the shared projection's paths and records the durable tags. */
   readonly contract: Contract
+  /** The durable journal's codecs, reducer, and, when declared, authorization. */
+  readonly journalContract: () => PolicyJournalContract<
+    Operation,
+    Schema.Struct.Type<Fields>,
+    Principal
+  >
 }
 
 /** The sync constructors specialized to one application. */
@@ -85,14 +186,38 @@ export interface ApplicationSync<
   AppModel,
   F extends Schema.Struct.Fields,
   Cases extends Record<string, Schema.Struct.Fields>,
+  Principal = unknown,
 > {
+  /**
+   * Fixes the `Principal` that `authorize` rules see. A `Principal` cannot be a
+   * positional type argument beside an inferred Model, so it is supplied here:
+   * `Sync.forApplication(App).withPrincipal<User>()`. Type-only.
+   */
+  readonly withPrincipal: <P>() => ApplicationSync<AppModel, F, Cases, P>
+  /** One feature's shared fields and durable Messages, for `compose`. */
+  readonly fragment: <
+    Fields extends Schema.Struct.Fields,
+    Subset,
+    Ms extends readonly MessageConstructor<AppMessage<AppModel, F, Cases>>[],
+  >(config: {
+    readonly shared: WritableProjection<AppModel, Fields>
+    readonly durable: MessageSet<AppModel, any, Subset, Ms>
+  }) => SyncFragment<AppModel, Fields, Subset, Ms>
+  /**
+   * Merges fragments into one: `make({ documentId, ...compose(Todos, Members) })`.
+   * A field declared twice with a different codec, a tag declared twice, or a
+   * fragment from another application throws.
+   */
+  readonly compose: <const Fs extends readonly SyncFragment<AppModel, any, any, any>[]>(
+    ...fragments: Fs
+  ) => SyncFragment<AppModel, FragmentFields<Fs>, FragmentMessages<Fs>, FragmentConstructors<Fs>>
   readonly make: <
     Fields extends Schema.Struct.Fields,
     Subset,
     Ms extends readonly MessageConstructor<AppMessage<AppModel, F, Cases>>[],
   >(
-    config: MakeOptions<AppModel, Fields, Subset, Ms>,
-  ) => DefinedSync<AppModel, Fields, AppMessage<AppModel, F, Cases>, Ms>
+    options: MakeOptions<AppModel, Fields, Subset, Ms, Principal>,
+  ) => DefinedSync<AppModel, Fields, AppMessage<AppModel, F, Cases>, Ms, Principal>
 }
 
 /**
@@ -151,6 +276,25 @@ const derivedReplay = <
 }
 
 /**
+ * Merges fragments into one. The primitives reject a conflicting field, a
+ * duplicate tag, and a subset from another application.
+ */
+const composeFragments = (
+  fragments: readonly SyncFragment<any, any, any, any>[],
+): SyncFragment<any, any, any, any> => {
+  const compose = Projection.compose as (
+    ...projections: readonly WritableProjection<any, any>[]
+  ) => WritableProjection<any, any>
+  const union = MessageSet.union as (
+    ...subsets: readonly MessageSet<any, any, any, any>[]
+  ) => MessageSet<any, any, any, any>
+  return {
+    shared: compose(...fragments.map(fragment => fragment.shared)),
+    durable: union(...fragments.map(fragment => fragment.durable)),
+  }
+}
+
+/**
  * Specializes the sync constructors to a `Surface.application`, so
  * `Sync.forApplication(App).make({ documentId, shared, durable })` derives the
  * shared codec, the initial snapshot, the durable predicate, and replay from
@@ -164,38 +308,48 @@ export const forApplication = <
   Cases extends Record<string, Schema.Struct.Fields>,
 >(
   app: RunnableApplication<AppModel, F, Cases, any>,
-): ApplicationSync<AppModel, F, Cases> => ({
-  make: <
-    Fields extends Schema.Struct.Fields,
-    Subset,
-    Ms extends readonly MessageConstructor<AppMessage<AppModel, F, Cases>>[],
-  >(
-    config: MakeOptions<AppModel, Fields, Subset, Ms>,
-  ): DefinedSync<AppModel, Fields, AppMessage<AppModel, F, Cases>, Ms> => {
-    type Message = AppMessage<AppModel, F, Cases>
-    type Shared = Schema.Struct.Type<Fields>
-    type SharedEncoded = Schema.Struct.Encoded<Fields>
-    const { shared, durable } = config
+): ApplicationSync<AppModel, F, Cases> => build(app)
+
+const build = <
+  AppModel,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+  Principal,
+>(
+  app: RunnableApplication<AppModel, F, Cases, any>,
+): ApplicationSync<AppModel, F, Cases, Principal> => {
+  type Message = AppMessage<AppModel, F, Cases>
+  const decodeMessage = Schema.decodeUnknownSync(
+    app.Message as unknown as Schema.Codec<Message, unknown>,
+  )
+
+  const make = (
+    options: MakeOptions<AppModel, any, any, any, Principal>,
+  ): DefinedSync<AppModel, any, Message, any, Principal> => {
+    type Shared = Record<string, unknown>
+    const { shared, durable } = options
 
     // Two applications can have structurally identical Message unions, so the
     // types cannot separate them; the owner token can.
     if (durable.owner !== app.owner)
-      throw new Error('Sync.forApplication: the durable subset belongs to a different application')
+      throw new Error('Sync.make: the durable subset belongs to a different application')
 
     const replay: (value: Shared, message: Message) => Shared =
-      config.replay === undefined
+      options.replay === undefined
         ? derivedReplay(app, shared)
         : // `durable` has already rejected anything outside the declared subset.
-          (value, message) => config.replay!(value, message as MsgOf<Ms>)
+          (value, message) => options.replay!(value, message as never)
     const durableTags = new Set(
-      durable.constructors.map(messageTag).filter((tag): tag is string => tag !== undefined),
+      (durable.constructors as readonly unknown[])
+        .map(messageTag)
+        .filter((tag): tag is string => tag !== undefined),
     )
     // `AppScope` does not constrain its schemas' services; a Foldkit Message union
     // and a Struct are pure, so the low-level contract's `never` is satisfied.
-    const sync = defineSync<Message, Shared, unknown, SharedEncoded>({
-      documentId: config.documentId,
+    const sync = defineSync<Message, Shared, unknown, unknown>({
+      documentId: options.documentId,
       message: app.Message as unknown as Schema.Codec<Message, unknown>,
-      shared: shared.schema as unknown as Schema.Codec<Shared, SharedEncoded>,
+      shared: shared.schema as unknown as Schema.Codec<Shared, unknown>,
       empty: shared.get(app.initial),
       durable: message => {
         const tag = (message as { readonly _tag?: string })._tag
@@ -204,17 +358,31 @@ export const forApplication = <
       replay,
     })
 
+    const rules = options.authorize as
+      Record<string, (request: AuthorizeRequest<Principal, Message, Shared>) => boolean> | undefined
+    const journalContract = (): PolicyJournalContract<Operation, Shared, Principal> => {
+      const base = sync.journalContract()
+      if (rules === undefined) return base
+      return {
+        ...base,
+        authorize: ({ principal, operation, snapshot }) => {
+          const message = decodeMessage(operation.message)
+          const rule = rules[(message as { readonly _tag: string })._tag]
+          return rule === undefined ? true : rule({ principal, message, shared: snapshot })
+        },
+      }
+    }
+
     const readOnly: Projection<AppModel, Shared> = {
       Model: shared.schema,
       dependencies: shared.dependencies,
       requirements: [],
       read: shared.get,
     }
-    const surface = Surface.make(app, config.name ?? String(config.documentId), {
+    const surface = Surface.make(app, options.name ?? String(options.documentId), {
       model: () => readOnly,
       messages: durable.constructors,
     })
-
     const contract: Contract = {
       kind: 'sync',
       name: surface.name,
@@ -224,6 +392,25 @@ export const forApplication = <
       messages: [...durable.tags],
       requirements: [],
     }
-    return { ...sync, surface, projection: shared, messages: durable.constructors, contract }
-  },
-})
+    return {
+      ...sync,
+      journalContract,
+      surface,
+      projection: shared,
+      messages: durable.constructors,
+      contract,
+    }
+  }
+
+  return {
+    withPrincipal: <P>() => build<AppModel, F, Cases, P>(app),
+    fragment: config => {
+      if (config.durable.owner !== app.owner)
+        throw new Error('Sync.fragment: the durable subset belongs to a different application')
+      return { shared: config.shared, durable: config.durable }
+    },
+    compose: ((...fragments: readonly SyncFragment<any, any, any, any>[]) =>
+      composeFragments(fragments)) as ApplicationSync<AppModel, F, Cases, Principal>['compose'],
+    make: make as ApplicationSync<AppModel, F, Cases, Principal>['make'],
+  }
+}

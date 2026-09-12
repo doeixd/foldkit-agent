@@ -22,14 +22,10 @@ import {
   type TransportClient,
 } from 'foldkit-sync'
 import { encodeShared, type Message, type Shared } from './app.js'
-import { Sync } from './sync.js'
+import type { SyncPrincipal } from './principal.js'
+import { Sync, journalContract } from './sync.js'
 
-/** Supplied by a trusted transport, never decoded from an operation. */
-export interface SyncPrincipal {
-  readonly actorId: string
-  readonly documentId: string
-  readonly canWrite: boolean
-}
+export type { SyncPrincipal } from './principal.js'
 
 export interface Journal {
   readonly append: (input: unknown, principal: SyncPrincipal) => Committed
@@ -53,9 +49,10 @@ export const openJournal = (path: string): Journal => {
     try {
       return Effect.runSync(
         makeJournal<Operation, Shared, SyncPrincipal>({
-          // The replica contract also produces the durable journal's codecs,
-          // initial snapshot, and replay, so they are not written twice.
-          ...Sync.journalContract(),
+          // The contract produces the journal's codecs, initial snapshot, and
+          // reducer, and its `authorize` rules: none is written twice, and the
+          // policy declared in `sync.ts` is the policy this journal enforces.
+          ...journalContract(),
           file: path,
           opId: operation => toOpId(operation.opId),
           actorId: principal => toActorId(principal.actorId),
