@@ -100,6 +100,8 @@ runtime.
   `foldkit-sync` do, and when to reach for them.
 - [Server-derived state](./docs/remote.md) — the `foldkit-surface` boundary and
   the `foldkit-remote` Submodel.
+- [Inside-out view composition](./docs/mixins.md) — slot contracts, Style and
+  Behavior, and the `@foldkit/ui` adapters.
 - [`foldkit-agent` design rationale](./packages/agent/DESIGN.md).
 - [Revision plan](./REVISION_PLAN.md) — the full design and phase status.
 - Each package README documents its API; [`examples/`](./examples) has runnable
