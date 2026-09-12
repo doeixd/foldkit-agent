@@ -90,6 +90,15 @@ relation (or computed) name that collides with a column; a computed naming an
 undeclared or singular relation; and a `one` relation pointed at a nullable
 column without `{ nullable: true }` (below).
 
+`fields` replaces the field map Drizzle derives, for a custom id codec or a
+narrower client schema. Relation and computed fields still derive on top:
+
+```ts
+const User = entity('User', users, {
+  fields: { id: UserId, name: Schema.String },
+})
+```
+
 ## Provide the database
 
 ```ts

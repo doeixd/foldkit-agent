@@ -86,13 +86,6 @@ type ComputedFields<Computed extends Record<string, ComputedConfig>> = {
   readonly [Field in keyof Computed]: Schema.Codec<number, number>
 }
 
-/** The table's select fields plus a ref field per relation and a count per computed. */
-export type EntityFields<
-  Table extends DrizzleTable,
-  Relations extends Record<string, RelationBinding>,
-  Computed extends Record<string, ComputedConfig> = {},
-> = SelectFields<Table> & RelationFields<Relations> & ComputedFields<Computed>
-
 /** An aggregate over a collection relation, attached to each owning row. */
 export interface ComputedConfig {
   /** The collection relation whose target rows are counted. */
@@ -171,14 +164,21 @@ export const entity = <
   Table extends DrizzleTable,
   const Relations extends Record<string, RelationBinding> = {},
   const Computed extends Record<string, ComputedConfig> = {},
+  F extends Schema.Struct.Fields = SelectFields<Table>,
 >(
   name: Name,
   table: Table,
   options?: {
+    readonly fields?: F | undefined
     readonly relations?: Relations | undefined
     readonly computed?: Computed | undefined
   },
-): EntityBinding<Name, Table, EntityFields<Table, Relations, Computed>, Relations> => {
+): EntityBinding<
+  Name,
+  Table,
+  F & RelationFields<Relations> & ComputedFields<Computed>,
+  Relations
+> => {
   const columns = getTableColumns(table)
   const relations = options?.relations ?? ({} as Relations)
 
@@ -214,7 +214,10 @@ export const entity = <
   }
 
   const fields: Record<string, Schema.Schema<unknown>> = {
-    ...(createSelectSchema(table).fields as Record<string, Schema.Schema<unknown>>),
+    ...((options?.fields ?? createSelectSchema(table).fields) as Record<
+      string,
+      Schema.Schema<unknown>
+    >),
   }
   for (const [field, relation] of Object.entries(relations)) {
     const target = relation.entity as EntityDescriptor<any, any>
@@ -241,5 +244,10 @@ export const entity = <
     columns,
     relations,
     computed,
-  } as unknown as EntityBinding<Name, Table, EntityFields<Table, Relations, Computed>, Relations>
+  } as unknown as EntityBinding<
+    Name,
+    Table,
+    F & RelationFields<Relations> & ComputedFields<Computed>,
+    Relations
+  >
 }

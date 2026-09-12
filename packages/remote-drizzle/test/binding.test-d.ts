@@ -1,10 +1,12 @@
 import { pgTable, text, uuid } from 'drizzle-orm/pg-core'
+import { Schema } from 'effect'
 import { Selection } from 'foldkit-remote'
 import { entity, many, one } from '../src/index.js'
 
 const users = pgTable('users', {
   id: uuid('id').primaryKey(),
   name: text('name').notNull(),
+  email: text('email').notNull(),
 })
 const projects = pgTable('projects', {
   id: uuid('id').primaryKey(),
@@ -41,3 +43,12 @@ Selection.make(ProjectBinding, {
 
 // @ts-expect-error `nope` is not a field of the table
 Selection.make(ProjectBinding, { nope: true })
+
+// `fields` overrides the derived field map, dropping `email` here.
+const SlimUser = entity('User', users, {
+  fields: { id: Schema.String, name: Schema.String },
+})
+Selection.make(SlimUser, { id: true, name: true })
+
+// @ts-expect-error the override dropped `email`
+Selection.make(SlimUser, { email: true })
