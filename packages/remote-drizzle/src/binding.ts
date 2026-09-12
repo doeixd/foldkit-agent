@@ -178,8 +178,14 @@ export const entity = <
   F & RelationFields<Relations> & ComputedFields<Computed>,
   Relations
 > => {
-  const columns = getTableColumns(table)
-  const relations = options?.relations ?? ({} as Relations)
+  // Field names arrive from the client, so the lookup maps have no prototype:
+  // a plain object would resolve `__proto__`/`constructor` to inherited members
+  // and misread them as a column or relation.
+  const columns = Object.assign(
+    Object.create(null) as Record<string, AnyColumn>,
+    getTableColumns(table),
+  )
+  const relations = Object.assign(Object.create(null) as Relations, options?.relations ?? {})
   const baseFields = (options?.fields ?? createSelectSchema(table).fields) as Record<
     string,
     Schema.Schema<unknown>
@@ -189,7 +195,7 @@ export const entity = <
     // A relation field would overwrite a same-named field in the schema, and
     // `selectColumns` would read a same-named column instead of the relation.
     // A collision is silently wrong either way, so refuse it up front.
-    if (baseFields[field] !== undefined) {
+    if (Object.hasOwn(baseFields, field)) {
       throw new Error(
         `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" collides with a field of the same name`,
       )
@@ -202,9 +208,12 @@ export const entity = <
       )
     }
   }
-  const computed: Record<string, ComputedConfig> = options?.computed ?? {}
+  const computed = Object.assign(
+    Object.create(null) as Record<string, ComputedConfig>,
+    options?.computed ?? {},
+  )
   for (const [field, config] of Object.entries(computed)) {
-    if (baseFields[field] !== undefined || relations[field] !== undefined) {
+    if (Object.hasOwn(baseFields, field) || relations[field] !== undefined) {
       throw new Error(
         `[foldkit-remote-drizzle] computed field "${field}" on entity "${name}" collides with a field or relation`,
       )

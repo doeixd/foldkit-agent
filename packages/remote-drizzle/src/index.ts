@@ -37,6 +37,14 @@ export * from './page.js'
 export * from './pagination.js'
 export * from './window.js'
 
+/**
+ * An own-property lookup. Request field names are client-supplied and relation
+ * names are developer-supplied, so an inherited member like `toString` must not
+ * satisfy the lookup.
+ */
+const pick = <T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
+  record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
+
 /** A whole id batch as one `IN (...)` — the normalized-store advantage. */
 export const whereIds = (binding: AnyEntityBinding, ids: ReadonlyArray<string>): SQL =>
   inArray(idColumn(binding), ids)
@@ -234,8 +242,8 @@ export const source = <P = unknown>(
           if (relation === undefined) continue
 
           // A principal-scoped filter applies only to collection relations.
-          const policyWhere = options?.policies?.[field]?.(context.principal)
-          const window = context.windows?.[field]
+          const policyWhere = pick(options?.policies, field)?.(context.principal)
+          const window = pick(context.windows, field)
           if (relation.kind === 'one') {
             if (window !== undefined) {
               return yield* new RemoteServerError({
@@ -272,6 +280,8 @@ export const source = <P = unknown>(
               })
             }
             const empty = { refs: [] as ReadonlyArray<string>, hasNext: false, hasPrevious: false }
+            // The ORDER BY is the same for every parent; only the keyset differs.
+            const traversalOrder = orderByTerms(order, shape.traversal)
             const pages = yield* Effect.forEach(
               parentKeys,
               parentKey =>
@@ -311,7 +321,7 @@ export const source = <P = unknown>(
                           { child: targetId, parent: relation.foreignKey },
                           {
                             where,
-                            orderBy: orderByTerms(order, shape.traversal),
+                            orderBy: traversalOrder,
                             limit: shape.pageSize + 1,
                           },
                         )
@@ -325,7 +335,7 @@ export const source = <P = unknown>(
                               table: relation.entity.table,
                               on: eq(relation.foreignColumn, targetId),
                             },
-                            orderBy: orderByTerms(order, shape.traversal),
+                            orderBy: traversalOrder,
                             limit: shape.pageSize + 1,
                           },
                         )
@@ -433,7 +443,7 @@ export const source = <P = unknown>(
             ),
           ]
           const counts = new Map<string, number>()
-          const countPolicy = options?.policies?.[computed.relation]?.(context.principal)
+          const countPolicy = pick(options?.policies, computed.relation)?.(context.principal)
           if (parentKeys.length > 0) {
             const count = sql<number>`count(*)`.mapWith(Number)
             const countRows =

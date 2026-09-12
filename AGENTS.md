@@ -123,6 +123,11 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
   setter, not `optic.replace`. Silent no-op otherwise.
 - **Untrusted field names are prototype keys.** `field in values` walks the
   prototype chain; filter with `Object.hasOwn` and accumulate with no prototype.
+  The Drizzle adapter's relation/computed/column maps are `Object.create(null)`,
+  and app-supplied policy/window lookups use `Object.hasOwn`, because
+  `RemoteServer` passes client-chosen `fields` straight to `source.read`; a
+  crafted `fields: ['__proto__']` otherwise misread `Object.prototype` as a
+  relation and crashed the read.
 - **Effect 4 `Rpc.make` streams via `stream: true`,** not `success:
   RpcSchema.Stream(...)`. Handlers come from `RpcGroup.toLayer`; the in-process
   test client is `RpcTest.makeClient(group)`.

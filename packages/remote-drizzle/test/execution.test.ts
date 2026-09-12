@@ -159,6 +159,20 @@ describe('RemoteDrizzle execution', () => {
     expect(result.failure.message).toBe('Database query failed')
   })
 
+  it('ignores inherited field names instead of crashing', async () => {
+    const { database, calls } = fakeDatabase([{ id: 'p1', name: 'P' }])
+
+    const records = await Effect.runPromise(
+      source(UserBinding)
+        .read({ ids: ['p1'], fields: ['__proto__', 'constructor'], principal: null })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    // An inherited name is not a field, so nothing is projectable and no query runs.
+    expect(records).toEqual([])
+    expect(calls).toEqual([])
+  })
+
   it('rewrites a selected relation to the ref key the client decodes', async () => {
     const { database } = fakeDatabase([{ id: 'p1', name: 'P', owner: 'u1' }])
     const read = source(ProjectBinding)
@@ -248,6 +262,40 @@ describe('RemoteDrizzle execution', () => {
     )
 
     expect(records[0]!.values.comments).toEqual([])
+  })
+
+  it('does not mistake an inherited name for a window', async () => {
+    const weird = entity('Post', posts, {
+      relations: {
+        comments: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+        toString: many(CommentBinding, { foreignKey: comments.postId, localKey: posts.id }),
+      },
+    })
+    const { database } = fakeDatabaseQueue([
+      [{ id: 'p1', comments: 'p1', toString: 'p1' }],
+      [{ child: 'c1', parent: 'p1' }],
+      [{ child: 'c2', parent: 'p1' }],
+    ])
+
+    const records = await Effect.runPromise(
+      source(weird)
+        .read({
+          ids: ['p1'],
+          fields: ['id', 'comments', 'toString'],
+          principal: null,
+          windows: { comments: { first: 1 } },
+        })
+        .pipe(Effect.provideService(DrizzleDatabase, database)),
+    )
+
+    // `comments` is windowed; `toString` has no window, so it stays an array
+    // even though `context.windows.toString` is inherited.
+    expect(records[0]!.values.comments).toEqual({
+      refs: ['Comment:c1'],
+      hasNext: false,
+      hasPrevious: false,
+    })
+    expect(records[0]!.values.toString).toEqual(['Comment:c2'])
   })
 
   it('loads a bounded page per parent when a first window is given', async () => {

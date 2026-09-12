@@ -5,7 +5,7 @@
  * did not ask for it, so `idColumn` is the single place that enforces it.
  */
 import type { AnyColumn } from 'drizzle-orm'
-import type { EntityBinding } from './binding.js'
+import type { AnyEntityBinding } from './binding.js'
 
 const missingId = (name: string): never => {
   throw new Error(
@@ -13,14 +13,11 @@ const missingId = (name: string): never => {
   )
 }
 
-export const idColumn = (binding: EntityBinding<any, any>): AnyColumn =>
+export const idColumn = (binding: AnyEntityBinding): AnyColumn =>
   binding.columns.id ?? missingId(binding.name)
 
 /** Whether at least one requested field maps to a column, relation, or computed value. */
-export const projectsAny = (
-  binding: EntityBinding<any, any>,
-  fields: Iterable<string>,
-): boolean => {
+export const projectsAny = (binding: AnyEntityBinding, fields: Iterable<string>): boolean => {
   for (const field of fields) {
     if (
       binding.columns[field] !== undefined ||
