@@ -148,10 +148,17 @@ export interface SyncDefinition<Message, Shared, MessageEncoded, SharedEncoded> 
 
 export interface Sync<Message, Shared> {
   readonly documentId: DocumentId
-  readonly normalizeOperation: (input: unknown) => Operation
-  readonly operationFrom: (input: unknown, documentId: DocumentId) => Operation
-  readonly committedFrom: (input: unknown, documentId: DocumentId) => CommittedOperation
-  readonly decodeExchange: (input: unknown) => Exchange<Shared>
+  /**
+   * Low-level wire codecs for adapters and the transport. Most applications use
+   * `journalContract` and `openReplica`; these are exposed for a custom
+   * transport or a server that must speak the operation envelope directly.
+   */
+  readonly codec: {
+    readonly normalizeOperation: (input: unknown) => Operation
+    readonly operationFrom: (input: unknown, documentId: DocumentId) => Operation
+    readonly committedFrom: (input: unknown, documentId: DocumentId) => CommittedOperation
+    readonly decodeExchange: (input: unknown) => Exchange<Shared>
+  }
   /** The codecs and pure reducer `foldkit-durable`'s `makeJournal` consumes. */
   readonly journalContract: () => JournalContract<Operation, Shared>
   readonly openReplica: (
@@ -600,10 +607,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
 
   return {
     documentId,
-    normalizeOperation,
-    operationFrom,
-    committedFrom,
-    decodeExchange,
+    codec: { normalizeOperation, operationFrom, committedFrom, decodeExchange },
     journalContract,
     openReplica,
   }

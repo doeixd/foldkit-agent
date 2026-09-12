@@ -122,29 +122,29 @@ const close = (replica: Replica<Message, Shared>): Promise<void> => Effect.runPr
 describe('the operation codec', () => {
   it('normalizes a valid operation and refuses a broken identity', () => {
     const valid = operation('a', 1, created('t'))
-    expect(Sync.normalizeOperation(valid)).toEqual(valid)
-    expect(() => Sync.normalizeOperation({ ...valid, opId: 'b:1' })).toThrow(
+    expect(Sync.codec.normalizeOperation(valid)).toEqual(valid)
+    expect(() => Sync.codec.normalizeOperation({ ...valid, opId: 'b:1' })).toThrow(
       'Invalid operation identity',
     )
     // A 1-based local sequence is refused by the codec before the identity check.
-    expect(() => Sync.normalizeOperation({ ...valid, localSequence: 0 })).toThrow()
+    expect(() => Sync.codec.normalizeOperation({ ...valid, localSequence: 0 })).toThrow()
   })
 
   it('refuses a Message the contract does not call durable', () => {
     expect(() =>
-      Sync.normalizeOperation(operation('a', 1, { _tag: 'SelectedTodo', id: 't' })),
+      Sync.codec.normalizeOperation(operation('a', 1, { _tag: 'SelectedTodo', id: 't' })),
     ).toThrow('Message is local-only')
   })
 
   it('checks the document only when the caller supplies one', () => {
     const foreign = { ...operation('a', 1, created('t')), documentId: 'other' }
-    expect(Sync.normalizeOperation(foreign)).toMatchObject({ documentId: 'other' })
-    expect(() => Sync.operationFrom(foreign, documentId('todos'))).toThrow('Wrong document')
+    expect(Sync.codec.normalizeOperation(foreign)).toMatchObject({ documentId: 'other' })
+    expect(() => Sync.codec.operationFrom(foreign, documentId('todos'))).toThrow('Wrong document')
   })
 
   it('refuses a committed operation without a positive server sequence', () => {
     expect(() =>
-      Sync.committedFrom(
+      Sync.codec.committedFrom(
         { ...operation('a', 1, created('t')), serverSequence: 0, actorId: 'owner' },
         documentId('todos'),
       ),

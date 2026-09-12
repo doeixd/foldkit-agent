@@ -272,6 +272,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `ReplicaState`, `Replica.cursor`, and `ReplicaStatus` use them.
 - **Distinct committed type.** Sync's committed operation is `CommittedOperation`,
   so importing it beside `foldkit-durable`'s `Committed` no longer collides.
+- **Grouped codec helpers.** `Sync.codec` collects `normalizeOperation`,
+  `operationFrom`, `committedFrom`, and `decodeExchange`; they are advanced
+  wire/transport helpers, not the application-facing surface.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.

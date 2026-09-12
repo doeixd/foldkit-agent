@@ -112,7 +112,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
 
   /** The durable record, flattened into the wire shape the protocol exchanges. */
   const toCommitted = (committed: DurableCommitted<Operation>, documentId: string): Committed =>
-    Sync.committedFrom(
+    Sync.codec.committedFrom(
       { ...committed.operation, serverSequence: committed.sequence, actorId: committed.actorId },
       toSyncDocumentId(documentId),
     )
@@ -209,7 +209,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
         const rejected: string[] = []
         const acknowledged: string[] = []
         for (const input of pending) {
-          const operation = Sync.normalizeOperation(input)
+          const operation = Sync.codec.normalizeOperation(input)
           if (!principal.canWrite) {
             rejected.push(operation.opId)
             continue

@@ -85,7 +85,7 @@ describe('Sync.make', () => {
     const contract = TodoSync.journalContract()
     expect(contract.empty()).toEqual({ todos: [] })
 
-    const operation = TodoSync.normalizeOperation({
+    const operation = TodoSync.codec.normalizeOperation({
       protocolVersion: 1,
       schemaVersion: 1,
       documentId: documentId('todos'),
