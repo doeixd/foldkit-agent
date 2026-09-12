@@ -45,6 +45,67 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)(jsdom@26.1.0)
 
+  examples/kitchen-sink:
+    dependencies:
+      drizzle-orm:
+        specifier: 1.0.0-rc.4
+        version: 1.0.0-rc.4(@effect/sql-pg@4.0.0-rc.112(effect@4.0.0-rc.112))(@effect/sql-sqlite-node@4.0.0-rc.112(effect@4.0.0-rc.112))(@electric-sql/pglite@0.5.8)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(effect@4.0.0-rc.112)(pg@8.23.0)(postgres@3.4.9)(valibot@1.5.0(typescript@5.9.3))(zod@4.6.1)
+      foldkit-agent:
+        specifier: workspace:*
+        version: link:../../packages/agent
+      foldkit-agent-a2a:
+        specifier: workspace:*
+        version: link:../../packages/agent-a2a
+      foldkit-agent-mcp:
+        specifier: workspace:*
+        version: link:../../packages/agent-mcp
+      foldkit-agent-native:
+        specifier: workspace:*
+        version: link:../../packages/agent-native
+      foldkit-agent-webmcp:
+        specifier: workspace:*
+        version: link:../../packages/agent-webmcp
+      foldkit-durable:
+        specifier: workspace:*
+        version: link:../../packages/durable
+      foldkit-mixins:
+        specifier: workspace:*
+        version: link:../../packages/mixins
+      foldkit-mixins-surface:
+        specifier: workspace:*
+        version: link:../../packages/mixins-surface
+      foldkit-mixins-ui:
+        specifier: workspace:*
+        version: link:../../packages/mixins-ui
+      foldkit-remote:
+        specifier: workspace:*
+        version: link:../../packages/remote
+      foldkit-remote-drizzle:
+        specifier: workspace:*
+        version: link:../../packages/remote-drizzle
+      foldkit-remote-server:
+        specifier: workspace:*
+        version: link:../../packages/remote-server
+      foldkit-surface:
+        specifier: workspace:*
+        version: link:../../packages/surface
+      foldkit-sync:
+        specifier: workspace:*
+        version: link:../../packages/sync
+    devDependencies:
+      '@foldkit/ui':
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)(foldkit@0.158.2(effect@4.0.0-rc.112))
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+      foldkit:
+        specifier: 0.158.2
+        version: 0.158.2(effect@4.0.0-rc.112)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   examples/mixins:
     dependencies:
       foldkit-mixins:
