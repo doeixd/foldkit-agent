@@ -57,7 +57,11 @@ describe('Requirement relations', () => {
         id: 'p1',
         fields: ['owner'],
         relations: {
-          owner: { entity: 'User', fields: [], relations: { team: { entity: 'Team', fields: ['id'] } } },
+          owner: {
+            entity: 'User',
+            fields: [],
+            relations: { team: { entity: 'Team', fields: ['id'] } },
+          },
         },
       }),
     })
@@ -84,9 +88,7 @@ describe('Requirement relations', () => {
         { entity: 'Project', id: 'p1', fields: ['name'] },
         { entity: 'Project', id: 'p1', fields: ['owner'], relations: { owner } },
       ]),
-    ).toEqual([
-      { entity: 'Project', id: 'p1', fields: ['name', 'owner'], relations: { owner } },
-    ])
+    ).toEqual([{ entity: 'Project', id: 'p1', fields: ['name', 'owner'], relations: { owner } }])
   })
 
   it('mergeRelations passes an absent side through', () => {

@@ -87,11 +87,16 @@ ProjectsByOwner(u7)   Project:p9  Project:p7  Project:p4  [gap]  Project:p1
 ## Requirements and observation
 
 A Surface's projection carries its remote **requirements** — entity, id, fields,
-and a pagination window per relation — as plain data. Reading is pure; it
-performs no I/O.
+a pagination window per relation, and through `relations`, the slice required of
+each relation's target — as plain data. Reading is pure; it performs no I/O. A
+nested selection (`owner: UserSummary`) reads through the ref in the store and
+assembles the target's fields; the store itself stays normalized.
 
 The planner diffs requirements against the store and returns only the missing or
-stale fields. It is deterministic and takes `now` as input (`PlanFreshness`)
+stale fields. A relation whose field is being fetched rides on the request, so
+the server resolves the graph in one read; a relation the store already holds is
+followed into concrete requirements for its targets. It is deterministic and
+takes `now` as input (`PlanFreshness`)
 rather than reading the clock, so the same store and requirements produce the same
 plan.
 

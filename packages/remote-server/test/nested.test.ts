@@ -171,7 +171,11 @@ describe('RemoteServer nested resolution', () => {
   it('does not follow a relation whose field the principal may not read', async () => {
     const locked = RemoteServer.make({
       entities: [
-        tableSource(Project, (_principal, fields) => fields.filter(field => field !== 'owner'), true),
+        tableSource(
+          Project,
+          (_principal, fields) => fields.filter(field => field !== 'owner'),
+          true,
+        ),
         tableSource(User),
       ],
     })

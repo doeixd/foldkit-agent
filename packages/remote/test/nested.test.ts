@@ -338,8 +338,7 @@ describe('observe resolves a graph in one read', () => {
           refsIn(values[field]).map(ref => ({
             entity: ref.entity,
             id: ref.id,
-            relations: (relation as { relations?: Record<string, { entity: string }> })
-              .relations,
+            relations: (relation as { relations?: Record<string, { entity: string }> }).relations,
           })),
         ),
       )

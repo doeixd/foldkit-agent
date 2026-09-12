@@ -59,6 +59,21 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote` (private)
 
+- **Recursive nested selections.** `Selection.make(Project, { owner:
+  UserSummary })` now reads through the ref into the target instead of failing
+  to decode: the field codec follows the entity field's shape (ref, nullable
+  ref, array of refs, or a page of refs through
+  `Selection.connection(Entity, window, nested)`, which reads a `Page` of
+  items), `Remote.select` assembles every level from the normalized store and
+  reads `Initial` until each is present, and the requirement carries the graph
+  (`relations`, on `foldkit-surface`'s `Requirement`, with `Requirement.merge`
+  and `Requirement.mergeRelations`). `plan` attaches a relation to a field
+  being fetched and follows a known relation's refs into concrete
+  requirements. `Entity.ref`/`refPage` codecs are annotated, and `refsIn` /
+  `relationShape` are exported. Breaking wire change: `ReadBatch` and
+  `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
+  `relations`, and a version mismatch fails with `RemoteProtocolError`
+  (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
 - **Request policies.** `RemotePolicy.cacheFirst` / `staleWhileRevalidate({
   maxAge })` / `networkOnly` on `Remote.observe` and `Remote.prefetch` decide
   what a field the store already holds means. A refreshing policy emits
@@ -101,6 +116,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   application.
 
 ### `foldkit-remote-server` (private)
+
+- **Nested resolution in one read.** `FoldkitRemoteRead` resolves a request's
+  `relations` level by level: each level's refs become the next level's
+  requests, a target the batch already read is not read again, every level is
+  authorized through its own entity source, and `HandlerOptions.maxDepth`
+  (default 8) caps traversal. Both read and live handlers refuse another
+  protocol version with `RemoteProtocolError` (#65, section 1).
 
 - **Live handler.** `RemoteServer.live` and the compiled `FoldkitRemoteLive`
   handler were missing; the server can now stream the client's live requirements.

@@ -57,9 +57,19 @@ const RenameProject = Mutation.make('RenameProject', {
 A relation is a reference codec (`Entity.ref(User)`), never an inline target
 schema, so a recursive relation such as `Node.parent: Entity.refTo('Node')` needs
 no inlining and the entity type stays finite. `Selection.make` infers the picked
-Struct; an unknown field is a compile error. Nesting a selection or a
-`Selection.connection(Entity, window)` adds the relation and its pagination
-window to the requirement.
+Struct; an unknown field is a compile error.
+
+A nested selection reads **through** a relation into its target, and takes the
+field's shape: a ref reads as the nested value, a nullable ref as the value or
+`null`, an array of refs as an array, and a page of refs
+(`Selection.connection(Entity, window, nested)`) as a `Page` of items;
+`Selection.connection(Entity, window)` alone reads the page of refs. The cache
+stays normalized (`Project:p1.owner` is a ref to `User:u7`), the requirement
+carries the whole graph (`relations`), and one read resolves it: the server
+follows each level's refs into the next, fetching a target several relations
+share once and authorizing every level through its own entity source. A
+selection on a scalar field throws at construction, and a recursive relation
+stays finite because the selection, not the entity, drives traversal.
 
 ### Declare the domain and embed its submodel
 
@@ -302,7 +312,8 @@ planner refetches.
 - **Entity identity and references.** `Entity.make`, typed `EntityRef`s, and
   reference codecs; `Entity.patch` types a patch against the entity's fields.
 - **Field selections.** `Selection.make` derives a Struct from the picked fields
-  and rejects unknown ones; nested selections and connection windows compose.
+  and rejects unknown ones; a nested selection reads through a relation, and
+  the requirement carries the graph so one read resolves it.
 - **The normalized store.** Values, per-field presence, staleness, and tombstones
   are tracked separately, so `undefined`, `null`, absent, stale, and not-found
   are distinct. Presence is never inferred from `value === undefined`.
@@ -334,7 +345,13 @@ planner refetches.
 ## Limits
 
 - The transport is not part of the package. Effect RPC is the wire; the
-  application supplies the client and server protocol layers.
+  application supplies the client and server protocol layers. `ReadBatch` and
+  `LiveRequirement` name `REMOTE_PROTOCOL_VERSION`; a server refuses another
+  version with `RemoteProtocolError`, so a wire change is a version bump, never
+  silent drift.
+- A nested connection's page is merged onto the stored page only when it is a
+  top-level requirement; "load more" through a nested relation refetches the
+  page.
 - The wire `LiveChange` union carries entity patches, deletes, and connection
   insert/remove/invalidate changes; the client adapter reconstructs a `LiveEvent`
   from it. `RemoteServer.live` serves them as a stream.

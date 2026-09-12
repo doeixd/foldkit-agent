@@ -19,7 +19,12 @@ body {
   place-items: start center;
   padding: 4rem 1rem;
   background: #f6f7f9;
-  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font:
+    16px/1.5 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {

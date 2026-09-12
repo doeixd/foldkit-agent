@@ -18,7 +18,7 @@ pnpm --filter foldkit-kitchen-sink-example demo
 | Observation | `foldkit-surface` | One `Surface.application` embeds the Remote submodel beside the client-owned `notes` slice; `BoardSurface` projects both. |
 | Server-derived state | `foldkit-remote` | The normalized cache submodel: `Remote.prefetch`, `Remote.mutateInto`, `Remote.query`, `Remote.inspect`. |
 | Server | `foldkit-remote-server` | `RemoteServer` sources compiled to the `RemoteRpc` handlers, served in-process. |
-| Server SQL | `foldkit-remote-drizzle` | The `Project` entity is a Drizzle binding over an in-memory SQLite table; reads and the query compile to SQL. |
+| Server SQL | `foldkit-remote-drizzle` | `Project` and `User` are Drizzle bindings over in-memory SQLite tables; the nested `owner` selection, the reads, and the query compile to SQL. |
 | Client-owned state | `foldkit-durable` | A `makeJournal` over the Sync contract orders the `notes` operations. |
 | Replication | `foldkit-sync` | A replica, an in-memory `Storage`, and `replica.start` exchanging through a `TransportClient`. |
 | Agent | `foldkit-agent` | One contract projected from the same Model and Messages. |
@@ -35,6 +35,7 @@ pnpm --filter foldkit-kitchen-sink-example demo
 ```
 surface: the board Surface projects the project and the notes
 after fetch (Drizzle SQLite): Ready Apollo      # remote read compiled to SQL
+nested selection (one read): owner Ada          # owner resolved through its ref
 mutation: {"id":"p1"} -> Ready Apollo II        # Remote.mutateInto reconciles
 query connection: Project:p2, Project:p1        # Remote.query -> a connection
 replicated (durable journal): First note        # durable + sync reconciled

@@ -76,6 +76,7 @@ type Projected = {
     readonly id: string
     readonly name: string
     readonly status: string
+    readonly owner: { readonly name: string }
   }>
   readonly notes: ReadonlyArray<{ readonly id: string; readonly body: string }>
   readonly selectedNoteId: string | null
@@ -105,6 +106,10 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   )
   const loaded = withStore(App.initial, store)
   say(`after fetch (Drizzle SQLite): ${describeData(projection.read(loaded))}`)
+  const fetched = projection.read(loaded)
+  say(
+    `nested selection (one read): owner ${fetched._tag === 'Ready' ? fetched.value.owner.name : fetched._tag}`,
+  )
 
   const renamed = await Effect.runPromise(
     Remote.mutateInto(

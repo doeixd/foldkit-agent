@@ -29,6 +29,7 @@ import {
   databaseLayer,
   entity,
   normalize,
+  one,
   query,
   selectColumns,
   source,
@@ -59,15 +60,22 @@ import {
 
 export const sqlite = new DatabaseSync(':memory:')
 sqlite.exec(`
+  CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL);
   CREATE TABLE projects (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, status TEXT NOT NULL
   );
+  INSERT INTO users (id, name) VALUES ('u1', 'Ada');
   INSERT INTO projects (id, name, owner_id, status) VALUES
     ('p1', 'Apollo', 'u1', 'active'),
     ('p2', 'Borealis', 'u1', 'archived');
 `)
 
 export const db = drizzle({ client: sqlite })
+
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+})
 
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
@@ -77,9 +85,23 @@ export const projects = sqliteTable('projects', {
 })
 
 /** The binding is the Remote `EntityDescriptor`; no second field declaration. */
-export const Project = entity('Project', projects)
+export const User = entity('User', users)
 
-export const ProjectSummary = Selection.make(Project, { id: true, name: true, status: true })
+/** `owner` is a relation: the entity field is a ref, and the read resolves it. */
+export const Project = entity('Project', projects, {
+  relations: { owner: one(User, { field: projects.ownerId }) },
+})
+
+/**
+ * A nested selection: the Surface reads the owner's name through the ref, and
+ * one `FoldkitRemoteRead` resolves both entities.
+ */
+export const ProjectSummary = Selection.make(Project, {
+  id: true,
+  name: true,
+  status: true,
+  owner: Selection.make(User, { name: true }),
+})
 
 export const RenameProject = Mutation.make('RenameProject', {
   Input: Schema.Struct({ id: Schema.String, name: Schema.String }),
@@ -114,7 +136,7 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 })
 
 export const Data = Remote.make({
-  entities: [Project],
+  entities: [User, Project],
   mutations: [RenameProject],
   queries: [ProjectsByOwner],
 })
@@ -277,7 +299,7 @@ export const openReplica = KitchenSync.openReplica(replicaId('kitchen-a'), memor
  */
 export const serverClient = (principal: string): Layer.Layer<RemoteClient> => {
   const server = RemoteServer.make({
-    entities: [source(Project)],
+    entities: [source(User), source(Project)],
     mutations: [RenameProjectSource],
     queries: [ProjectsByOwnerSource],
   })

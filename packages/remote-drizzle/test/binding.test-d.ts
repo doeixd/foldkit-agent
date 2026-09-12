@@ -1,6 +1,6 @@
 import { pgTable, text, uuid } from 'drizzle-orm/pg-core'
 import { Schema } from 'effect'
-import { Remote, Selection } from 'foldkit-remote'
+import { Remote, Selection, type EntityRef } from 'foldkit-remote'
 import { entity, many, one } from '../src/index.js'
 
 const users = pgTable('users', {
@@ -67,3 +67,15 @@ const RefinedProject = entity('Project', projects, {
   relations: { owner: one(UserBinding, { field: projects.ownerId, nullable: true }) },
 })
 Selection.make(RefinedProject, { owner: true })
+
+// A `one` relation's ref is nullable only when declared so.
+const teams = pgTable('teams', { id: uuid('id').primaryKey(), leadId: uuid('lead_id').notNull() })
+const TeamBinding = entity('Team', teams, {
+  relations: { lead: one(UserBinding, { field: teams.leadId }) },
+})
+type TeamLead = Schema.Schema.Type<(typeof TeamBinding)['fields']['lead']>
+const _lead: EntityRef<'User', any> = null as unknown as TeamLead
+type ProjectOwner = Schema.Schema.Type<(typeof ProjectBinding)['fields']['owner']>
+const _owner: EntityRef<'User', any> | null = null as unknown as ProjectOwner
+// @ts-expect-error a nullable ref is not assignable to a plain ref
+const _ownerStrict: EntityRef<'User', any> = null as unknown as ProjectOwner
