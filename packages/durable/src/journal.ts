@@ -18,11 +18,15 @@ import { SqlClient } from 'effect/unstable/sql'
 import type { Codec } from './codec.js'
 import {
   actorId as toActorId,
+  cursor as toCursor,
   documentId as toDocumentId,
   opId as toOpId,
+  sequence as toSequence,
   type ActorId,
+  type Cursor,
   type DocumentId,
   type OpId,
+  type Sequence,
 } from './ids.js'
 import {
   CompactedCursorError,
@@ -50,7 +54,7 @@ export const journalMetrics = {
 export interface Committed<Operation> {
   readonly operation: Operation
   readonly opId: OpId
-  readonly sequence: number
+  readonly sequence: Sequence
   readonly actorId: ActorId
 }
 
@@ -119,19 +123,19 @@ export type AppendResult<Operation> =
   | {
       readonly _tag: 'AlreadyCommitted'
       readonly opId: OpId
-      readonly sequence: number
+      readonly sequence: Sequence
       readonly actorId: ActorId
     }
 
 export interface Journal<Operation, Snapshot, Principal, OperationEncoded = unknown> {
   readonly load: (
     key: DocumentId,
-  ) => Effect.Effect<{ readonly snapshot: Snapshot; readonly cursor: number }, JournalError>
+  ) => Effect.Effect<{ readonly snapshot: Snapshot; readonly cursor: Cursor }, JournalError>
   /** The highest sequence whose payload has been compacted away; `0` if none. */
-  readonly floor: (key: DocumentId) => Effect.Effect<number, JournalError>
+  readonly floor: (key: DocumentId) => Effect.Effect<Sequence, JournalError>
   readonly read: (
     key: DocumentId,
-    after: number,
+    after: Cursor,
   ) => Effect.Effect<
     ReadonlyArray<Committed<Operation>>,
     InvalidCursorError | CompactedCursorError | JournalError
@@ -156,7 +160,7 @@ export interface Journal<Operation, Snapshot, Principal, OperationEncoded = unkn
   ) => Effect.Effect<ReadonlyArray<AppendResult<Operation>>, AppendError>
   readonly compact: (
     key: DocumentId,
-    through: number,
+    through: Sequence,
   ) => Effect.Effect<void, InvalidCompactionError | JournalError>
   /** The document keys that have a snapshot or a committed operation. */
   readonly keys: () => Effect.Effect<ReadonlyArray<DocumentId>, JournalError>
@@ -373,12 +377,12 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
 ): Journal<Operation, Snapshot, Principal, OperationEncoded> => {
   type Shape = Journal<Operation, Snapshot, Principal, OperationEncoded>
 
-  const decodeSnapshot = (row: DocumentRow | undefined): { snapshot: Snapshot; cursor: number } =>
+  const decodeSnapshot = (row: DocumentRow | undefined): { snapshot: Snapshot; cursor: Cursor } =>
     row === undefined
-      ? { snapshot: options.empty(), cursor: 0 }
+      ? { snapshot: options.empty(), cursor: toCursor(0) }
       : {
           snapshot: options.snapshot.decode(JSON.parse(String(row.snapshot))),
-          cursor: Number(row.cursor),
+          cursor: toCursor(Number(row.cursor)),
         }
 
   const load: Shape['load'] = Effect.fn('Journal.load')(function* (key: DocumentId) {
@@ -400,10 +404,10 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
     }>`SELECT compact_before FROM documents WHERE key = ${key}`.pipe(
       Effect.catchTag('SqlError', asJournalError('Could not read the compaction floor')),
     )
-    return rows[0]?.compact_before ?? 0
+    return toSequence(rows[0]?.compact_before ?? 0)
   })
 
-  const read: Shape['read'] = Effect.fn('Journal.read')(function* (key: DocumentId, after: number) {
+  const read: Shape['read'] = Effect.fn('Journal.read')(function* (key: DocumentId, after: Cursor) {
     yield* Effect.annotateCurrentSpan({ key, after })
     const documents = yield* sql<{
       readonly cursor: number
@@ -411,7 +415,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
     }>`SELECT cursor, compact_before FROM documents WHERE key = ${key}`.pipe(
       Effect.catchTag('SqlError', asJournalError('Could not read the log')),
     )
-    const cursor = documents[0]?.cursor ?? 0
+    const cursor = toCursor(documents[0]?.cursor ?? 0)
     if (!Number.isSafeInteger(after) || after < 0 || after > cursor)
       return yield* Effect.fail(
         new InvalidCursorError({
@@ -422,7 +426,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
       )
     // Compaction removes the payloads a cursor below the floor would need. Fail
     // closed rather than returning a tail that silently starts late.
-    const floor = documents[0]?.compact_before ?? 0
+    const floor = toSequence(documents[0]?.compact_before ?? 0)
     if (after < floor)
       return yield* Effect.fail(
         new CompactedCursorError({
@@ -441,7 +445,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         rows.map(row => ({
           operation: options.operation.decode(JSON.parse(String(row.input))),
           opId: toOpId(String(row.op_id)),
-          sequence: Number(row.sequence),
+          sequence: toSequence(Number(row.sequence)),
           actorId: toActorId(String(row.actor_id)),
         })),
       catch: cause => journalError('Could not read the log', cause),
@@ -499,7 +503,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         yield* sql<OperationRow>`SELECT actor_id, op_id, sequence, input, payload_hash FROM operations WHERE key = ${key} AND op_id = ${opId}`
       if (prior.length > 0) {
         const row = prior[0]!
-        const sequence = Number(row.sequence)
+        const sequence = toSequence(Number(row.sequence))
         const priorActor = toActorId(String(row.actor_id))
         if (row.input !== null) {
           // The payload is retained, so the committed operation is canonical.
@@ -554,7 +558,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         try: () => options.reduce(snapshot, operation),
         catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
       })
-      const sequence = cursor + 1
+      const sequence = toSequence(cursor + 1)
       const encodedSnapshot = yield* Effect.try({
         try: () => JSON.stringify(options.snapshot.encode(reduced)),
         catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
@@ -620,7 +624,7 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
 
   const compact: Shape['compact'] = Effect.fn('Journal.compact')(function* (
     key: DocumentId,
-    through: number,
+    through: Sequence,
   ) {
     yield* Effect.annotateCurrentSpan({ key, through })
     yield* Effect.gen(function* () {
@@ -628,8 +632,8 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         readonly cursor: number
         readonly compact_before: number
       }>`SELECT cursor, compact_before FROM documents WHERE key = ${key}`
-      const cursor = documents[0]?.cursor ?? 0
-      const compactBefore = documents[0]?.compact_before ?? 0
+      const cursor = toCursor(documents[0]?.cursor ?? 0)
+      const compactBefore = toSequence(documents[0]?.compact_before ?? 0)
       if (!Number.isSafeInteger(through) || through < compactBefore || through > cursor)
         return yield* Effect.fail(
           new InvalidCompactionError({

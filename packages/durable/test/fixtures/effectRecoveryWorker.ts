@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { Effect } from 'effect'
-import { makeJournal } from '../../src/index.js'
+import { cursor, makeJournal } from '../../src/index.js'
 import { document, effectKey, journalOptions, operation } from './recoveryModel.js'
 
 const [journalFile, providerFile, phase, policy] = process.argv.slice(2)
@@ -46,7 +46,7 @@ const results = await Effect.runPromise(
       crashAt('after-append')
       const results = []
       // Startup discovers even an intent whose runEffect call never started.
-      for (const committed of yield* journal.read(document, 0)) {
+      for (const committed of yield* journal.read(document, cursor(0))) {
         const key = effectKey(committed.operation)
         results.push(
           yield* journal.runEffect(

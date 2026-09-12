@@ -3,10 +3,12 @@ import { IDBFactory } from 'fake-indexeddb'
 import { defineMessageUnion } from 'foldkit/message'
 import {
   actorId as toActorId,
+  cursor as toCursor,
   documentId as toDocumentId,
   makeJournal,
   OperationRejectedError,
   opId as toOpId,
+  sequence as toSequence,
 } from 'foldkit-durable'
 import {
   defineSync,
@@ -87,9 +89,10 @@ const openJournal = () => {
       Effect.runSync(durable.append(toDocumentId(key), input, principal)),
     floor: (key: string) => Effect.runSync(durable.floor(toDocumentId(key))),
     load: (key: string) => Effect.runSync(durable.load(toDocumentId(key))),
-    read: (key: string, after: number) => Effect.runSync(durable.read(toDocumentId(key), after)),
+    read: (key: string, after: number) =>
+      Effect.runSync(durable.read(toDocumentId(key), toCursor(after))),
     compact: (key: string, through: number) =>
-      Effect.runSync(durable.compact(toDocumentId(key), through)),
+      Effect.runSync(durable.compact(toDocumentId(key), toSequence(through))),
     close: () => Effect.runSync(Scope.close(scope, Exit.void)),
   }
   const transport = (canWrite = true): TransportClient => ({

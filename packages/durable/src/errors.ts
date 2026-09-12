@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { OpId } from './ids.js'
+import { Cursor, OpId, Sequence } from './ids.js'
 
 /** A storage or database failure, not something the caller did. */
 export class JournalError extends Schema.TaggedError<JournalError>()('JournalError', {
@@ -30,8 +30,8 @@ export class InvalidOperationError extends Schema.TaggedError<InvalidOperationEr
 export class InvalidCursorError extends Schema.TaggedError<InvalidCursorError>()(
   'InvalidCursorError',
   {
-    after: Schema.Number,
-    cursor: Schema.Number,
+    after: Cursor,
+    cursor: Cursor,
     message: Schema.String,
   },
 ) {}
@@ -40,9 +40,9 @@ export class InvalidCursorError extends Schema.TaggedError<InvalidCursorError>()
 export class CompactedCursorError extends Schema.TaggedError<CompactedCursorError>()(
   'CompactedCursorError',
   {
-    after: Schema.Number,
-    floor: Schema.Number,
-    cursor: Schema.Number,
+    after: Cursor,
+    floor: Sequence,
+    cursor: Cursor,
     message: Schema.String,
   },
 ) {}
@@ -51,9 +51,9 @@ export class CompactedCursorError extends Schema.TaggedError<CompactedCursorErro
 export class InvalidCompactionError extends Schema.TaggedError<InvalidCompactionError>()(
   'InvalidCompactionError',
   {
-    through: Schema.Number,
-    cursor: Schema.Number,
-    floor: Schema.Number,
+    through: Sequence,
+    cursor: Cursor,
+    floor: Sequence,
     message: Schema.String,
   },
 ) {}

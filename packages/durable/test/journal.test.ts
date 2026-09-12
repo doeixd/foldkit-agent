@@ -7,11 +7,13 @@ import { describe, expect, it } from 'vitest'
 import {
   JournalService,
   actorId,
+  cursor,
   documentId,
   journalMetrics,
   makeJournal,
   makeJournalLayer,
   opId,
+  sequence,
   type AppendResult,
   type Codec,
   type Committed,
@@ -129,12 +131,12 @@ describe('a durable journal', () => {
       yield* journal.append(todos, add(1, 'a'), principal)
       yield* journal.append(todos, add(2, 'b'), principal)
 
-      const all = yield* journal.read(todos, 0)
+      const all = yield* journal.read(todos, cursor(0))
       expect(all.map(committed => [committed.operation.opId, committed.sequence])).toEqual([
         ['a:1', 1],
         ['a:2', 2],
       ])
-      const tail = yield* journal.read(todos, 1)
+      const tail = yield* journal.read(todos, cursor(1))
       expect(tail.map(committed => committed.operation.opId)).toEqual(['a:2'])
       expect(yield* journal.load(todos)).toEqual({
         snapshot: { ids: ['a', 'b'] },
@@ -160,7 +162,7 @@ describe('a durable journal', () => {
       expect(first.snapshot).not.toBe(second.snapshot)
 
       yield* journal.append(todos, add(1, 'a'), principal)
-      expect(yield* journal.read(todos, 1)).toEqual([])
+      expect(yield* journal.read(todos, cursor(1))).toEqual([])
     }))
 
   it('is idempotent by operation identity and rejects a conflicting reuse', () =>
@@ -277,21 +279,21 @@ describe('a durable journal', () => {
       const before = yield* journal.load(todos)
       expect(yield* journal.floor(todos)).toBe(0)
 
-      yield* journal.compact(todos, 2)
+      yield* journal.compact(todos, sequence(2))
       expect(yield* journal.floor(todos)).toBe(2)
       // `read` fails closed below the floor instead of returning a late tail.
-      expect(yield* Effect.result(journal.read(todos, 0))).toMatchObject({
+      expect(yield* Effect.result(journal.read(todos, cursor(0)))).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'CompactedCursorError', after: 0, floor: 2, cursor: 3 },
       })
-      expect(yield* Effect.result(journal.read(todos, 1))).toMatchObject({
+      expect(yield* Effect.result(journal.read(todos, cursor(1)))).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'CompactedCursorError' },
       })
-      expect((yield* journal.read(todos, 2)).map(committed => committed.operation.opId)).toEqual([
-        'a:3',
-      ])
-      expect(yield* journal.read(todos, 3)).toEqual([])
+      expect(
+        (yield* journal.read(todos, cursor(2))).map(committed => committed.operation.opId),
+      ).toEqual(['a:3'])
+      expect(yield* journal.read(todos, cursor(3))).toEqual([])
       expect(yield* journal.load(todos)).toEqual(before)
 
       // A retransmission of a compacted operation is answered from its identity,
@@ -307,7 +309,7 @@ describe('a durable journal', () => {
   it('refuses a compacted identity reused with different data or actor', () =>
     withJournal(function* (journal) {
       yield* journal.append(todos, add(1, 'a'), principal)
-      yield* journal.compact(todos, 1)
+      yield* journal.compact(todos, sequence(1))
 
       // Same opId, different payload: before the payload hash this was accepted
       // as an idempotent repeat and returned the uncommitted payload.
@@ -330,10 +332,10 @@ describe('a durable journal', () => {
   it('refuses a compaction cursor that moves backwards or past the snapshot', () =>
     withJournal(function* (journal) {
       yield* journal.append(todos, add(1), principal)
-      const past = yield* Effect.result(journal.compact(todos, 2))
+      const past = yield* Effect.result(journal.compact(todos, sequence(2)))
       expect(past).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidCompactionError' } })
-      yield* journal.compact(todos, 1)
-      const backwards = yield* Effect.result(journal.compact(todos, 0))
+      yield* journal.compact(todos, sequence(1))
+      const backwards = yield* Effect.result(journal.compact(todos, sequence(0)))
       expect(backwards).toMatchObject({
         _tag: 'Failure',
         failure: { _tag: 'InvalidCompactionError' },
@@ -343,7 +345,7 @@ describe('a durable journal', () => {
   it('refuses a read cursor past the snapshot', () =>
     withJournal(function* (journal) {
       yield* journal.append(todos, add(1), principal)
-      const result = yield* Effect.result(journal.read(todos, 2))
+      const result = yield* Effect.result(journal.read(todos, cursor(2)))
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidCursorError' } })
     }))
 
@@ -377,7 +379,7 @@ describe('a durable journal', () => {
       await withJournal(
         function* (journal) {
           expect(
-            (yield* journal.read(todos, 0)).map(committed => [
+            (yield* journal.read(todos, cursor(0))).map(committed => [
               committed.operation.opId,
               committed.sequence,
             ]),
@@ -535,14 +537,14 @@ describe('the journal surface', () => {
     withJournal(function* (journal) {
       const committed = appendCommitted(yield* journal.append(todos, add(1, 'a'), principal))
       expect(committed.opId).toBe('a:1')
-      expect((yield* journal.read(todos, 0))[0]?.opId).toBe('a:1')
+      expect((yield* journal.read(todos, cursor(0)))[0]?.opId).toBe('a:1')
     }))
 
   it('appends a batch in order in one transaction', () =>
     withJournal(function* (journal) {
       const results = yield* journal.appendAll(todos, [add(1, 'a'), add(2, 'b')], principal)
       expect(results.map(result => result._tag)).toEqual(['Committed', 'Committed'])
-      expect((yield* journal.read(todos, 0)).map(row => row.sequence)).toEqual([1, 2])
+      expect((yield* journal.read(todos, cursor(0))).map(row => row.sequence)).toEqual([1, 2])
       expect((yield* journal.load(todos)).snapshot).toEqual({ ids: ['a', 'b'] })
     }))
 
@@ -554,7 +556,7 @@ describe('the journal surface', () => {
         )
         expect(result._tag).toBe('Failure')
         expect((yield* journal.load(todos)).cursor).toBe(0)
-        expect(yield* journal.read(todos, 0)).toEqual([])
+        expect(yield* journal.read(todos, cursor(0))).toEqual([])
       },
       {
         validate: ({ operation }) => {

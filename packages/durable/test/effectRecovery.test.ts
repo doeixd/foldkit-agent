@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Effect, Option } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { makeJournal } from '../src/index.js'
+import { cursor, makeJournal } from '../src/index.js'
 import { document, effectKey, journalOptions, operation } from './fixtures/recoveryModel.js'
 
 // Vite 5's builtin list predates node:sqlite; let Node resolve it directly.
@@ -110,7 +110,7 @@ describe('effect recovery after process termination', () => {
           Effect.scoped(
             Effect.gen(function* () {
               const journal = yield* makeJournal(journalOptions(file))
-              expect(yield* journal.read(document, 0)).toEqual([
+              expect(yield* journal.read(document, cursor(0))).toEqual([
                 { operation, opId: operation, sequence: 1, actorId: 'owner' },
               ])
               const record = Option.getOrElse(yield* journal.effect(key), () => undefined)

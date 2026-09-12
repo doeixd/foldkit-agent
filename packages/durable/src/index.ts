@@ -7,7 +7,18 @@
  * replay would produce.
  */
 export type { Codec } from './codec.js'
-export { ActorId, DocumentId, OpId, actorId, documentId, opId } from './ids.js'
+export {
+  ActorId,
+  Cursor,
+  DocumentId,
+  OpId,
+  Sequence,
+  actorId,
+  cursor,
+  documentId,
+  opId,
+  sequence,
+} from './ids.js'
 export {
   CompactedCursorError,
   IdentityConflictError,

@@ -1,9 +1,11 @@
 import { Effect, Exit, Fiber, Scope, Stream } from 'effect'
 import {
   actorId as toActorId,
+  cursor as toCursor,
   documentId as toDocumentId,
   makeJournal,
   opId as toOpId,
+  sequence as toSequence,
   type AppendResult as DurableAppendResult,
   type Committed as DurableCommitted,
   type Journal as DurableJournal,
@@ -161,7 +163,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
   }
 
   const read = (documentId: string, after: number): ReadonlyArray<Committed> =>
-    Effect.runSync(durable.read(toDocumentId(documentId), after)).map(committed =>
+    Effect.runSync(durable.read(toDocumentId(documentId), toCursor(after))).map(committed =>
       toCommitted(committed, documentId),
     )
 
@@ -189,7 +191,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
     settle,
     read,
     compact: (documentId, through) =>
-      Effect.runSync(durable.compact(toDocumentId(documentId), through)),
+      Effect.runSync(durable.compact(toDocumentId(documentId), toSequence(through))),
     snapshot,
     // The agent host still registers a callback; the journal's subscription is
     // a Stream, so this is the edge where it is bridged back.
@@ -237,7 +239,7 @@ export const openJournal = (path: string, policy: JournalPolicy = {}): Journal =
         // read decides that itself, so a compaction cannot slip between the
         // floor check and the read and produce a gapped stream.
         const caught = Effect.runSync(
-          durable.read(toDocumentId(principal.documentId), cursor).pipe(
+          durable.read(toDocumentId(principal.documentId), toCursor(cursor)).pipe(
             Effect.map(rows => ({ rows })),
             Effect.catchTag('CompactedCursorError', () =>
               Effect.succeed({ checkpoint: true as const }),

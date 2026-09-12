@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, Exit, Scope } from 'effect'
-import { actorId, documentId, makeJournal, opId } from '../src/index.js'
+import { actorId, documentId, makeJournal, opId, sequence } from '../src/index.js'
 
 interface Operation {
   readonly opId: string
@@ -48,7 +48,7 @@ const elapsed = performance.now() - started
 
 // Compaction drops payloads but keeps one identity row per operation, so the
 // file does not shrink; this separates "payload bytes" from "identity bytes".
-Effect.runSync(journal.compact(documentId('bench'), operations))
+Effect.runSync(journal.compact(documentId('bench'), sequence(operations)))
 const compacted = size()
 const heap = process.memoryUsage()
 
