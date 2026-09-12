@@ -3070,7 +3070,6 @@ packages/mixins/
 ├ tsconfig.json
 ├ tsdown.config.ts
 ├ README.md
-├ DESIGN.md
 ├ LICENSE
 │
 ├ src/
@@ -3230,7 +3229,7 @@ SSR serialization of Style/Class combinations
 
 Do not base the resolver on assumptions.
 
-Write conclusions into `packages/mixins/DESIGN.md`.
+Write conclusions into `docs/design/mixins-DESIGN.md`.
 
 No production abstractions yet.
 

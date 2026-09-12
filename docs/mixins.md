@@ -145,5 +145,5 @@ of the component API, not of the mixin model.
 ## See also
 
 - [`packages/mixins/README.md`](../packages/mixins/README.md) — the API.
-- [`packages/mixins/DESIGN.md`](../packages/mixins/DESIGN.md) — substrate probes
+- [`docs/design/mixins-DESIGN.md`](./design/mixins-DESIGN.md) — substrate probes
   and implementation decisions.

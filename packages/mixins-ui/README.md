@@ -60,4 +60,4 @@ contribution to every item while each item's base keeps its own event ownership.
 expose no attribute bundles, so there is nothing to resolve against; they are not
 adapted.
 
-Private while the API is settling (`0.0.0`). See [DESIGN.md](../mixins/DESIGN.md).
+Private while the API is settling (`0.0.0`). See [DESIGN.md](../../docs/design/mixins-DESIGN.md).

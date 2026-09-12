@@ -1,9 +1,9 @@
 # Revision Plan — Foldkit Plus reorganization around Surface and Remote
 
 **Status:** authoritative plan and handoff. Supersedes
-`packages/surface/DESIGN_BRAINSTORM.md`, `packages/surface/BACKBONE.md`,
-`packages/surface/REMOTE.md`, and `packages/surface/DRIZZLE.md` wherever they
-conflict; those remain for provenance. This document is written to be executable
+`docs/design/surface-DESIGN_BRAINSTORM.md`, `docs/design/surface-BACKBONE.md`,
+`docs/design/surface-REMOTE.md`, and `docs/design/surface-DRIZZLE.md` wherever
+they conflict; those remain for provenance. This document is written to be executable
 by someone with **no prior context**.
 
 **One-line thesis:**
@@ -42,8 +42,9 @@ packages/
   mixins*/          foldkit-mixins*  (private)
 examples/
   todo/  sync/  mixins/
-docs/                 replication.md, sync-dx.md, sync-runtime-binding.md, benchmarks.md
-REVISION_PLAN.md      this file
+docs/                 guides (replication.md, sync-dx.md, sync-runtime-binding.md, ...)
+  design/             design docs: REVISION_PLAN.md, SLOT_MIXIN_STYLE_BRAINSTORM.md,
+                      agent-DESIGN.md, mixins-DESIGN.md, remote-drizzle-DESIGN.md, surface-*.md
 PLAN.md               git-ignored scratch tracker
 AGENTS.md             working agreements and a trap list — read it
 ```
@@ -102,7 +103,7 @@ pnpm bench           # sync bench + durable storage script (not a gate)
 
 ### 1.5 Git / coordination hazards
 
-- A concurrent session has been editing `packages/agent/DESIGN.md` and
+- A concurrent session has been editing `docs/design/agent-DESIGN.md` and
   `docs/sync-dx.md` in this same working tree.
 - **Never `git add -A`.** Stage only the files you own. A previous `git add -A`
   swept another session's in-progress edit into an unrelated commit.
@@ -226,7 +227,7 @@ Relevant module files:
 
 **Correction from the source docs:** there is **no browser IndexedDB
 `KeyValueStore` layer in the installed `effect`.** `BrowserKeyValueStore.layerIndexedDb`
-from `REMOTE.md` §47 is not available here. Source it from an Effect platform
+from `docs/design/surface-REMOTE.md` §47 is not available here. Source it from an Effect platform
 package (`@effect/platform-browser` or similar) if one exists for this rc, or
 author a small IndexedDB `KeyValueStore` layer. Until then, Remote cache
 persistence in the browser is an open dependency (§8.9, §17).
@@ -275,7 +276,7 @@ persistence in the browser is an open dependency (§8.9, §17).
 
 ### 3.5 Drizzle (pinned and probed)
 
-`packages/surface/DRIZZLE.md` builds on two Drizzle features: an Effect-native
+`docs/design/surface-DRIZZLE.md` builds on two Drizzle features: an Effect-native
 PostgreSQL driver (`drizzle-orm/effect-postgres`, over `@effect/sql-pg`) and
 Effect Schema derivation from tables (`drizzle-orm/effect-schema`).
 
@@ -653,7 +654,7 @@ const Project = Entity.make(
 )
 ```
 
-**Decision:** the `Schema.Struct` form is canonical. `REMOTE.md` §6's
+**Decision:** the `Schema.Struct` form is canonical. `docs/design/surface-REMOTE.md` §6's
 `Entity.make("User", { id, fields })` is superseded — it reduces Schema, which the
 thesis forbids.
 
@@ -1622,7 +1623,7 @@ const journal = yield* makeJournal({
 
 | Topic | Decision | Reason |
 | --- | --- | --- |
-| `Entity.make` shape | `Entity.make(name, Schema.Struct({...}))` | Brainstorm supersedes `REMOTE.md` §6; never reduce Schema. |
+| `Entity.make` shape | `Entity.make(name, Schema.Struct({...}))` | Brainstorm supersedes `docs/design/surface-REMOTE.md` §6; never reduce Schema. |
 | Entity field namespace | `User.fields === User.schema.fields` | No second namespace. |
 | Entity root constraint | `Schema.Struct` with an `id` field | Buys field lookup, partial selection, patch schema, ID extraction, inference. |
 | Relations | `Entity.ref` as a Schema with distinct decoded/encoded forms | Reuses Schema's codec boundary; no parallel relation codec. |
@@ -2194,7 +2195,7 @@ now uses both, replacing its hand-written replica and journal contracts
 (`717a28e`); the Foldkit runtime-binding gap and the proposed upstream hook are
 documented in `docs/sync-runtime-binding.md` (`fdd9789`, with the concrete
 admission-hook proposal in `c3d6c91`); the reference-based
-selection from `packages/agent/DESIGN.md` started as `Projection.pick` over keyed,
+selection from `docs/design/agent-DESIGN.md` started as `Projection.pick` over keyed,
 owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
 landed next (`8daf52b`); typed Message subsets landed as `MessageSet.make`
 (`fbf5368`); the derivation landed as `Sync.forApplication` (`f779fc9`);
@@ -2219,7 +2220,7 @@ naming, and Message claims. Deferred from #60: the shared host seam (section 5,
 waits on the admission hook), a tagged requirement algebra (section 7, no second
 interpreter yet), and `Sync.for(Surface)` (a Surface's projection is read-only).
 The remaining integration work is the Foldkit binding (step 3 onward in
-`packages/agent/DESIGN.md`). Work through the review findings and open questions
+`docs/design/agent-DESIGN.md`). Work through the review findings and open questions
 below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.

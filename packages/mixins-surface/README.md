@@ -36,4 +36,4 @@ functions. `SurfaceView.describe(surface, params, view)` merges that with
 emitted Messages as tags — into one value, and `SurfaceView.toMarkdown` renders it
 deterministically for docs or a CI drift check.
 
-Private while the API is settling (`0.0.0`). See [DESIGN.md](../mixins/DESIGN.md).
+Private while the API is settling (`0.0.0`). See [DESIGN.md](../../docs/design/mixins-DESIGN.md).

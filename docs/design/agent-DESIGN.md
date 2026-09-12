@@ -2,7 +2,7 @@
 
 > Design rationale for `foldkit-agent` and its integration with the wider
 > project, including the proposed `foldkit-surface` package. For the API
-> summary see the [package README](./README.md); for the umbrella project see
+> summary see the [package README](../../packages/agent/README.md); for the umbrella project see
 > the [root README](../../README.md).
 
 > A thin, Schema-first agent layer for Foldkit.
@@ -35,13 +35,13 @@ integration layer; it is not a shipped API.
 
 | Package | What it is |
 | --- | --- |
-| [`foldkit-agent`](./README.md) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
-| [`foldkit-agent-webmcp`](../agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
-| [`foldkit-agent-mcp`](../agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
-| [`foldkit-agent-a2a`](../agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
-| [`foldkit-durable`](../durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
-| [`foldkit-sync`](../sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
-| [`foldkit-agent-native`](../agent-native) | A private prototype adapting the contract to Agent Native, with integration tests against the real framework. |
+| [`foldkit-agent`](../../packages/agent/README.md) | The protocol-neutral contract: `context`, `expose`, `define`, `resource`, introspection, and the bound `AgentRuntime`. |
+| [`foldkit-agent-webmcp`](../../packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
+| [`foldkit-agent-mcp`](../../packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and HTTP. |
+| [`foldkit-agent-a2a`](../../packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
+| [`foldkit-durable`](../../packages/durable) | A durable, ordered operation log with snapshots, compaction, change streams, and a durable effect ledger. |
+| [`foldkit-sync`](../../packages/sync) | A local-first replica with an offline outbox, optimistic projection, presence, and a reconnecting transport. |
+| [`foldkit-agent-native`](../../packages/agent-native) | A private prototype adapting the contract to Agent Native, with integration tests against the real framework. |
 | `foldkit-surface` (proposed) | Shared application/projection primitives and a live runtime contract, with Foldkit bindings; no implementation yet. |
 
 It is deliberately built on Foldkit's existing architecture rather than
@@ -1104,7 +1104,7 @@ change while decoding or authorization is pending does not retarget an
 invocation already in flight. That is snapshot consistency, not live-state
 freshness: the next invocation sees the newer Model. Nothing rejects a dispatch
 because the live Model has advanced; see the
-[package README](./README.md#the-model-snapshot).
+[package README](../../packages/agent/README.md#the-model-snapshot).
 
 The host must replace Models rather than mutate them in place: the runtime
 retains the returned reference, without cloning it. Unknown capabilities and
@@ -1129,7 +1129,7 @@ const registration = AgentWebMcp.register({ agent: agentRuntime })
 
 The registration exposes `refresh()` to reconcile against the current Model,
 `registered()` for the capability names currently registered, and
-`unregister()`. See the [package README](../agent-webmcp) for the
+`unregister()`. See the [package README](../../packages/agent-webmcp) for the
 options.
 
 The adapter projects exposed Message variants into `document.modelContext.registerTool(...)` calls.
@@ -1999,7 +1999,7 @@ effect identities, and a policy for how result Messages return to shared state.
 Rebase and historical replay must not rerun external effects. The durable ledger
 reuses recorded successes, but cannot atomically commit an external provider's
 action and its local result. Surface adds no exactly-once guarantee. Preserve
-the [durable recovery requirements](../durable/README.md#effect-recovery), and
+the [durable recovery requirements](../../packages/durable/README.md#effect-recovery), and
 keep recovery and effect ownership outside the initial surface contract.
 
 ## Type safety and composability

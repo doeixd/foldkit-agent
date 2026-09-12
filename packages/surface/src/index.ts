@@ -3,7 +3,7 @@
  *
  * Minimal, deliberately non-final implementations of the Surface and Remote
  * descriptors, written only to answer the five inference questions in
- * `REVISION_PLAN.md` §15 (Phase 0). Runtime behaviour is thin; the deliverable
+ * `docs/design/REVISION_PLAN.md` §15 (Phase 0). Runtime behaviour is thin; the deliverable
  * is the type surface, pinned by `test/inference.test-d.ts`.
  *
  * Phase 1 replaces the Surface half with the real package. Phase 3 moves the

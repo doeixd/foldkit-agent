@@ -1,7 +1,7 @@
 /**
  * Internal attribute helpers. Foldkit's `isChildAttribute` and the tagged
  * attribute shape are not public, so this module localizes the two casts they
- * require. Probed against foldkit 0.158.2; see DESIGN.md.
+ * require. Probed against foldkit 0.158.2; see docs/design/mixins-DESIGN.md.
  */
 import type { Attribute, ChildAttribute } from 'foldkit/html'
 import { inertHtml as ih } from 'foldkit/html'

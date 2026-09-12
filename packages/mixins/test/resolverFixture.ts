@@ -1,7 +1,7 @@
 /**
  * Test fixtures for the resolver. `inertHtml` is cast to a real Message
  * universe so event attributes can be constructed without a live Foldkit
- * runtime; the tagged shape is the same one `h` builds. See DESIGN.md.
+ * runtime; the tagged shape is the same one `h` builds. See docs/design/mixins-DESIGN.md.
  */
 import { Stream } from 'effect'
 import type { Attribute, ChildAttribute, HtmlBuilder } from 'foldkit/html'

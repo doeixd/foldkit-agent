@@ -12,7 +12,7 @@ Context is a `foldkit-surface` projection (`Projection.pick` / `Projection.compo
 so the same value an application replicates is what an agent may see. Everything
 else is an adapter. `update` remains the single source of truth.
 
-See the [design rationale](https://github.com/doeixd/foldkit-plus/blob/main/packages/agent/DESIGN.md)
+See the [design rationale](https://github.com/doeixd/foldkit-plus/blob/main/docs/design/agent-DESIGN.md)
 for the full proposal, and [examples/todo](../../examples/todo) for a worked
 example.
 

@@ -5,7 +5,7 @@ slot contract; Style and Behavior attach to those slots without forking the
 view. Application state stays in Model/Submodel. This package does not grow
 a second runtime.
 
-Authoritative product plan: root `SLOT_MIXIN_STYLE_BRAINSTORM.md`. This file
+Authoritative product plan: `docs/design/SLOT_MIXIN_STYLE_BRAINSTORM.md`. This file
 records substrate probes and the decisions they force. Where they conflict,
 this file wins for implementation.
 
