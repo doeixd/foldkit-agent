@@ -905,7 +905,6 @@ const storeOf = <AppModel, Store extends RemoteModel, Names extends string>(
 const visibleStores = new WeakMap<OptimisticState, WeakMap<EntityStore, EntityStore>>()
 
 const visibleStoreOf = (entities: EntityStore, optimistic: OptimisticState): EntityStore => {
-  if (optimistic.layers.length === 0) return entities
   let byStore = visibleStores.get(optimistic)
   if (byStore === undefined) {
     byStore = new WeakMap()

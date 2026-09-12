@@ -58,8 +58,9 @@ const relationLevel = (depth: number): Schema.Codec<RelationRequirement, Relatio
     fields: Fields,
     windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
   }
+  // A struct drops an unknown key silently; the last level refuses one instead.
   return (depth === 0
-    ? Schema.Struct(slice)
+    ? Schema.Struct({ ...slice, relations: Schema.optionalKey(Schema.Never) })
     : Schema.Struct({
         ...slice,
         relations: Schema.optional(Schema.Record(Schema.String, relationLevel(depth - 1))),
