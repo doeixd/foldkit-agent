@@ -1,7 +1,7 @@
 import { eq, type SQL } from 'drizzle-orm'
-import { pgTable, PgDialect, text, uuid } from 'drizzle-orm/pg-core'
+import { pgTable, PgDialect, text } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
-import { Entity, Selection } from 'foldkit-remote'
+import { Selection } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
 import {
@@ -10,6 +10,7 @@ import {
   many,
   manyToMany,
   normalize,
+  one,
   source,
   type DrizzleDatabaseService,
   type DrizzleStatement,
@@ -17,74 +18,47 @@ import {
 import { fakeDatabase, fakeDatabaseQueue } from './fakeDatabase.js'
 
 const users = pgTable('users', {
-  id: uuid('id').primaryKey(),
+  id: text('id').primaryKey(),
   name: text('name').notNull(),
   email: text('email').notNull(),
 })
 
-const User = Entity.make(
-  'User',
-  Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String }),
-)
-
 const UserBinding = entity('User', users)
 
 const projects = pgTable('projects', {
-  id: uuid('id').primaryKey(),
+  id: text('id').primaryKey(),
   name: text('name').notNull(),
-  ownerId: uuid('owner_id'),
+  ownerId: text('owner_id'),
 })
 
-const Project = Entity.make(
-  'Project',
-  Schema.Struct({ id: Schema.String, name: Schema.String, owner: Schema.NullOr(Entity.ref(User)) }),
-)
-
 const ProjectBinding = entity('Project', projects, {
-  relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+  relations: { owner: one(UserBinding, { field: projects.ownerId, nullable: true }) },
 })
 
 const posts = pgTable('posts', {
-  id: uuid('id').primaryKey(),
+  id: text('id').primaryKey(),
   title: text('title').notNull(),
 })
 
 const comments = pgTable('comments', {
-  id: uuid('id').primaryKey(),
+  id: text('id').primaryKey(),
   body: text('body').notNull(),
-  postId: uuid('post_id').notNull(),
+  postId: text('post_id').notNull(),
 })
-
-const CommentEntity = Entity.make(
-  'Comment',
-  Schema.Struct({ id: Schema.String, body: Schema.String }),
-)
 
 const CommentBinding = entity('Comment', comments)
 
 const tags = pgTable('tags', {
-  id: uuid('id').primaryKey(),
+  id: text('id').primaryKey(),
   name: text('name').notNull(),
 })
 
 const postTags = pgTable('post_tags', {
-  postId: uuid('post_id').notNull(),
-  tagId: uuid('tag_id').notNull(),
+  postId: text('post_id').notNull(),
+  tagId: text('tag_id').notNull(),
 })
 
-const TagEntity = Entity.make('Tag', Schema.Struct({ id: Schema.String, name: Schema.String }))
-
 const TagBinding = entity('Tag', tags)
-
-const PostEntity = Entity.make(
-  'Post',
-  Schema.Struct({
-    id: Schema.String,
-    title: Schema.String,
-    comments: Schema.Array(Entity.ref(CommentEntity)),
-    tags: Schema.Array(Entity.ref(TagEntity)),
-  }),
-)
 
 const PostBinding = entity('Post', posts, {
   relations: {
@@ -102,6 +76,12 @@ const PostBinding = entity('Post', posts, {
 })
 
 describe('RemoteDrizzle execution', () => {
+  it('rejects a policy on a singular relation at definition time', () => {
+    expect(() => source(ProjectBinding, { policies: { owner: () => undefined } })).toThrow(
+      /needs a collection relation/,
+    )
+  })
+
   it('reads through the DrizzleDatabase service with a pruned projection', async () => {
     const { database, calls } = fakeDatabase([{ id: 'a', name: 'A', email: 'a@b.c' }])
     const read = source(UserBinding)
@@ -182,7 +162,7 @@ describe('RemoteDrizzle execution', () => {
   it('rewrites a selected relation to the ref key the client decodes', async () => {
     const { database } = fakeDatabase([{ id: 'p1', name: 'P', owner: 'u1' }])
     const read = source(ProjectBinding)
-    const selection = Selection.make(Project, { id: true, name: true, owner: true })
+    const selection = Selection.make(ProjectBinding, { id: true, name: true, owner: true })
 
     const records = await Effect.runPromise(
       read
@@ -220,7 +200,7 @@ describe('RemoteDrizzle execution', () => {
       ],
     ])
     const read = source(PostBinding)
-    const selection = Selection.make(PostEntity, { id: true, comments: true })
+    const selection = Selection.make(PostBinding, { id: true, comments: true })
 
     const records = await Effect.runPromise(
       read
@@ -423,7 +403,7 @@ describe('RemoteDrizzle execution', () => {
       ],
     ])
     const read = source(PostBinding)
-    const selection = Selection.make(PostEntity, { id: true, tags: true })
+    const selection = Selection.make(PostBinding, { id: true, tags: true })
 
     const records = await Effect.runPromise(
       read
@@ -491,7 +471,7 @@ describe('RemoteDrizzle execution', () => {
       [{ child: 'c1', parent: 'p1' }],
     ])
     const read = source(PostBinding, {
-      relations: { comments: (principal: string) => eq(comments.body, principal) },
+      policies: { comments: (principal: string) => eq(comments.body, principal) },
     })
 
     await Effect.runPromise(
@@ -513,15 +493,21 @@ describe('RemoteDrizzle execution', () => {
       },
       computed: { commentCount: { relation: 'comments' } },
     })
+    const selection = Selection.make(counted, { id: true, commentCount: true })
     const { database, calls } = fakeDatabaseQueue([[{ id: 'p1' }], [{ count: 2, parent: 'p1' }]])
 
     const records = await Effect.runPromise(
       source(counted)
-        .read({ ids: ['p1'], fields: ['id', 'commentCount'], principal: null })
+        .read({ ids: ['p1'], fields: selection.fields, principal: null })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
     expect(records).toEqual([{ id: 'p1', values: { id: 'p1', commentCount: 2 } }])
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)(
+        records[0]!.values,
+      ),
+    ).toEqual({ id: 'p1', commentCount: 2 })
     expect(calls).toHaveLength(2)
     expect(Object.keys(calls[1]!.selection)).toEqual(['count', 'parent'])
     expect(calls[1]!.groupBy).toHaveLength(1)
@@ -580,7 +566,7 @@ describe('RemoteDrizzle execution', () => {
 
     await Effect.runPromise(
       source(counted, {
-        relations: { comments: (principal: string) => eq(comments.body, principal) },
+        policies: { comments: (principal: string) => eq(comments.body, principal) },
       })
         .read({ ids: ['p1'], fields: ['id', 'commentCount'], principal: 'ada' })
         .pipe(Effect.provideService(DrizzleDatabase, database)),

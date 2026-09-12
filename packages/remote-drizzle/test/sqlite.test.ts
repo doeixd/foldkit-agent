@@ -10,9 +10,10 @@ import {
   entity,
   many,
   manyToMany,
+  one,
   query,
   source,
-  type EntityBinding,
+  type AnyEntityBinding,
 } from '../src/index.js'
 
 // Vite rewrites a static `node:sqlite` import to `sqlite`; load it at the boundary.
@@ -52,7 +53,7 @@ const UserBinding = entity('User', users)
 const CommentBinding = entity('Comment', comments)
 const ProjectBinding = entity('Project', projects, {
   relations: {
-    owner: { entity: UserBinding, field: projects.ownerId },
+    owner: one(UserBinding, { field: projects.ownerId, nullable: true }),
     comments: many(CommentBinding, {
       foreignKey: comments.projectId,
       localKey: projects.id,
@@ -96,7 +97,7 @@ const setup = () => {
 }
 
 const read = (
-  binding: EntityBinding<any, any>,
+  binding: AnyEntityBinding,
   database: unknown,
   context: Parameters<ReturnType<typeof source>['read']>[0],
 ) =>
@@ -186,7 +187,7 @@ describe('RemoteDrizzle against in-process SQLite', () => {
     try {
       const records = await Effect.runPromise(
         source(ProjectBinding, {
-          relations: { comments: (principal: string) => eq(comments.body, principal) },
+          policies: { comments: (principal: string) => eq(comments.body, principal) },
         })
           .read({ ids: ['p1'], fields: ['id', 'comments'], principal: 'a' })
           .pipe(Effect.provide(databaseLayer(database))),

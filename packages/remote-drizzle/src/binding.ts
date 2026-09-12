@@ -3,16 +3,22 @@
  *
  * Adapted from fate's Drizzle integration (MIT, Copyright (c) 2025 Nakazawa
  * Tech); see `THIRD_PARTY_NOTICES.md`.
+ *
+ * A binding **is** a `foldkit-remote` `EntityDescriptor`: `entity(name, table)`
+ * derives the Entity's fields from the table, and each declared relation adds a
+ * ref field (keeping the foreign-key column too). So one declaration serves
+ * `Selection.make` and `source`/`query`, and relation fields are typed.
  */
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
 import type { BuildSchema } from 'drizzle-orm/effect-schema'
 import { getTableColumns, type AnyColumn, type SQL, type Table as DrizzleTable } from 'drizzle-orm'
-import type { Schema } from 'effect'
+import { Entity, type EntityDescriptor, type EntityRef } from 'foldkit-remote'
+import { Schema } from 'effect'
 import type { OrderTerm } from './cursor.js'
 
 /**
- * The Effect select schema Drizzle derives for a table. Naming it lets an
- * entity be built from a binding: `Entity.make(name, binding.Schema)`.
+ * The Effect select schema Drizzle derives for a table. Naming it lets a binding
+ * be built from its derived fields.
  */
 export type SelectSchema<Table extends DrizzleTable> = BuildSchema<
   'select',
@@ -20,19 +26,22 @@ export type SelectSchema<Table extends DrizzleTable> = BuildSchema<
   undefined
 >
 
-export interface RelationTarget {
-  readonly entity: EntityBinding<any, any>
-}
+type SelectFields<Table extends DrizzleTable> =
+  SelectSchema<Table> extends Schema.Struct<infer F> ? F : Schema.Struct.Fields
 
-/** A singular relation: the foreign key lives on the owning table. */
-export interface OneRelation extends RelationTarget {
+/** The foreign key lives on the owning table. */
+export interface OneRelation<Target extends AnyEntityBinding, Nullable extends boolean = false> {
   readonly kind: 'one'
+  readonly entity: Target
   readonly field: AnyColumn
+  /** Whether the foreign key may be null; the ref field is then nullable too. */
+  readonly nullable: Nullable
 }
 
-/** A collection relation: the foreign key lives on the target table. */
-export interface ManyRelation extends RelationTarget {
+/** The foreign key lives on the target table. */
+export interface ManyRelation<Target extends AnyEntityBinding> {
   readonly kind: 'many'
+  readonly entity: Target
   readonly foreignKey: AnyColumn
   readonly localKey: AnyColumn
   /** Natural order of the loaded refs; defaults to the target id. */
@@ -41,12 +50,10 @@ export interface ManyRelation extends RelationTarget {
   readonly where?: SQL | undefined
 }
 
-/**
- * A collection relation joined through a table. `localColumn` references the
- * owning entity's `id`; `foreignColumn` references the target entity's `id`.
- */
-export interface ManyToManyRelation extends RelationTarget {
+/** Joined through a table: `localColumn` references the owner's `id`. */
+export interface ManyToManyRelation<Target extends AnyEntityBinding> {
   readonly kind: 'manyToMany'
+  readonly entity: Target
   readonly through: DrizzleTable
   readonly localColumn: AnyColumn
   readonly foreignColumn: AnyColumn
@@ -56,7 +63,35 @@ export interface ManyToManyRelation extends RelationTarget {
   readonly where?: SQL | undefined
 }
 
-export type RelationBinding = OneRelation | ManyRelation | ManyToManyRelation
+export type RelationBinding = OneRelation<any, any> | ManyRelation<any> | ManyToManyRelation<any>
+
+/** The Entity field a relation contributes: a ref, or an array of refs. */
+type RelationField<Relation> =
+  Relation extends OneRelation<infer Target, infer Nullable>
+    ? Nullable extends true
+      ? Schema.Codec<EntityRef<Target['name'], Target['fields']> | null, string | null>
+      : Schema.Codec<EntityRef<Target['name'], Target['fields']>, string>
+    : Relation extends ManyRelation<infer Target> | ManyToManyRelation<infer Target>
+      ? Schema.Codec<
+          ReadonlyArray<EntityRef<Target['name'], Target['fields']>>,
+          ReadonlyArray<string>
+        >
+      : never
+
+type RelationFields<Relations extends Record<string, RelationBinding>> = {
+  readonly [Field in keyof Relations]: RelationField<Relations[Field]>
+}
+
+type ComputedFields<Computed extends Record<string, ComputedConfig>> = {
+  readonly [Field in keyof Computed]: Schema.Codec<number, number>
+}
+
+/** The table's select fields plus a ref field per relation and a count per computed. */
+export type EntityFields<
+  Table extends DrizzleTable,
+  Relations extends Record<string, RelationBinding>,
+  Computed extends Record<string, ComputedConfig> = {},
+> = SelectFields<Table> & RelationFields<Relations> & ComputedFields<Computed>
 
 /** An aggregate over a collection relation, attached to each owning row. */
 export interface ComputedConfig {
@@ -66,44 +101,44 @@ export interface ComputedConfig {
   readonly where?: SQL | undefined
 }
 
-export type RelationConfig =
-  | {
-      readonly kind?: 'one' | undefined
-      readonly entity: EntityBinding<any, any>
-      readonly field: AnyColumn
-    }
-  | {
-      readonly kind: 'many'
-      readonly entity: EntityBinding<any, any>
-      readonly foreignKey: AnyColumn
-      readonly localKey: AnyColumn
-      readonly orderBy?: readonly OrderTerm[] | undefined
-      readonly where?: SQL | undefined
-    }
-  | {
-      readonly kind: 'manyToMany'
-      readonly entity: EntityBinding<any, any>
-      readonly through: DrizzleTable
-      readonly localColumn: AnyColumn
-      readonly foreignColumn: AnyColumn
-      readonly orderBy?: readonly OrderTerm[] | undefined
-      readonly where?: SQL | undefined
-    }
+export interface EntityBinding<
+  Name extends string,
+  Table extends DrizzleTable,
+  F extends Schema.Struct.Fields = Schema.Struct.Fields,
+  Relations extends Record<string, RelationBinding> = Record<string, RelationBinding>,
+> extends EntityDescriptor<Name, F> {
+  readonly table: Table
+  readonly columns: Readonly<Record<string, AnyColumn>>
+  readonly relations: Relations
+  readonly computed: Readonly<Record<string, ComputedConfig>>
+}
 
-export const one = (
-  entity: EntityBinding<any, any>,
-  options: { readonly field: AnyColumn },
-): OneRelation => ({ kind: 'one', entity, field: options.field })
+/**
+ * A binding with its derived fields erased. The field map is invariant through
+ * `EntityDescriptor.ref`, so a concrete binding is not assignable to
+ * `EntityBinding<any, any>`; parameters take this instead.
+ */
+export type AnyEntityBinding = EntityBinding<any, any, any, any>
 
-export const many = (
-  entity: EntityBinding<any, any>,
+export const one = <Target extends AnyEntityBinding, const Nullable extends boolean = false>(
+  entity: Target,
+  options: { readonly field: AnyColumn; readonly nullable?: Nullable | undefined },
+): OneRelation<Target, Nullable> => ({
+  kind: 'one',
+  entity,
+  field: options.field,
+  nullable: (options.nullable ?? false) as Nullable,
+})
+
+export const many = <Target extends AnyEntityBinding>(
+  entity: Target,
   options: {
     readonly foreignKey: AnyColumn
     readonly localKey: AnyColumn
     readonly orderBy?: readonly OrderTerm[] | undefined
     readonly where?: SQL | undefined
   },
-): ManyRelation => ({
+): ManyRelation<Target> => ({
   kind: 'many',
   entity,
   foreignKey: options.foreignKey,
@@ -112,8 +147,8 @@ export const many = (
   ...(options.where === undefined ? {} : { where: options.where }),
 })
 
-export const manyToMany = (
-  entity: EntityBinding<any, any>,
+export const manyToMany = <Target extends AnyEntityBinding>(
+  entity: Target,
   options: {
     readonly through: DrizzleTable
     readonly localColumn: AnyColumn
@@ -121,7 +156,7 @@ export const manyToMany = (
     readonly orderBy?: readonly OrderTerm[] | undefined
     readonly where?: SQL | undefined
   },
-): ManyToManyRelation => ({
+): ManyToManyRelation<Target> => ({
   kind: 'manyToMany',
   entity,
   through: options.through,
@@ -131,58 +166,23 @@ export const manyToMany = (
   ...(options.where === undefined ? {} : { where: options.where }),
 })
 
-const normalizeRelation = (config: RelationConfig): RelationBinding => {
-  switch (config.kind) {
-    case 'many':
-      return {
-        kind: 'many',
-        entity: config.entity,
-        foreignKey: config.foreignKey,
-        localKey: config.localKey,
-        ...(config.orderBy === undefined ? {} : { orderBy: config.orderBy }),
-        ...(config.where === undefined ? {} : { where: config.where }),
-      }
-    case 'manyToMany':
-      return {
-        kind: 'manyToMany',
-        entity: config.entity,
-        through: config.through,
-        localColumn: config.localColumn,
-        foreignColumn: config.foreignColumn,
-        ...(config.orderBy === undefined ? {} : { orderBy: config.orderBy }),
-        ...(config.where === undefined ? {} : { where: config.where }),
-      }
-    default:
-      return { kind: 'one', entity: config.entity, field: config.field }
-  }
-}
-
-export interface EntityBinding<Name extends string, Table extends DrizzleTable> {
-  readonly name: Name
-  readonly table: Table
-  readonly Schema: SelectSchema<Table>
-  readonly columns: Readonly<Record<string, AnyColumn>>
-  readonly relations: Readonly<Record<string, RelationBinding>>
-  readonly computed: Readonly<Record<string, ComputedConfig>>
-}
-
-export const entity = <const Name extends string, Table extends DrizzleTable>(
+export const entity = <
+  const Name extends string,
+  Table extends DrizzleTable,
+  const Relations extends Record<string, RelationBinding> = {},
+  const Computed extends Record<string, ComputedConfig> = {},
+>(
   name: Name,
   table: Table,
   options?: {
-    readonly schema?: Schema.Codec<unknown> | undefined
-    readonly relations?: Readonly<Record<string, RelationConfig>> | undefined
-    readonly computed?: Readonly<Record<string, ComputedConfig>> | undefined
+    readonly relations?: Relations | undefined
+    readonly computed?: Computed | undefined
   },
-): EntityBinding<Name, Table> => {
+): EntityBinding<Name, Table, EntityFields<Table, Relations, Computed>, Relations> => {
   const columns = getTableColumns(table)
-  const relations = Object.fromEntries(
-    Object.entries(options?.relations ?? {}).map(([field, config]) => [
-      field,
-      normalizeRelation(config),
-    ]),
-  )
-  for (const field of Object.keys(relations)) {
+  const relations = options?.relations ?? ({} as Relations)
+
+  for (const [field, relation] of Object.entries(relations)) {
     // `selectColumns` gives a column priority and `source` treats the name as a
     // relation, so a collision is silently wrong. Refuse it up front.
     if (columns[field] !== undefined) {
@@ -190,8 +190,15 @@ export const entity = <const Name extends string, Table extends DrizzleTable>(
         `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" collides with a column of the same name`,
       )
     }
+    // A null foreign key has no ref, so the client must decode a null. Without
+    // the flag the derived field is non-nullable and would reject it silently.
+    if (relation.kind === 'one' && relation.field.notNull === false && relation.nullable !== true) {
+      throw new Error(
+        `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" points at a nullable column; pass { nullable: true }`,
+      )
+    }
   }
-  const computed = options?.computed ?? {}
+  const computed: Record<string, ComputedConfig> = options?.computed ?? {}
   for (const [field, config] of Object.entries(computed)) {
     if (columns[field] !== undefined || relations[field] !== undefined) {
       throw new Error(
@@ -205,12 +212,34 @@ export const entity = <const Name extends string, Table extends DrizzleTable>(
       )
     }
   }
-  return {
+
+  const fields: Record<string, Schema.Schema<unknown>> = {
+    ...(createSelectSchema(table).fields as Record<string, Schema.Schema<unknown>>),
+  }
+  for (const [field, relation] of Object.entries(relations)) {
+    const target = relation.entity as EntityDescriptor<any, any>
+    if (relation.kind === 'one') {
+      const ref = Entity.ref(target) as Schema.Schema<unknown>
+      fields[field] = relation.nullable === true ? Schema.NullOr(ref) : ref
+    } else {
+      fields[field] = Schema.Array(Entity.ref(target) as Schema.Schema<unknown>)
+    }
+  }
+  for (const field of Object.keys(computed)) {
+    fields[field] = Schema.Number
+  }
+
+  const descriptor = Entity.make(
     name,
+    Schema.Struct(fields) as unknown as Schema.Struct<
+      Schema.Struct.Fields & { readonly id: Schema.Schema<unknown> }
+    >,
+  )
+  return {
+    ...descriptor,
     table,
     columns,
-    Schema: (options?.schema ?? createSelectSchema(table)) as SelectSchema<Table>,
     relations,
     computed,
-  }
+  } as unknown as EntityBinding<Name, Table, EntityFields<Table, Relations, Computed>, Relations>
 }

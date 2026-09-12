@@ -10,7 +10,7 @@ import { drizzle } from 'drizzle-orm/node-sqlite'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Effect, Schema } from 'effect'
 import { Query } from 'foldkit-remote'
-import { databaseLayer, entity, many, query, source } from '../src/index.js'
+import { databaseLayer, entity, many, one, query, source } from '../src/index.js'
 
 const require_ = createRequire(import.meta.url)
 const { DatabaseSync } = require_('node:sqlite') as typeof import('node:sqlite')
@@ -36,7 +36,7 @@ const User = entity('User', users)
 const Comment = entity('Comment', comments)
 const Project = entity('Project', projects, {
   relations: {
-    owner: { entity: User, field: projects.ownerId },
+    owner: one(User, { field: projects.ownerId, nullable: true }),
     comments: many(Comment, {
       foreignKey: comments.projectId,
       localKey: projects.id,

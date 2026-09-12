@@ -1,13 +1,13 @@
 import { sql } from 'drizzle-orm'
 import { text, uuid, pgTable, PgDialect } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
-import { Entity, Selection } from 'foldkit-remote'
+import { Selection } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import {
   entity,
+  one,
   orderByTerms,
   reader,
-  relationsFor,
   selectColumns,
   whereIds,
   type SourceQuery,
@@ -25,25 +25,16 @@ const projects = pgTable('projects', {
   ownerId: uuid('owner_id').notNull(),
 })
 
-const User = Entity.make(
-  'User',
-  Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String }),
-)
-const Project = Entity.make(
-  'Project',
-  Schema.Struct({ id: Schema.String, name: Schema.String, owner: Entity.ref(User) }),
-)
-
 const UserBinding = entity('User', users)
 const ProjectBinding = entity('Project', projects, {
-  relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+  relations: { owner: one(UserBinding, { field: projects.ownerId }) },
 })
 
 describe('RemoteDrizzle', () => {
   it('derives an Entity Schema from the table', () => {
     const row = { id: '123e4567-e89b-42d3-a456-426614174000', name: 'Ada', email: 'a@b.c' }
 
-    expect(Schema.decodeUnknownSync(UserBinding.Schema)(row)).toEqual(row)
+    expect(Schema.decodeUnknownSync(UserBinding.schema)(row)).toEqual(row)
   })
 
   it('always projects the primary key, selected fields, and relation keys', () => {
@@ -53,16 +44,14 @@ describe('RemoteDrizzle', () => {
   })
 
   it('separates relation fields from scalar columns', () => {
-    const selection = Selection.make(Project, { id: true, name: true, owner: true })
+    const selection = Selection.make(ProjectBinding, { id: true, name: true, owner: true })
 
     expect(Object.keys(selectColumns(ProjectBinding, selection.fields))).toEqual([
       'id',
       'name',
       'owner',
     ])
-    expect(relationsFor(ProjectBinding, selection).map(relation => relation.entity.name)).toEqual([
-      'User',
-    ])
+    expect(ProjectBinding.relations.owner.entity.name).toBe('User')
   })
 
   it('batches ids into one IN and prunes the column list', () => {
@@ -145,15 +134,34 @@ describe('RemoteDrizzle', () => {
   it('rejects a relation whose name collides with a column', () => {
     expect(() =>
       entity('Project', projects, {
-        relations: { name: { entity: UserBinding, field: projects.ownerId } },
+        relations: { name: one(UserBinding, { field: projects.ownerId }) },
       }),
     ).toThrow(/collides with a column/)
+  })
+
+  it('rejects a nullable relation not declared nullable', () => {
+    const articles = pgTable('articles', {
+      id: text('id').primaryKey(),
+      authorId: text('author_id'),
+    })
+
+    expect(() =>
+      entity('Article', articles, {
+        relations: { author: one(UserBinding, { field: articles.authorId }) },
+      }),
+    ).toThrow(/points at a nullable column/)
+
+    expect(() =>
+      entity('Article', articles, {
+        relations: { author: one(UserBinding, { field: articles.authorId, nullable: true }) },
+      }),
+    ).not.toThrow()
   })
 
   it('rejects a computed field that collides or names a non-collection relation', () => {
     expect(() =>
       entity('Project', projects, {
-        relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+        relations: { owner: one(UserBinding, { field: projects.ownerId }) },
         computed: { name: { relation: 'owner' } },
       }),
     ).toThrow(/collides with a column or relation/)
@@ -166,7 +174,7 @@ describe('RemoteDrizzle', () => {
 
     expect(() =>
       entity('Project', projects, {
-        relations: { owner: { entity: UserBinding, field: projects.ownerId } },
+        relations: { owner: one(UserBinding, { field: projects.ownerId }) },
         computed: { ownerCount: { relation: 'owner' } },
       }),
     ).toThrow(/needs a collection relation/)

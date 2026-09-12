@@ -36,33 +36,22 @@ export const projects = pgTable('projects', {
 
 ```ts
 // remote.ts
-import { Schema } from 'effect'
-import { Entity, Remote, Selection } from 'foldkit-remote'
+import { Remote, Selection } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
-import { entity, source } from 'foldkit-remote-drizzle'
+import { entity, one, source } from 'foldkit-remote-drizzle'
 import { projects, users } from './schema.js'
 
-// One declaration per entity: the table binding, and the Remote Entity that
-// `Selection` uses. The binding's derived Schema seeds the Entity.
+// One declaration per entity. The returned value is both the Drizzle binding and
+// the Remote EntityDescriptor: relation fields are derived from the foreign keys.
 const User = entity('User', users)
 const Project = entity('Project', projects, {
-  relations: { owner: { entity: User, field: projects.ownerId } },
+  relations: { owner: one(User, { field: projects.ownerId }) },
 })
 
-const UserEntity = Entity.make('User', User.Schema)
-const ProjectEntity = Entity.make(
-  'Project',
-  Schema.Struct({
-    id: Schema.String,
-    name: Schema.String,
-    owner: Entity.ref(UserEntity),
-  }),
-)
-
 // A Surface selects exactly these fields; a query is described separately.
-const ProjectSummary = Selection.make(ProjectEntity, { id: true, name: true, owner: true })
+const ProjectSummary = Selection.make(Project, { id: true, name: true, owner: true })
 
-const Data = Remote.make({ entities: [UserEntity, ProjectEntity] })
+const Data = Remote.make({ entities: [User, Project] })
 
 const Server = RemoteServer.make(Data, {
   entities: [source(User), source(Project)],
@@ -88,22 +77,18 @@ import { entity } from 'foldkit-remote-drizzle'
 const User = entity('User', users)
 ```
 
-`entity(name, table, { schema?, relations?, computed? })` derives an Effect Schema
-from the table with `drizzle-orm/effect-schema` and exposes the table columns. The
-derived Schema can seed the Remote Entity, so the table is declared once and the
-Entity still checks field names:
-
-```ts
-import { Entity } from 'foldkit-remote'
-
-const User = entity('User', users)
-const UserEntity = Entity.make('User', User.Schema)
-```
+`entity(name, table, { relations?, computed? })` derives an Effect Schema from
+the table with `drizzle-orm/effect-schema` and exposes the table columns. The
+result **is** a `foldkit-remote` `EntityDescriptor`, so `Selection.make` checks
+field names against the table without a second declaration. Each declared
+relation adds a ref field (`owner: Entity.ref(User)`, or an array of refs for a
+collection); each computed adds a number field.
 
 A table must have an `id` column; every read needs it for normalization even when
-the client did not select it. A relation (or computed) name that collides with a
-column is rejected at definition time, as is a computed field naming an
-undeclared or singular relation.
+the client did not select it. Several mistakes are rejected at definition time: a
+relation (or computed) name that collides with a column; a computed naming an
+undeclared or singular relation; and a `one` relation pointed at a nullable
+column without `{ nullable: true }` (below).
 
 ## Provide the database
 
@@ -177,35 +162,28 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 
 ## Relations
 
-A singular relation is normalized: the Entity declares it as a ref, and a
-Selection asks for the ref.
+A singular relation is normalized: the binding declares it with `one`, which
+derives a ref field on the Entity, and a Selection asks for the ref.
 
 ```ts
-import { Entity, Selection } from 'foldkit-remote'
+import { Selection } from 'foldkit-remote'
+import { entity, one } from 'foldkit-remote-drizzle'
 
 const User = entity('User', users)
-const UserEntity = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 const Project = entity('Project', projects, {
-  relations: { owner: { entity: User, field: projects.ownerId } },
+  relations: { owner: one(User, { field: projects.ownerId, nullable: true }) },
 })
 
-// The Remote Entity, paired with the binding above.
-const ProjectEntity = Entity.make(
-  'Project',
-  Schema.Struct({
-    id: Schema.String,
-    name: Schema.String,
-    owner: Schema.NullOr(Entity.ref(UserEntity)),
-  }),
-)
-
-const selection = Selection.make(ProjectEntity, { id: true, name: true, owner: true })
+const selection = Selection.make(Project, { id: true, name: true, owner: true })
 ```
 
-The read selects `projects.owner_id` and emits `values.owner = "User:u1"` — the
-key the ref codec decodes. A null foreign key emits `null`, so the client holds a
-present null rather than refetching forever. Select the target's fields
-separately and let the normalized store share it.
+Pass `{ nullable: true }` when the foreign key is nullable; the derived field is
+then `Entity.ref(User) | null`, so the client decodes a present null rather than
+failing. A non-nullable key omits the flag. The read selects `projects.owner_id`
+and emits `values.owner = "User:u1"` — the key the ref codec decodes. A null
+foreign key emits `null`, so the client holds a present null rather than
+refetching forever. Select the target's fields separately and let the normalized
+store share it.
 
 A to-many relation is an array of refs. The foreign key lives on the target:
 
@@ -219,8 +197,8 @@ const Post = entity('Post', posts, {
 ```
 
 The read loads every child row in one `IN (...)`, ordered by child id, and emits
-`values.comments = ["Comment:c1", "Comment:c2"]`. The Entity declares the field as
-`Schema.Array(Entity.ref(CommentEntity))` and the Selection selects it as `true`.
+`values.comments = ["Comment:c1", "Comment:c2"]`. The binding derives the field
+as an array of refs; the Selection selects it as `true`.
 A collection relation may also take `orderBy` (default target id) and `where`
 (appended to the child query, e.g. to exclude soft-deleted rows).
 
@@ -246,28 +224,24 @@ A collection relation can be filtered per principal at the source, e.g. to expos
 only rows the caller may see:
 
 ```ts
-const ProjectSource = source(ProjectBinding, {
-  relations: {
+const ProjectSource = source(Project, {
+  policies: {
     comments: principal => eq(comments.visibleTo, principal.id),
   },
 })
 ```
 
 The policy is applied to `many`/`manyToMany` child queries alongside any static
-`where` on the binding; a policy on a singular relation is ignored.
+`where` on the binding. Keying a policy by a singular relation is rejected at
+definition time — it filters nothing.
 
-A relation can be paginated. Declare the field as a page of refs and select it
-with a window:
+A relation can be paginated. Select the collection field with a window; the
+Entity field stays an array of refs, and the connection supplies the page shape:
 
 ```ts
-const ProjectEntity = Entity.make('Project', Schema.Struct({
-  id: Schema.String,
-  comments: Entity.refPage(CommentEntity),
-}))
-
-const selection = Selection.make(ProjectEntity, {
+const selection = Selection.make(Project, {
   id: true,
-  comments: Selection.connection(CommentEntity, { first: 10 }),
+  comments: Selection.connection(Comment, { first: 10 }),
 })
 ```
 
@@ -292,9 +266,9 @@ const Post = entity('Post', posts, {
 })
 ```
 
-The Entity declares `commentCount` as a number and the Selection selects it. The
-config's `where` filters the counted rows, and the source's principal policy for
-that relation applies too. The count is the total, not the page, and `reader`,
+The binding derives `commentCount` as a number field and the Selection selects it.
+The config's `where` filters the counted rows, and the source's principal policy
+for that relation applies too. The count is the total, not the page, and `reader`,
 the injected-executor path, does not compute fields.
 
 ## Mutation results
