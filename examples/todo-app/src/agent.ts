@@ -16,9 +16,9 @@ export interface Principal {
   readonly actorId: string
 }
 
-const TodoAgent = Agent.forApplication<Principal>()(App)
+const TodoAgent = Agent.forApplication(App).withPrincipal<Principal>()
 
-export const AppAgent = TodoAgent.define({
+export const AppAgent = TodoAgent.make({
   context: AgentContext,
 
   messages: TodoAgent.expose(Message, {

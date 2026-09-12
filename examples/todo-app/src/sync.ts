@@ -11,15 +11,15 @@
  * declarations: the inferred type expands a Foldkit-private alias that
  * declaration emit cannot name.
  */
-import { Surface } from 'foldkit-surface'
+import { MessageSet } from 'foldkit-surface'
 import { documentId, forApplication, type Sync as SyncContract } from 'foldkit-sync'
 import { Message, type Shared } from './app.js'
 import { App, Todos } from './surface.js'
 
-export const Sync: SyncContract<Message, Shared> = forApplication(App, {
+export const Sync: SyncContract<Message, Shared> = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
-  durable: Surface.messages(App, [
+  durable: MessageSet.make(App, [
     Message.SubmittedTodo,
     Message.ToggledTodo,
     Message.RenamedTodo,
