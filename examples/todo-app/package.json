@@ -10,17 +10,21 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@foldkit/ui": "0.158.2",
     "drizzle-orm": "1.0.0-rc.4",
     "effect": "4.0.0-rc.112",
     "foldkit": "0.158.2",
     "foldkit-agent": "workspace:*",
     "foldkit-agent-webmcp": "workspace:*",
     "foldkit-durable": "workspace:*",
+    "foldkit-mixins": "workspace:*",
+    "foldkit-mixins-surface": "workspace:*",
+    "foldkit-mixins-ui": "workspace:*",
     "foldkit-remote": "workspace:*",
     "foldkit-remote-drizzle": "workspace:*",
     "foldkit-remote-server": "workspace:*",
-    "foldkit-sync": "workspace:*",
     "foldkit-surface": "workspace:*",
+    "foldkit-sync": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

@@ -1,31 +1,55 @@
 /**
- * The one application, shared by every producer.
+ * The one application. Everything else in this example is derived from it.
  *
- * `update` is the single source of truth: the human clicking a checkbox, an
- * agent calling a WebMCP tool, and a peer's operation arriving over sync all
- * become a `Message` and run through this function. Everything else in the
- * example — the Surface projections, the sync slice, the agent contract — is
- * derived from what is declared here.
+ * A human clicking a checkbox, an agent calling a tool, and a peer's committed
+ * operation arriving over sync all become a `Message` and run through `update`.
+ * There is no second reducer anywhere: the replica's replay, the server
+ * journal's reducer, and the agent's dispatch are all this function.
  *
- * Durable Messages are state-only and carry every nondeterministic input (the
- * id), so replaying a committed operation is a pure function of the shared
- * slice. `replay` enforces that at the boundary.
+ * Three kinds of Message live here, and the distinction is the whole design:
+ *
+ * - **Durable facts** change the replicated slice (`todos`, `listTitle`). They
+ *   must be state-only and deterministic, because the replica replays them and
+ *   the server reduces them independently. Every nondeterministic input (an id,
+ *   a timestamp) is *inside* the Message, never computed in `update`.
+ *   `Sync.forApplication` enforces this: a durable Message whose transition
+ *   returns a Command or touches a local field is refused at `submit`.
+ * - **Effectful intents** are local Messages whose `update` returns a Command.
+ *   The Command does the impure work (mint an id, read the clock) and emits the
+ *   durable fact. `RequestedTodo` -> `SubmittedTodo` is the pattern.
+ * - **Local Messages** change per-device UI state (draft, filter, editing) and
+ *   never leave the tab.
  */
-import { Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import type * as Update from 'foldkit/update'
+
+export const Priority = Schema.Union([
+  Schema.Literal('low'),
+  Schema.Literal('normal'),
+  Schema.Literal('high'),
+])
+export type Priority = typeof Priority.Type
 
 export const Todo = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   completed: Schema.Boolean,
+  priority: Priority,
+  /** Milliseconds since the epoch, minted by the Command that created the todo. */
+  createdAt: Schema.Number,
 })
 export type Todo = typeof Todo.Type
 
-/** The replicated slice: the part of the Model a document owns. */
-export const Shared = Schema.Struct({ todos: Schema.Array(Todo) })
+/**
+ * The replicated slice. Two features contribute to it (`sync.ts` declares them
+ * as fragments): the list itself, and the list's own metadata.
+ */
+export const Shared = Schema.Struct({
+  listTitle: Schema.String,
+  todos: Schema.Array(Todo),
+})
 export type Shared = typeof Shared.Type
-export const decodeShared = Schema.decodeUnknownSync(Shared, { onExcessProperty: 'error' })
 export const encodeShared = Schema.encodeSync(Shared)
 
 export const Filter = Schema.Union([
@@ -35,61 +59,94 @@ export const Filter = Schema.Union([
 ])
 export type Filter = typeof Filter.Type
 
-/** The whole app state: the shared slice plus per-device UI state. */
+/** The whole Model: the shared slice plus per-device UI state. */
 export const Model = Schema.Struct({
   ...Shared.fields,
   draft: Schema.String,
   filter: Filter,
   editingId: Schema.NullOr(Schema.String),
+  editDraft: Schema.String,
   lastError: Schema.NullOr(Schema.String),
 })
 export type Model = typeof Model.Type
 
 export const Message = defineMessageUnion({
-  /** Local: the composer's text. */
-  DraftChanged: { value: Schema.String },
-  /** Durable: commit the draft as a todo. */
-  SubmittedTodo: { id: Schema.String, title: Schema.String },
-  /** Durable. */
+  // --- effectful intents: local, and their Command emits a durable fact -----
+  /** The composer was submitted. The Command mints the id and the timestamp. */
+  RequestedTodo: { title: Schema.String },
+  /** The inline editor was committed. The Command emits `RenamedTodo`. */
+  EditingCommitted: {},
+
+  // --- durable facts: replicated, replayed, journaled ----------------------
+  SubmittedTodo: { id: Schema.String, title: Schema.String, createdAt: Schema.Number },
   ToggledTodo: { id: Schema.String },
-  /** Durable. */
   RenamedTodo: { id: Schema.String, title: Schema.String },
-  /** Durable. */
+  PrioritySet: { id: Schema.String, priority: Priority },
   DeletedTodo: { id: Schema.String },
-  /** Durable: drop every completed todo. */
   ClearedCompleted: {},
-  /** Local. */
+  RenamedList: { title: Schema.String },
+
+  // --- local: this device only ---------------------------------------------
+  DraftChanged: { value: Schema.String },
   FilterSelected: { filter: Filter },
-  /** Local. */
   EditingStarted: { id: Schema.String },
-  /** Local. */
+  EditDraftChanged: { value: Schema.String },
   EditingStopped: {},
 })
 export type Message = typeof Message.Type
 
 export const initialModel: Model = {
+  listTitle: 'Todos',
   todos: [],
   draft: '',
   filter: 'all',
   editingId: null,
+  editDraft: '',
   lastError: null,
 }
 
-export const update = (model: Model, message: Message): Update.Return<Model, Message> =>
-  Message.match<Update.Return<Model, Message>>(message, {
-    DraftChanged: ({ value }) => ({ model: { ...model, draft: value } }),
-    SubmittedTodo: ({ id, title }) =>
+type Return = Update.Return<Model, Message>
+
+/** Mints what a durable fact needs and cannot compute itself: an id and a time. */
+const mintTodo = (title: string) => ({
+  name: 'MintTodo',
+  effect: Effect.map(Clock.currentTimeMillis, createdAt =>
+    Message.SubmittedTodo({ id: crypto.randomUUID(), title, createdAt }),
+  ),
+})
+
+const nextPriority: Record<Priority, Priority> = { low: 'normal', normal: 'high', high: 'low' }
+
+export const update = (model: Model, message: Message): Return =>
+  Message.match<Return>(message, {
+    // Intents. Note that each one clears its *local* state here, in the local
+    // transition; the durable fact it causes never touches local fields.
+    RequestedTodo: ({ title }) =>
       title.trim() === ''
         ? { model }
-        : {
-            model: {
-              ...model,
-              draft: '',
-              todos: model.todos.some(todo => todo.id === id)
-                ? model.todos
-                : [...model.todos, { id, title: title.trim(), completed: false }],
-            },
-          },
+        : { model: { ...model, draft: '' }, commands: [mintTodo(title.trim())] },
+    EditingCommitted: () => {
+      const id = model.editingId
+      const title = model.editDraft.trim()
+      if (id === null) return { model }
+      const stopped = { ...model, editingId: null, editDraft: '' }
+      if (title === '' || model.todos.every(todo => todo.id !== id)) return { model: stopped }
+      return {
+        model: stopped,
+        commands: [{ name: 'Rename', effect: Effect.succeed(Message.RenamedTodo({ id, title })) }],
+      }
+    },
+
+    // Durable facts: pure over the shared slice, idempotent where a retry could
+    // deliver one twice.
+    SubmittedTodo: ({ id, title, createdAt }) => ({
+      model: {
+        ...model,
+        todos: model.todos.some(todo => todo.id === id)
+          ? model.todos
+          : [...model.todos, { id, title, completed: false, priority: 'normal', createdAt }],
+      },
+    }),
     ToggledTodo: ({ id }) => ({
       model: {
         ...model,
@@ -101,71 +158,54 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
     RenamedTodo: ({ id, title }) => ({
       model: {
         ...model,
-        editingId: model.editingId === id ? null : model.editingId,
         todos: model.todos.map(todo => (todo.id === id ? { ...todo, title } : todo)),
       },
     }),
-    DeletedTodo: ({ id }) => ({
+    PrioritySet: ({ id, priority }) => ({
       model: {
         ...model,
-        editingId: model.editingId === id ? null : model.editingId,
-        todos: model.todos.filter(todo => todo.id !== id),
+        todos: model.todos.map(todo => (todo.id === id ? { ...todo, priority } : todo)),
       },
+    }),
+    DeletedTodo: ({ id }) => ({
+      model: { ...model, todos: model.todos.filter(todo => todo.id !== id) },
     }),
     ClearedCompleted: () => ({
       model: { ...model, todos: model.todos.filter(todo => !todo.completed) },
     }),
+    RenamedList: ({ title }) =>
+      title.trim() === '' ? { model } : { model: { ...model, listTitle: title.trim() } },
+
+    // Local.
+    DraftChanged: ({ value }) => ({ model: { ...model, draft: value } }),
     FilterSelected: ({ filter }) => ({ model: { ...model, filter } }),
-    EditingStarted: ({ id }) => ({ model: { ...model, editingId: id } }),
-    EditingStopped: () => ({ model: { ...model, editingId: null } }),
+    EditingStarted: ({ id }) => ({
+      model: {
+        ...model,
+        editingId: id,
+        editDraft: model.todos.find(todo => todo.id === id)?.title ?? '',
+      },
+    }),
+    EditDraftChanged: ({ value }) => ({ model: { ...model, editDraft: value } }),
+    EditingStopped: () => ({ model: { ...model, editingId: null, editDraft: '' } }),
   })
 
-/** Which Messages change the replicated slice; the rest are per-device. */
-export const durableTags = new Set<Message['_tag']>([
-  'SubmittedTodo',
-  'ToggledTodo',
-  'RenamedTodo',
-  'DeletedTodo',
-  'ClearedCompleted',
-])
+/** The priority a click on the badge moves to. Derived, so the view stays dumb. */
+export const bumpPriority = (priority: Priority): Priority => nextPriority[priority]
 
-export const decodeMessage = Schema.decodeUnknownSync(Message, { onExcessProperty: 'error' })
-export const encodeMessage = Schema.encodeSync(Message)
+const rank: Record<Priority, number> = { high: 0, normal: 1, low: 2 }
 
-/**
- * Replays one committed operation against the replicated slice.
- *
- * It runs the real `update` and then proves the transition stayed inside the
- * shared slice: no Commands, and no change to `draft`/`filter`/`editingId`.
- * A durable Message that reaches for local state fails loudly here rather than
- * silently diverging across replicas.
- */
-export const replay = (shared: Shared, message: Message, transition = update): Shared => {
-  if (!durableTags.has(message._tag)) throw new Error('Message is local-only')
-  const result = transition({ ...initialModel, ...shared }, message)
-  if (result.commands?.length) throw new Error('Durable transitions must not produce Commands')
-  const { todos, draft, filter, editingId, lastError } = result.model
-  if (
-    draft !== initialModel.draft ||
-    filter !== initialModel.filter ||
-    editingId !== initialModel.editingId ||
-    lastError !== initialModel.lastError
-  ) {
-    throw new Error('Durable transition changed local Model fields')
-  }
-  return decodeShared({ todos })
+/** The todos under the filter, highest priority first, then oldest first. */
+export const visibleTodos = (model: Pick<Model, 'todos' | 'filter'>): ReadonlyArray<Todo> => {
+  const wanted = model.filter === 'all' ? undefined : model.filter === 'completed'
+  return model.todos
+    .filter(todo => wanted === undefined || todo.completed === wanted)
+    .sort((a, b) => rank[a.priority] - rank[b.priority] || a.createdAt - b.createdAt)
 }
 
-/** The todos visible under a filter, in insertion order. */
-export const visibleTodos = (model: Model): ReadonlyArray<Todo> => {
-  if (model.filter === 'all') return model.todos
-  const wanted = model.filter === 'active' ? false : true
-  return model.todos.filter(todo => todo.completed === wanted)
-}
-
-/** Counts for the footer and the agent context. */
+/** Counts for the header, the footer, and the agent. */
 export const counts = (
-  model: Model,
+  model: Pick<Model, 'todos'>,
 ): { readonly total: number; readonly active: number; readonly completed: number } => ({
   total: model.todos.length,
   active: model.todos.filter(todo => !todo.completed).length,

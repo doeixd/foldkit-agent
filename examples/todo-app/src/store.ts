@@ -1,27 +1,37 @@
+/**
+ * A tiny in-memory runtime for the demo: `update`, Commands, and the host seam
+ * an agent binds to. In the browser `Sync.mount` provides the same shape over
+ * the real Foldkit runtime and the replica; here the loop is a few lines so the
+ * transcript can run without a DOM.
+ *
+ * It runs Commands, because the example's intent-to-fact pattern depends on
+ * them: `RequestedTodo` mints its fact in a Command, and `dispatch` settles
+ * only once the fact has been applied.
+ */
+import { Effect } from 'effect'
 import type { Agent } from 'foldkit-agent'
 import { type Message, type Model, initialModel, update } from './app.js'
 
-/**
- * The seam between the agent contract and a running application.
- *
- * Foldkit `0.158.2` exposes no Model or dispatch handle, so the application
- * provides this. In the browser build the same shape is backed by the live
- * Foldkit runtime and the sync replica; here it is a tiny loop over `update`.
- */
 export interface Store {
   readonly host: Agent.AgentHost<Model, Message>
   readonly model: () => Model
-  /** Dispatch from the UI side, to show both surfaces driving one state machine. */
-  readonly dispatch: (message: Message) => void
+  /** Dispatches and waits for the Commands it caused, and theirs. */
+  readonly dispatch: (message: Message) => Promise<void>
 }
 
 export const makeStore = (initial: Model = initialModel): Store => {
   let model = initial
-  const listeners = new Set<() => void>()
+  const modelListeners = new Set<() => void>()
+  const messageListeners = new Set<(message: Message) => void>()
 
-  const dispatch = (message: Message): void => {
-    model = update(model, message).model
-    for (const listener of listeners) listener()
+  const dispatch = async (message: Message): Promise<void> => {
+    for (const listener of messageListeners) listener(message)
+    const result = update(model, message)
+    model = result.model
+    for (const listener of modelListeners) listener()
+    await Promise.all(
+      (result.commands ?? []).map(command => Effect.runPromise(command.effect).then(dispatch)),
+    )
   }
 
   return {
@@ -31,8 +41,12 @@ export const makeStore = (initial: Model = initialModel): Store => {
       model: () => model,
       dispatch,
       subscribe: listener => {
-        listeners.add(listener)
-        return () => listeners.delete(listener)
+        modelListeners.add(listener)
+        return () => modelListeners.delete(listener)
+      },
+      observe: listener => {
+        messageListeners.add(listener as (message: Message) => void)
+        return () => messageListeners.delete(listener as (message: Message) => void)
       },
     },
   }

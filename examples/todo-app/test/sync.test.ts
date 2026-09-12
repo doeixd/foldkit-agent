@@ -5,7 +5,8 @@ import { Effect } from 'effect'
 import { layerSocket } from 'foldkit-sync'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Message } from '../src/app.js'
-import { openJournal, type SyncPrincipal } from '../src/journal.js'
+import { openJournal } from '../src/journal.js'
+import type { SyncPrincipal } from '../src/principal.js'
 import { startSyncServer, type SyncServer } from '../src/server.js'
 import { closeStorages, openReplica, type TodoReplica } from './helpers.js'
 
@@ -28,8 +29,12 @@ describe('the sync server', () => {
     const a = await openReplica('a')
     const b = await openReplica('b')
     try {
-      await Effect.runPromise(a.submit(Message.SubmittedTodo({ id: 'a', title: 'from a' })))
-      await Effect.runPromise(b.submit(Message.SubmittedTodo({ id: 'b', title: 'from b' })))
+      await Effect.runPromise(
+        a.submit(Message.SubmittedTodo({ id: 'a', title: 'from a', createdAt: 1 })),
+      )
+      await Effect.runPromise(
+        b.submit(Message.SubmittedTodo({ id: 'b', title: 'from b', createdAt: 2 })),
+      )
 
       // Two passes: each replica pushes its outbox, then catches up on the
       // other's committed operation.
@@ -56,7 +61,7 @@ describe('the sync server', () => {
     const replica = await openReplica('client')
     try {
       journal.appendAsServer(
-        Message.SubmittedTodo({ id: 's1', title: 'from the server agent' }),
+        Message.SubmittedTodo({ id: 's1', title: 'from the server agent', createdAt: 1 }),
         principal,
         'server',
       )
@@ -64,7 +69,13 @@ describe('the sync server', () => {
       await sync(server.url, replica)
 
       expect(Effect.runSync(replica.shared).todos).toEqual([
-        { id: 's1', title: 'from the server agent', completed: false },
+        {
+          id: 's1',
+          title: 'from the server agent',
+          completed: false,
+          priority: 'normal',
+          createdAt: 1,
+        },
       ])
     } finally {
       await Effect.runPromise(replica.close)
@@ -78,7 +89,7 @@ describe('the sync server', () => {
     try {
       const first = openJournal(file)
       first.appendAsServer(
-        Message.SubmittedTodo({ id: 'p1', title: 'persisted' }),
+        Message.SubmittedTodo({ id: 'p1', title: 'persisted', createdAt: 1 }),
         principal,
         'server',
       )
@@ -86,11 +97,46 @@ describe('the sync server', () => {
 
       const second = openJournal(file)
       expect(second.snapshot('todos').model.todos).toEqual([
-        { id: 'p1', title: 'persisted', completed: false },
+        { id: 'p1', title: 'persisted', completed: false, priority: 'normal', createdAt: 1 },
       ])
       second.close()
     } finally {
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("applies the contract's authorize rules in the server journal", async () => {
+    const journal = openJournal(':memory:')
+    const guest: SyncPrincipal = { ...principal, actorId: 'guest' }
+    const server = await startSyncServer({
+      journal,
+      authenticate: token => ({ principal: token === 'owner' ? principal : guest }),
+    })
+    servers.push(server)
+    const replica = await openReplica('guest')
+    try {
+      await Effect.runPromise(
+        replica.submit(Message.SubmittedTodo({ id: 'g', title: 'guest todo', createdAt: 1 })),
+      )
+      // Owner-only on the contract: refused for a guest and reverted locally.
+      await Effect.runPromise(replica.submit(Message.RenamedList({ title: 'Mine now' })))
+      // Names no todo in the snapshot: refused by the `DeletedTodo` rule.
+      await Effect.runPromise(replica.submit(Message.DeletedTodo({ id: 'nope' })))
+
+      await sync(`${server.url}/?token=guest`, replica)
+
+      const status = await Effect.runPromise(replica.status)
+      expect(status.rejected).toEqual(['guest:2', 'guest:3'])
+      expect(Effect.runSync(replica.shared)).toEqual({
+        listTitle: 'Todos',
+        todos: [
+          { id: 'g', title: 'guest todo', completed: false, priority: 'normal', createdAt: 1 },
+        ],
+      })
+      expect(journal.snapshot('todos').model.listTitle).toBe('Todos')
+    } finally {
+      await Effect.runPromise(replica.close)
+      journal.close()
     }
   })
 })
