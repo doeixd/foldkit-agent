@@ -55,3 +55,15 @@ Selection.make(SlimUser, { id: true, name: true })
 
 // @ts-expect-error the override dropped `email`
 Selection.make(SlimUser, { email: true })
+
+// Relations still merge on top of a `fields` override.
+const RefinedProject = entity('Project', projects, {
+  fields: {
+    id: Schema.String,
+    name: Schema.String,
+    ownerId: Schema.String,
+    createdAt: Schema.String,
+  },
+  relations: { owner: one(UserBinding, { field: projects.ownerId, nullable: true }) },
+})
+Selection.make(RefinedProject, { owner: true })
