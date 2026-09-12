@@ -112,6 +112,9 @@ export interface EntityBinding<
  */
 export type AnyEntityBinding = EntityBinding<any, any, any>
 
+// Overloads rather than `Nullable extends boolean = false`: with `nullable`
+// omitted, inference widens the parameter to `boolean` instead of taking the
+// default, which would make every ref nullable.
 interface One {
   <Target extends AnyEntityBinding>(
     entity: Target,

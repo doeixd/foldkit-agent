@@ -165,9 +165,9 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 - A nullable ordered column pages under Postgres' default NULL ordering (ASC:
   nulls last, DESC: nulls first); the keyset predicate uses `IS NULL` / `IS NOT
   NULL` rather than comparing a column to NULL.
-- The window is client-supplied: `first`/`last` are clamped to a positive integer
-  under `maxPageSize` (default 100), and `after`/`before` or `first`/`last`
-  cannot be combined.
+- The window is client-supplied: `first`/`last` are clamped to a non-negative
+  integer under `maxPageSize` (default 100), with `0` honored as boundaries
+  only, and `after`/`before` or `first`/`last` cannot be combined.
 - A cursor that no longer resolves fails the query rather than silently returning
   page one.
 

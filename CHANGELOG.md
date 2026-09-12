@@ -94,6 +94,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   first `pageSize + 1` of each, so a `Selection.connection` over many parents
   no longer runs one page query per parent; the statement count of a windowed
   nested read no longer grows with the number of parents (#65, Phase E item 16).
+  Its `source` declares the binding's fields (`EntitySource.fields`), so the
+  server never asks it for another; `first: 0` is honored as a page of
+  boundaries only rather than falling back to the default size.
 - **Property tests and two fixes they found.** Seeded property checks over
   connection merge, live event ordering, and optimistic convergence. `merge`
   now puts a terminal-start segment first and a terminal-end segment last, so
