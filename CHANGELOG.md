@@ -97,7 +97,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   inner stream fails the merge rather than being swallowed.
 - **Theme and recipes.** `Theme.define` is typed token data, with
   `Theme.variable`/`Theme.variables` compiling to CSS custom properties;
-  `Style.recipe` is a typed variant selector returning Style data.
+  `Style.recipe` is a typed variant selector returning Style data, with
+  `compound` combinations matched against the resolved selection.
 - **Advanced Style compiler (started).** `Style.pseudo`/`media`/`supports`/
   `container`/`nest` compile to a deterministic class (FNV-1a of the canonical
   rule text) plus CSS text; `Style.keyframes` and `Style.global` contribute

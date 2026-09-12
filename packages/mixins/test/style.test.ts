@@ -120,4 +120,25 @@ describe('Style', () => {
     expect(Button({ intent: 'secondary' }).classes).toEqual(['button', 'secondary', 'md'])
     expect(Button({ intent: 'primary', size: 'sm' }).classes).toEqual(['button', 'primary', 'sm'])
   })
+
+  it('recipe applies a matching compound after the variants', () => {
+    const Button = Style.recipe({
+      base: Style.class('button'),
+      variants: {
+        intent: { primary: Style.class('primary'), ghost: Style.class('ghost') },
+        size: { sm: Style.class('sm'), lg: Style.class('lg') },
+      },
+      defaults: { size: 'sm' },
+      compound: [{ when: { intent: 'primary', size: 'lg' }, style: Style.class('primary-lg') }],
+    })
+    expect(Button({ intent: 'primary', size: 'lg' }).classes).toEqual([
+      'button',
+      'primary',
+      'lg',
+      'primary-lg',
+    ])
+    // The default resolves before compound matching, so this one does not match.
+    expect(Button({ intent: 'primary' }).classes).toEqual(['button', 'primary', 'sm'])
+    expect(Button({ intent: 'ghost', size: 'lg' }).classes).toEqual(['button', 'ghost', 'lg'])
+  })
 })

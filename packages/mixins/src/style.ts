@@ -323,10 +323,17 @@ export const attach =
 
 export type RecipeVariantDef = Readonly<Record<string, StyleValue>>
 
+/** A combination style applied when every `when` entry matches the selection. */
+export interface RecipeCompound {
+  readonly when: Readonly<Record<string, string>>
+  readonly style: StyleValue
+}
+
 export interface RecipeDef<Variants extends Readonly<Record<string, RecipeVariantDef>>> {
   readonly base?: StyleValue
   readonly variants: Variants
   readonly defaults?: { readonly [K in keyof Variants]?: keyof Variants[K] & string }
+  readonly compound?: ReadonlyArray<RecipeCompound>
 }
 
 export type AnyRecipeDef = RecipeDef<Record<string, RecipeVariantDef>>
@@ -335,19 +342,27 @@ export type RecipeSelection<D extends AnyRecipeDef> = {
   readonly [K in keyof D['variants']]?: keyof D['variants'][K] & string
 }
 
-/** A recipe is just Style data: base + one piece per selected variant. */
+/** A recipe is just Style data: base, one piece per selected variant, then any
+ *  matching compound. */
 export const recipe =
   <D extends AnyRecipeDef>(def: D) =>
   (selection: RecipeSelection<D>): StyleValue => {
     const pieces: Array<StyleValue> = []
     if (def.base !== undefined) pieces.push(def.base)
+    const effective: Record<string, string> = {}
     for (const [variant, values] of Object.entries(def.variants)) {
       const chosen =
         (selection as Record<string, string | undefined>)[variant] ??
         (def.defaults as Record<string, string | undefined> | undefined)?.[variant]
       if (chosen === undefined) continue
+      effective[variant] = chosen
       const piece = (values as Record<string, StyleValue>)[chosen]
       if (piece !== undefined) pieces.push(piece)
+    }
+    for (const compound of def.compound ?? []) {
+      if (Object.entries(compound.when).every(([variant, value]) => effective[variant] === value)) {
+        pieces.push(compound.style)
+      }
     }
     return compose(...pieces)
   }

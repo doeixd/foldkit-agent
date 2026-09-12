@@ -202,6 +202,11 @@ override even when a later attachment would otherwise win.
 - Behavior owns no state. Stateful widgets stay `@foldkit/ui` Submodels; a
   continuous element listener is a Mount; a network call is Message -> update ->
   Command.
+- `Mixin.mapInput` / `forSlot` / `describe` are deliberately absent. A `Mixin`
+  is not parameterized by its input: `context.input` is `unknown` and re-narrowed
+  by the authoring helper, so `mapInput` has no honest type here; nothing needs
+  `forSlot`; and `SurfaceView.inspect` covers view-level introspection. Add them
+  with a concrete caller rather than speculatively.
 - Event ownership normalizes a tag by stripping `On` and lowercasing, so
   `OnKeyDownPreventDefault` owns `keydownpreventdefault`, not `keydown`. A slot
   whose base installs a prevent-default handler therefore does not advertise
