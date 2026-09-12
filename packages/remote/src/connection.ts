@@ -94,7 +94,7 @@ const join = (a: Segment, b: Segment): Segment | undefined => {
   const overlap = overlapLength(a.edges, b.edges)
   if (overlap > 0) {
     return {
-      edges: dedupeEdges([...a.edges, ...b.edges.slice(overlap)]),
+      edges: dedupeEdges([...a.edges, ...b.edges]),
       start: a.start,
       end: b.end,
     }
