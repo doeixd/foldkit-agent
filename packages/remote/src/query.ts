@@ -45,7 +45,8 @@ export interface QueryDescriptor<Name extends string, Input, Result> {
 
 /** Stable stringify: object keys sorted, undefined-valued keys dropped, so equal inputs encode equally. */
 export const stableStringify = (value: unknown): string => {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined'
+  if (value === undefined) return 'null'
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
   const record = value as Record<string, unknown>
   return `{${Object.keys(record)

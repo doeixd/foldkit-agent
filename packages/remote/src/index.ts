@@ -44,6 +44,7 @@ import {
   type NormalizedPatch,
 } from './mutation.js'
 import {
+  clearStale,
   entityKey,
   emptyStore,
   isFieldStale,
@@ -56,7 +57,13 @@ import {
 } from './store.js'
 import { plan, windowKey, type PlanOptions } from './plan.js'
 import { RemotePolicy } from './policy.js'
-import { RelationAnnotation, isRefPage, refsIn, relationShape } from './relation.js'
+import {
+  RelationAnnotation,
+  RelationEntityAnnotation,
+  isRefPage,
+  refsIn,
+  relationShape,
+} from './relation.js'
 import { coalesceReads, type CoalesceOptions } from './coalesce.js'
 import { gc, type RetentionRoots } from './retain.js'
 import { mergeStores, type MergePolicy } from './persistence.js'
@@ -143,10 +150,9 @@ const decodeRef = (encoded: string): { readonly entity: string; readonly id: str
  * target schema is not inlined, recursive relations cannot arise through the
  * schema graph.
  */
-const refCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema.Codec<
-  EntityRef<Name, F>,
-  string
-> =>
+const refCodec = <Name extends string, F extends Schema.Struct.Fields>(
+  entity: Name,
+): Schema.Codec<EntityRef<Name, F>, string> =>
   Schema.Struct({ entity: Schema.String, id: Schema.String })
     .pipe(
       Schema.encodeTo(Schema.String, {
@@ -154,10 +160,10 @@ const refCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema
         encode: SchemaGetter.transform(encodeRef),
       }),
     )
-    .annotate({ [RelationAnnotation]: 'one' }) as unknown as Schema.Codec<
-    EntityRef<Name, F>,
-    string
-  >
+    .annotate({
+      [RelationAnnotation]: 'one',
+      [RelationEntityAnnotation]: entity,
+    }) as unknown as Schema.Codec<EntityRef<Name, F>, string>
 
 export interface EntityPatch<Name extends string, F extends Schema.Struct.Fields> {
   readonly entity: Name
@@ -179,7 +185,9 @@ export interface RefPage<
   readonly hasPrevious: boolean
 }
 
-const refPageCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema.Codec<
+const refPageCodec = <Name extends string, F extends Schema.Struct.Fields>(
+  entity: Name,
+): Schema.Codec<
   RefPage<Name, F>,
   {
     readonly refs: ReadonlyArray<string>
@@ -188,10 +196,13 @@ const refPageCodec = <Name extends string, F extends Schema.Struct.Fields>(): Sc
   }
 > =>
   Schema.Struct({
-    refs: Schema.Array(refCodec<Name, F>()),
+    refs: Schema.Array(refCodec<Name, F>(entity)),
     hasNext: Schema.Boolean,
     hasPrevious: Schema.Boolean,
-  }).annotate({ [RelationAnnotation]: 'page' }) as unknown as Schema.Codec<
+  }).annotate({
+    [RelationAnnotation]: 'page',
+    [RelationEntityAnnotation]: entity,
+  }) as unknown as Schema.Codec<
     RefPage<Name, F>,
     {
       readonly refs: ReadonlyArray<string>
@@ -216,12 +227,12 @@ export const Entity = {
 
   /** A relation to a known entity, decoded as a reference. */
   ref: <Name extends string, F extends Schema.Struct.Fields>(
-    _entity: EntityDescriptor<Name, F>,
-  ): Schema.Codec<EntityRef<Name, F>, string> => refCodec<Name, F>(),
+    entity: EntityDescriptor<Name, F>,
+  ): Schema.Codec<EntityRef<Name, F>, string> => refCodec<Name, F>(entity.name),
 
   /** A relation by name, for recursive or forward references. */
-  refTo: <Name extends string>(_name: Name): Schema.Codec<EntityRef<Name>, string> =>
-    refCodec<Name, Schema.Struct.Fields>(),
+  refTo: <Name extends string>(name: Name): Schema.Codec<EntityRef<Name>, string> =>
+    refCodec<Name, Schema.Struct.Fields>(name),
 
   /**
    * The wire key a relation field carries (`"Entity:id"`). Adapters that read a
@@ -234,7 +245,7 @@ export const Entity = {
 
   /** A relation value of one authoritative page of refs. */
   refPage: <Name extends string, F extends Schema.Struct.Fields>(
-    _entity: EntityDescriptor<Name, F>,
+    entity: EntityDescriptor<Name, F>,
   ): Schema.Codec<
     RefPage<Name, F>,
     {
@@ -242,7 +253,7 @@ export const Entity = {
       readonly hasNext: boolean
       readonly hasPrevious: boolean
     }
-  > => refPageCodec<Name, F>(),
+  > => refPageCodec<Name, F>(entity.name),
 
   patch: <Name extends string, F extends Schema.Struct.Fields>(
     ref: EntityRef<Name, F>,
@@ -285,22 +296,36 @@ export interface Selection<
   readonly shape?: Shape
 }
 
+/** The nested selections a relation field admits: of its target entity, in the shapes its value takes. */
+type NestedFor<Field> =
+  Exclude<Field, null | undefined> extends ReadonlyArray<EntityRef<infer Name, any>>
+    ? Selection<unknown, Name, 'entity' | 'connection'>
+    : Exclude<Field, null | undefined> extends RefPage<infer Name, any>
+      ? Selection<unknown, Name, 'entity' | 'connection'>
+      : Exclude<Field, null | undefined> extends EntityRef<infer Name, any>
+        ? Selection<unknown, Name, 'entity'>
+        : never
+
 type SelectionOf<F extends Schema.Struct.Fields> = {
-  readonly [K in keyof F]?: true | Selection<unknown, string, 'entity' | 'connection'>
+  readonly [K in keyof F]?: true | NestedFor<Schema.Schema.Type<F[K]>>
 }
+
+/** `T | null` when the field admits `null` or `undefined` (both assemble to `null`). */
+type Nullable<Field, T> = [Extract<Field, null | undefined>] extends [never] ? T : T | null
 
 /** A nested selection's value takes the shape of the field it selects through. */
 type NestedValue<Field, Sel> =
   Sel extends Selection<infer V, string, 'connection'>
-    ? V
+    ? Nullable<Field, V>
     : Sel extends Selection<infer V, string, 'entity'>
-      ? Field extends ReadonlyArray<EntityRef<any, any>>
-        ? ReadonlyArray<V>
-        : Field extends RefPage<any, any>
-          ? Page<V>
-          : null extends Field
-            ? V | null
-            : V
+      ? Nullable<
+          Field,
+          Exclude<Field, null | undefined> extends ReadonlyArray<EntityRef<any, any>>
+            ? ReadonlyArray<V>
+            : Exclude<Field, null | undefined> extends RefPage<any, any>
+              ? Page<V>
+              : V
+        >
       : never
 
 type SelectionValue<F extends Schema.Struct.Fields, Sel> = {
@@ -344,28 +369,34 @@ export const Selection = {
         continue
       }
       const nested = choice as Selection<unknown>
-      if (nested.window !== undefined) {
-        // A connection: the nested selection already carries its page codec.
-        connections[key] = nested.window
-        picked[key] = nested.schema as AnySchema
-        if (nested.fields.length > 0) relations[key] = relationOf(nested)
-        continue
-      }
       const shape = relationShape(entity.fields[key] as Schema.Top)
       if (shape === undefined) {
         throw new Error(
           `Selection.make: "${key}" on "${entity.name}" is not a relation field, so it cannot take a nested selection`,
         )
       }
+      if (nested.entity !== shape.entity) {
+        throw new Error(
+          `Selection.make: "${key}" on "${entity.name}" refers to "${shape.entity}", not "${nested.entity}"`,
+        )
+      }
+      const nullable = (codec: AnySchema): AnySchema =>
+        shape.nullable ? (Schema.NullOr(codec) as unknown as AnySchema) : codec
+      if (nested.window !== undefined) {
+        // A connection: the nested selection already carries its page codec.
+        connections[key] = nested.window
+        picked[key] = nullable(nested.schema as AnySchema)
+        if (nested.fields.length > 0) relations[key] = relationOf(nested)
+        continue
+      }
       const item = nested.schema as AnySchema
-      picked[key] =
+      picked[key] = nullable(
         shape.kind === 'many'
           ? (Schema.Array(item) as unknown as AnySchema)
           : shape.kind === 'page'
             ? pageSchema(item)
-            : shape.nullable
-              ? (Schema.NullOr(item) as unknown as AnySchema)
-              : item
+            : item,
+      )
       relations[key] = relationOf(nested)
     }
     return {
@@ -695,7 +726,15 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
         entities: writeRead(model.entities, message.requests, message.result, message.now),
       }
     case 'ReadFailed':
-      return model
+      // The refresh is over; the fields read as they did before it started.
+      return {
+        ...model,
+        entities: message.requests.reduce(
+          (store, request) =>
+            clearStale(store, entityKey(request.entity, request.id), request.fields),
+          model.entities,
+        ),
+      }
     case 'RetentionChanged':
       return { ...model, ...gc(model, message.roots) }
     case 'Hydrated':
@@ -929,23 +968,44 @@ const writeRead = (
   result: Schema.Schema.Type<typeof ReadBatchResult>,
   now = 0,
 ): EntityStore => {
+  const returned = new Map<string, Record<string, unknown>>()
+  for (const entity of result.entities) {
+    const key = entityKey(entity.entity, entity.id)
+    returned.set(key, { ...returned.get(key), ...entity.values })
+  }
   const byEntity = new Map<
     string,
     { windows: Record<string, string>; merge: Map<string, 'after' | 'before'> }
   >()
-  for (const request of requests) {
-    const key = entityKey(request.entity, request.id)
+  // A request's windows apply to its entity; a relation's windows apply to
+  // each target the returned refs name, and so on down the graph.
+  const record = (
+    key: string,
+    windows: Requirement['windows'],
+    relations: Requirement['relations'],
+  ): void => {
     let entry = byEntity.get(key)
     if (entry === undefined) {
       entry = { windows: {}, merge: new Map() }
       byEntity.set(key, entry)
     }
-    for (const [field, window] of Object.entries(request.windows ?? {})) {
+    for (const [field, window] of Object.entries(windows ?? {})) {
       entry.windows[field] = windowKey(window)
       const direction =
         window.after !== undefined ? 'after' : window.before !== undefined ? 'before' : undefined
       if (direction !== undefined) entry.merge.set(field, direction)
     }
+    const values = returned.get(key)
+    if (values === undefined) return
+    for (const [field, relation] of Object.entries(relations ?? {})) {
+      for (const ref of refsIn(values[field])) {
+        if (ref.entity !== relation.entity) continue
+        record(entityKey(ref.entity, ref.id), relation.windows, relation.relations)
+      }
+    }
+  }
+  for (const request of requests) {
+    record(entityKey(request.entity, request.id), request.windows, request.relations)
   }
 
   return result.entities.reduce((current, entity) => {
@@ -1292,7 +1352,7 @@ export const Remote = {
   select:
     <AppModel, Store extends RemoteModel, Names extends string, Value, Name extends Names>(
       bound: BoundRemote<AppModel, Store, Names>,
-      selection: Selection<Value, Name>,
+      selection: Selection<Value, Name, 'entity'>,
     ) =>
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
       Model: remoteDataSchema(selection.schema),
@@ -1352,12 +1412,13 @@ export const Remote = {
   ) {
     const store = storeOf(bound, model)
     const { policy = RemotePolicy.cacheFirst, now = Date.now } = options
-    const missing = plan(store, projection.requirements, RemotePolicy.toPlan(policy, now()))
+    const at = now()
+    const missing = plan(store, projection.requirements, RemotePolicy.toPlan(policy, at))
     if (missing.length === 0) return store
     yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
     const client = yield* RemoteClient
     const result = yield* client.read({ version: REMOTE_PROTOCOL_VERSION, requests: missing })
-    return writeRead(store, missing, result)
+    return writeRead(store, missing, result, at)
   }),
 
   /**

@@ -112,3 +112,38 @@ Remote.at(Data, goodStore)
 declare const wrongStore: ModelRef<unknown, { readonly entities: string }>
 // @ts-expect-error a focus without the Remote model shape is not a store
 Remote.at(Data, wrongStore)
+
+// --- Nested selections are constrained to the field's target and nullability --
+
+const Nullable = Entity.make(
+  'Nullable',
+  Schema.Struct({
+    id: Schema.String,
+    maybe: Schema.optional(Entity.ref(User)),
+    members: Schema.NullOr(Schema.Array(Entity.ref(User))),
+    comments: Schema.NullOr(Entity.refPage(Comment)),
+  }),
+)
+const NullableCard = Selection.make(Nullable, {
+  maybe: UserSummary,
+  members: UserSummary,
+  comments: Selection.connection(Comment, { first: 1 }, CommentBody),
+})
+type NullableCard = typeof NullableCard extends Selection<infer V, any, any> ? V : never
+const _maybe: { readonly id: string; readonly name: string } | null = ({} as NullableCard).maybe
+const _nullMembers: ReadonlyArray<{ readonly id: string; readonly name: string }> | null = (
+  {} as NullableCard
+).members
+const _nullComments: {
+  readonly items: ReadonlyArray<{ readonly body: string }>
+  readonly hasNext: boolean
+  readonly hasPrevious: boolean
+} | null = ({} as NullableCard).comments
+// @ts-expect-error a nested selection must be of the field's target entity
+Selection.make(Board, { owner: CommentBody })
+// @ts-expect-error a scalar field takes no nested selection
+Selection.make(Board, { id: UserSummary })
+// @ts-expect-error a singular ref takes no connection selection
+Selection.make(Board, { owner: Selection.connection(User, { first: 1 }) })
+// @ts-expect-error Remote.select takes an entity selection, not a bare connection
+Remote.select({} as never, Selection.connection(Comment, { first: 1 }))

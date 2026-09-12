@@ -4,6 +4,7 @@ import {
   Entity,
   Selection,
   coalesceReads,
+  emptyMutationState,
   emptyOptimistic,
   emptyStore,
   entityKey,
@@ -36,7 +37,12 @@ describe('retention follows a nested relation even when its target was reached f
     store = writeEntity(store, entityKey('User', 'u1'), { name: 'ada', team: 'Team:t1' })
     store = writeEntity(store, entityKey('Team', 't1'), { name: 'core' })
     const kept = gc(
-      { entities: store, connections: {}, optimistic: emptyOptimistic },
+      {
+        entities: store,
+        connections: {},
+        optimistic: emptyOptimistic,
+        mutations: emptyMutationState,
+      },
       {
         requirements: [
           { ...Owner, id: 'p1', fields: Owner.fields },
@@ -68,7 +74,7 @@ describe('coalescing keys and windows', () => {
     expect(requirementKey(a)).toBe(requirementKey(b))
   })
 
-  it('does not merge two requirements whose windows differ for the same field', async () => {
+  it('a requirement that pages a relation reads alone, so each reader gets its own page', async () => {
     const batches: Array<Parameters<BatchRead>[0]> = []
     const read: BatchRead = batch =>
       Effect.sync(() => {
@@ -93,8 +99,46 @@ describe('coalescing keys and windows', () => {
         )
       }),
     )
-    expect(batches).toHaveLength(1)
-    expect(batches[0]!.requests).toHaveLength(2)
-    expect(batches[0]!.requests.map(request => request.windows?.c?.first).sort()).toEqual([1, 5])
+    expect(batches).toHaveLength(2)
+    expect(batches.map(batch => batch.requests.length)).toEqual([1, 1])
+    expect(batches.map(batch => batch.requests[0]!.windows?.c?.first).sort()).toEqual([1, 5])
+  })
+})
+
+describe('review: a nested page requirement reads alone, plain requirements share a read', () => {
+  it('splits a batch into one plain read plus one read per paged requirement', async () => {
+    const batches: Array<Parameters<BatchRead>[0]> = []
+    const read: BatchRead = batch =>
+      Effect.sync(() => {
+        batches.push(batch)
+        return { entities: [] }
+      })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const coalesced = yield* coalesceReads(read)
+        yield* Effect.all(
+          [
+            coalesced({ version: 3, requests: [{ entity: 'P', id: '1', fields: ['a'] }] }),
+            coalesced({ version: 3, requests: [{ entity: 'P', id: '1', fields: ['b'] }] }),
+            coalesced({
+              version: 3,
+              requests: [
+                {
+                  entity: 'P',
+                  id: '1',
+                  fields: ['c'],
+                  relations: { c: { entity: 'C', fields: ['x'], windows: { x: { first: 2 } } } },
+                },
+              ],
+            }),
+          ],
+          { concurrency: 'unbounded' },
+        )
+      }),
+    )
+    expect(batches.map(batch => batch.requests.map(r => r.fields.join('+')))).toEqual([
+      ['a+b'],
+      ['c'],
+    ])
   })
 })

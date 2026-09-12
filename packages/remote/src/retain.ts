@@ -9,6 +9,7 @@ import { refsIn } from './relation.js'
 import { entityKey, readField, type EntityKey, type EntityStore } from './store.js'
 import type { Connection } from './connection.js'
 import type { Optimistic } from './optimistic.js'
+import type { MutationState } from './mutation.js'
 
 export interface RetentionRoots {
   readonly requirements: ReadonlyArray<Requirement>
@@ -19,6 +20,7 @@ export interface RetentionRoots {
 export interface Retained {
   readonly entities: EntityStore
   readonly connections: Readonly<Record<string, Connection>>
+  readonly optimistic: Optimistic
 }
 
 /**
@@ -30,6 +32,7 @@ export const reachable = (
   roots: RetentionRoots,
   connections: Readonly<Record<string, Connection>>,
   optimistic: Optimistic,
+  pending: ReadonlySet<string>,
 ): ReadonlySet<EntityKey> => {
   const kept = new Set<EntityKey>()
   // A target is walked once per relation spec that reaches it: two specs may
@@ -62,33 +65,47 @@ export const reachable = (
       for (const edge of segment.edges) kept.add(entityKey(edge.ref.entity, edge.ref.id))
     }
   }
+  // A pending request's changes are kept whole; a settled overlay (a live or
+  // confirmed insert) is kept only with a retained connection, below.
   for (const layer of optimistic.layers) {
+    if (!pending.has(layer.id)) continue
     for (const patch of layer.patches) kept.add(entityKey(patch.entity, patch.id))
   }
   for (const overlay of optimistic.overlays) {
+    if (!pending.has(overlay.id) && !roots.connections.includes(overlay.connection)) continue
     for (const edge of overlay.edges) kept.add(entityKey(edge.ref.entity, edge.ref.id))
   }
   return kept
 }
 
 /**
- * Drops every entity the roots do not reach and every connection they do not
- * name, keeping whatever a pending optimistic layer or overlay touches. Pure.
+ * Drops every entity the roots do not reach, every connection they do not
+ * name, and every settled overlay on a dropped connection, keeping whatever a
+ * pending request's layer or overlays touch. Pure.
  */
 export const gc = (
-  state: Retained & { readonly optimistic: Optimistic },
+  state: Retained & { readonly mutations: MutationState },
   roots: RetentionRoots,
 ): Retained => {
-  const kept = reachable(state.entities, roots, state.connections, state.optimistic)
+  const pending = state.mutations.pending
+  const kept = reachable(state.entities, roots, state.connections, state.optimistic, pending)
   const entities = Object.fromEntries(
     Object.entries(state.entities).filter(([key]) => kept.has(key)),
   )
   const keptConnections = new Set([
     ...roots.connections,
-    ...state.optimistic.overlays.map(overlay => overlay.connection),
+    ...state.optimistic.overlays
+      .filter(overlay => pending.has(overlay.id))
+      .map(overlay => overlay.connection),
   ])
   const connections = Object.fromEntries(
     Object.entries(state.connections).filter(([identity]) => keptConnections.has(identity)),
   )
-  return { entities, connections }
+  const optimistic: Optimistic = {
+    layers: state.optimistic.layers,
+    overlays: state.optimistic.overlays.filter(
+      overlay => pending.has(overlay.id) || keptConnections.has(overlay.connection),
+    ),
+  }
+  return { entities, connections, optimistic }
 }

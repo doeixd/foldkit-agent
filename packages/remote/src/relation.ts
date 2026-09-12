@@ -12,12 +12,15 @@ export interface RefParts {
 
 /** Marks the codec `Entity.ref`/`Entity.refPage` produce, so a Selection can tell the field's shape. */
 export const RelationAnnotation = 'foldkitRemoteRelation'
+/** The target entity's name on the same codec, so a nested selection of another entity is refused. */
+export const RelationEntityAnnotation = 'foldkitRemoteRelationEntity'
 
 export type RelationKind = 'one' | 'many' | 'page'
 
 export interface RelationShape {
   readonly kind: RelationKind
   readonly nullable: boolean
+  readonly entity: string
 }
 
 const refParts = (encoded: string): RefParts => {
@@ -76,12 +79,17 @@ export const relationShape = (schema: Schema.Top): RelationShape | undefined =>
 
 const shapeOf = (ast: AstLike, nullable: boolean): RelationShape | undefined => {
   const annotated = ast.annotations?.[RelationAnnotation]
-  if (annotated === 'one' || annotated === 'page') return { kind: annotated, nullable }
+  if (annotated === 'one' || annotated === 'page') {
+    return {
+      kind: annotated,
+      nullable,
+      entity: String(ast.annotations?.[RelationEntityAnnotation]),
+    }
+  }
   if (ast._tag === 'Arrays') {
     const item = ast.rest?.[0]
-    return item !== undefined && shapeOf(item, false)?.kind === 'one'
-      ? { kind: 'many', nullable }
-      : undefined
+    const inner = item === undefined ? undefined : shapeOf(item, false)
+    return inner?.kind === 'one' ? { kind: 'many', nullable, entity: inner.entity } : undefined
   }
   if (ast._tag === 'Union') {
     const members = ast.types ?? []

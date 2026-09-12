@@ -6,7 +6,7 @@
  * seam's concern, and the store is still the only cache.
  */
 import { Deferred, Duration, Effect, Request, RequestResolver, type Schema } from 'effect'
-import { Requirement } from 'foldkit-surface'
+import { Requirement, type RelationRequirement } from 'foldkit-surface'
 import { stableStringify } from './query.js'
 import { REMOTE_PROTOCOL_VERSION, type ReadBatch, type ReadBatchResult } from './wire.js'
 import type { RemoteProtocolError, RemoteReadError } from './wire.js'
@@ -34,16 +34,36 @@ export const requirementKey = (requirement: Requirement): string =>
     requirement.relations ?? null,
   ])
 
+/** Whether a requirement pages a relation anywhere in its graph. */
+const hasWindows = (requirement: RelationRequirement): boolean =>
+  requirement.windows !== undefined || Object.values(requirement.relations ?? {}).some(hasWindows)
+
 /**
- * Merges a batch's requirements for the wire. Requirements without windows
- * union per entity and id; a windowed requirement stays its own request, so
- * two readers paging the same relation differently each get their own page
- * (merging would let one window win for both).
+ * The reads a batch runs. Requirements that page nothing union into one read
+ * per entity and id, and every waiter may write its whole result, since
+ * plain values are the same whoever asked. A requirement that pages a
+ * relation reads alone: a page answers exactly one window, and a waiter
+ * cannot tell which of two pages for the same entity was its own.
  */
-const mergeForBatch = (requirements: ReadonlyArray<Requirement>): ReadonlyArray<Requirement> => {
-  const windowed = requirements.filter(requirement => requirement.windows !== undefined)
-  const plain = requirements.filter(requirement => requirement.windows === undefined)
-  return [...Requirement.merge(plain), ...windowed]
+const readsOf = (
+  owned: ReadonlyMap<string, Requirement>,
+): ReadonlyArray<{
+  readonly keys: ReadonlyArray<string>
+  readonly requests: ReadonlyArray<Requirement>
+}> => {
+  const plain = [...owned].filter(([, requirement]) => !hasWindows(requirement))
+  const paged = [...owned].filter(([, requirement]) => hasWindows(requirement))
+  return [
+    ...(plain.length === 0
+      ? []
+      : [
+          {
+            keys: plain.map(([key]) => key),
+            requests: Requirement.merge(plain.map(([, requirement]) => requirement)),
+          },
+        ]),
+    ...paged.map(([key, requirement]) => ({ keys: [key], requests: [requirement] })),
+  ]
 }
 
 class ReadRequirement extends Request.Class<
@@ -89,20 +109,25 @@ export const coalesceReads = (
           joins.set(key, deferred)
         }
         if (own.size > 0) {
-          const exit = yield* Effect.exit(
-            read({
-              version: REMOTE_PROTOCOL_VERSION,
-              requests: mergeForBatch(
-                entries
-                  .filter(entry => own.has(entry.request.key))
-                  .map(entry => entry.request.requirement),
-              ),
-            }),
-          )
-          for (const [key, deferred] of own) {
-            inFlight.delete(key)
-            yield* Deferred.done(deferred, exit)
+          const owned = new Map<string, Requirement>()
+          for (const entry of entries) {
+            if (own.has(entry.request.key)) owned.set(entry.request.key, entry.request.requirement)
           }
+          yield* Effect.forEach(
+            readsOf(owned),
+            ({ keys, requests }) =>
+              Effect.gen(function* () {
+                const exit = yield* Effect.exit(
+                  read({ version: REMOTE_PROTOCOL_VERSION, requests }),
+                )
+                // Settle exactly the requirements this read answered.
+                for (const key of keys) {
+                  inFlight.delete(key)
+                  yield* Deferred.done(own.get(key)!, exit)
+                }
+              }),
+            { concurrency: 'unbounded', discard: true },
+          )
         }
         for (const entry of entries) {
           yield* Request.completeEffect(entry, Deferred.await(joins.get(entry.request.key)!))

@@ -241,11 +241,15 @@ export const visibleItems = (
   store?: EntityStore,
 ): ReadonlyArray<Edge> => {
   const applicable = overlays.filter(overlay => overlay.connection === connectionId)
-  const hidden = new Set(
-    applicable
-      .filter(overlay => overlay.position === 'remove')
-      .flatMap(overlay => overlay.edges.map(edge => edge.key)),
-  )
+  // Overlays are ordered evidence: the last word on an edge wins, so a remove
+  // hides it only until a later insert brings it back.
+  const hidden = new Set<string>()
+  for (const overlay of applicable) {
+    for (const edge of overlay.edges) {
+      if (overlay.position === 'remove') hidden.add(edge.key)
+      else hidden.delete(edge.key)
+    }
+  }
   const gone = (edge: Edge): boolean =>
     hidden.has(edge.key) ||
     (store !== undefined && isTombstone(store, entityKey(edge.ref.entity, edge.ref.id)))

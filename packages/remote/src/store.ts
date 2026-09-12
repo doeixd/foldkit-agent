@@ -95,6 +95,19 @@ export const markStale = (
   return replace(store, key, { ...previous, stale })
 }
 
+/** Ends a refresh that did not land: the fields are present again as they were. */
+export const clearStale = (
+  store: EntityStore,
+  key: EntityKey,
+  fields: Iterable<string>,
+): EntityStore => {
+  const previous = store[key]
+  if (previous === undefined) return store
+  const stale = new Set(previous.stale)
+  for (const field of fields) stale.delete(field)
+  return replace(store, key, { ...previous, stale })
+}
+
 /** Records that the entity is known to be absent, so it is not refetched. */
 export const tombstone = (store: EntityStore, key: EntityKey): EntityStore =>
   replace(store, key, {

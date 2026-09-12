@@ -107,11 +107,31 @@ describe('relation helpers', () => {
   })
 
   it('tells a field schema’s relation shape', () => {
-    expect(relationShape(Project.fields.owner)).toEqual({ kind: 'one', nullable: false })
-    expect(relationShape(Project.fields.reviewer)).toEqual({ kind: 'one', nullable: true })
-    expect(relationShape(Project.fields.members)).toEqual({ kind: 'many', nullable: false })
-    expect(relationShape(Project.fields.comments)).toEqual({ kind: 'page', nullable: false })
-    expect(relationShape(Project.fields.parent)).toEqual({ kind: 'one', nullable: false })
+    expect(relationShape(Project.fields.owner)).toEqual({
+      kind: 'one',
+      nullable: false,
+      entity: 'User',
+    })
+    expect(relationShape(Project.fields.reviewer)).toEqual({
+      kind: 'one',
+      nullable: true,
+      entity: 'User',
+    })
+    expect(relationShape(Project.fields.members)).toEqual({
+      kind: 'many',
+      nullable: false,
+      entity: 'User',
+    })
+    expect(relationShape(Project.fields.comments)).toEqual({
+      kind: 'page',
+      nullable: false,
+      entity: 'Comment',
+    })
+    expect(relationShape(Project.fields.parent)).toEqual({
+      kind: 'one',
+      nullable: false,
+      entity: 'Project',
+    })
     expect(relationShape(Project.fields.name)).toBeUndefined()
     expect(relationShape(Schema.Array(Schema.String))).toBeUndefined()
   })
@@ -156,6 +176,37 @@ describe('Selection.make with nested selections', () => {
         name: UserSummary as unknown as true,
       }),
     ).toThrow(/"name" on "Project" is not a relation field/)
+  })
+
+  it('refuses a nested selection of another entity than the field refers to', () => {
+    expect(() =>
+      Selection.make(Project, { owner: CommentSummary as unknown as typeof UserSummary }),
+    ).toThrow(/"owner" on "Project" refers to "User", not "Comment"/)
+  })
+
+  it('a nullable list or page field decodes null through a nested selection', () => {
+    const Wide = Entity.make(
+      'Wide',
+      Schema.Struct({
+        id: Schema.String,
+        members: Schema.NullOr(Schema.Array(Entity.ref(User))),
+        comments: Schema.NullOr(Entity.refPage(Comment)),
+        maybe: Schema.optional(Entity.ref(User)),
+      }),
+    )
+    const selection = Selection.make(Wide, {
+      members: UserSummary,
+      comments: Selection.connection(Comment, { first: 1 }, CommentSummary),
+      maybe: UserSummary,
+    })
+    const decode = Schema.decodeUnknownSync(
+      selection.schema as unknown as Schema.ConstraintDecoder<unknown>,
+    )
+    expect(decode({ members: null, comments: null, maybe: null })).toEqual({
+      members: null,
+      comments: null,
+      maybe: null,
+    })
   })
 
   it('a recursive relation stays finite because the selection is', () => {

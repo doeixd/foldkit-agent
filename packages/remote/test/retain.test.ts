@@ -9,6 +9,7 @@ import {
   Selection,
   addLayer,
   addOverlay,
+  emptyMutationState,
   emptyOptimistic,
   emptyStore,
   entityKey,
@@ -120,6 +121,7 @@ describe('gc', () => {
   it('a pending optimistic layer or overlay keeps what it touches', () => {
     const state: RemoteModel = {
       ...model(),
+      mutations: { ...emptyMutationState, pending: new Set(['req-1', 'req-2']) },
       optimistic: addOverlay(
         addLayer(emptyOptimistic, {
           id: 'req-1',
@@ -140,7 +142,25 @@ describe('gc', () => {
 
   it('with no roots and nothing pending, everything is collectible', () => {
     const kept = gc(model(), roots([]))
-    expect(kept).toEqual({ entities: {}, connections: {} })
+    expect(kept).toEqual({ entities: {}, connections: {}, optimistic: emptyOptimistic })
+  })
+
+  it('a settled overlay is kept only with a retained connection', () => {
+    const settled: RemoteModel = {
+      ...model(),
+      optimistic: addOverlay(emptyOptimistic, {
+        id: 'live:1',
+        connection: 'Other()',
+        edges: [{ key: 'User:u4', ref: { entity: 'User', id: 'u4' } }],
+        position: 'prepend',
+      }),
+    }
+    const dropped = gc(settled, roots([]))
+    expect(dropped.optimistic.overlays).toEqual([])
+    expect(keys(dropped)).toEqual([])
+    const retained = gc(settled, roots([], ['Other()']))
+    expect(retained.optimistic.overlays).toHaveLength(1)
+    expect(keys(retained)).toEqual(['User:u4'])
   })
 
   it('a nested relation is followed with its own fields, and a cycle terminates', () => {
@@ -156,7 +176,12 @@ describe('gc', () => {
     current = writeEntity(current, entityKey('Node', 'x'), {})
     current = writeEntity(current, entityKey('Node', 'y'), {})
     const kept = gc(
-      { entities: current, connections: {}, optimistic: emptyOptimistic },
+      {
+        entities: current,
+        connections: {},
+        optimistic: emptyOptimistic,
+        mutations: emptyMutationState,
+      },
       {
         requirements: [
           {
