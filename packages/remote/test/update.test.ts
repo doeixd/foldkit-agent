@@ -43,11 +43,9 @@ describe('Remote.update', () => {
 
   it('reconciles a mutation once and removes its optimistic layer', () => {
     const withLayer: RemoteModel = updateRemote(initialRemoteModel, {
-      _tag: 'OptimisticAdded',
-      layer: {
-        id: 'req-1',
-        patches: [{ entity: 'User', id: 'u1', values: { name: 'optimistic' } }],
-      },
+      _tag: 'MutationStarted',
+      requestId: 'req-1',
+      optimistic: [{ entity: 'User', id: 'u1', values: { name: 'optimistic' } }],
     })
     expect(
       readField(
@@ -57,14 +55,11 @@ describe('Remote.update', () => {
       ),
     ).toEqual(Option.some('optimistic'))
 
-    const settled = updateRemote(
-      updateRemote(withLayer, { _tag: 'MutationStarted', requestId: 'req-1' }),
-      {
-        _tag: 'MutationSucceeded',
-        requestId: 'req-1',
-        entities: [{ entity: 'User', id: 'u1', values: { name: 'server' } }],
-      },
-    )
+    const settled = updateRemote(withLayer, {
+      _tag: 'MutationSucceeded',
+      requestId: 'req-1',
+      entities: [{ entity: 'User', id: 'u1', values: { name: 'server' } }],
+    })
     expect(settled.optimistic.layers).toHaveLength(0)
     expect(readField(settled.entities, entityKey('User', 'u1'), 'name')).toEqual(
       Option.some('server'),
@@ -82,11 +77,9 @@ describe('Remote.update', () => {
 
   it('drops a failed mutation layer without touching the base', () => {
     const withLayer = updateRemote(initialRemoteModel, {
-      _tag: 'OptimisticAdded',
-      layer: {
-        id: 'req-1',
-        patches: [{ entity: 'User', id: 'u1', values: { name: 'optimistic' } }],
-      },
+      _tag: 'MutationStarted',
+      requestId: 'req-1',
+      optimistic: [{ entity: 'User', id: 'u1', values: { name: 'optimistic' } }],
     })
     const failed = updateRemote(withLayer, {
       _tag: 'MutationFailed',

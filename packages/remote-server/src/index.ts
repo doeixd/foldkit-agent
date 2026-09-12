@@ -15,6 +15,7 @@ import {
   RemoteReadError,
   refsIn,
   type Boundary,
+  type ConnectionChangeSchema,
   type EntityDescriptor,
   type LiveChange,
   type MutationDescriptor,
@@ -57,20 +58,26 @@ export interface EntitySource<P, R = never> {
   readonly authorize?: (principal: P, fields: readonly string[]) => readonly string[]
 }
 
+/** A connection change a mutation made, as the wire carries it. */
+export type ConnectionChange = Schema.Schema.Type<typeof ConnectionChangeSchema>
+
 export interface MutationOutcome<Output> {
   readonly output: Output
   readonly entities?: ReadonlyArray<NormalizedPatch>
+  /** Connection changes the mutation made; the client settles them with its patches. */
+  readonly connections?: ReadonlyArray<ConnectionChange>
 }
 
 export interface MutationSource<P, R = never> {
   readonly mutation: string
   readonly Input: Schema.Codec<unknown>
   readonly Output: Schema.Codec<unknown>
-  readonly run: (context: {
-    readonly input: unknown
-    readonly principal: P
-  }) => Effect.Effect<
-    { readonly output: unknown; readonly entities: ReadonlyArray<NormalizedPatch> },
+  readonly run: (context: { readonly input: unknown; readonly principal: P }) => Effect.Effect<
+    {
+      readonly output: unknown
+      readonly entities: ReadonlyArray<NormalizedPatch>
+      readonly connections: ReadonlyArray<ConnectionChange>
+    },
     RemoteServerError,
     R
   >
@@ -201,7 +208,11 @@ export const RemoteServer = {
     Output: mutation.Output,
     run: context =>
       run({ input: context.input as Input, principal: context.principal }).pipe(
-        Effect.map(outcome => ({ output: outcome.output, entities: outcome.entities ?? [] })),
+        Effect.map(outcome => ({
+          output: outcome.output,
+          entities: outcome.entities ?? [],
+          connections: outcome.connections ?? [],
+        })),
       ),
   }),
 
@@ -406,6 +417,7 @@ export const RemoteServer = {
           id: patch.id,
           values: patch.values,
         })),
+        connections: outcome.connections,
       }
     }),
 

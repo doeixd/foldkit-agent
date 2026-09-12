@@ -18,11 +18,12 @@ import {
 } from 'foldkit-surface'
 import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
 import {
-  addLayer,
+  Optimistic,
   emptyOptimistic,
-  removeLayer,
-  type EntityLayer,
-  type Optimistic,
+  settleFailure,
+  settleSuccess,
+  type ConnectionChange,
+  type OptimisticOperation,
 } from './optimistic.js'
 import {
   applyConnectionEvent,
@@ -66,6 +67,7 @@ import {
   ReadBatchResult,
   ReadRequest,
   REMOTE_PROTOCOL_VERSION,
+  type ConnectionChangeSchema,
   RemoteLiveError,
   RemoteMutationError,
   RemoteProtocolError,
@@ -575,11 +577,18 @@ export type RemoteMessage =
   | { readonly _tag: 'RefreshStarted'; readonly requests: readonly Requirement[] }
   /** The active Surfaces' roots changed; everything they do not reach is collected. */
   | { readonly _tag: 'RetentionChanged'; readonly roots: RetentionRoots }
-  | { readonly _tag: 'MutationStarted'; readonly requestId: string }
+  /** A mutation began; its optimistic operations show until it settles. */
+  | {
+      readonly _tag: 'MutationStarted'
+      readonly requestId: string
+      readonly optimistic?: ReadonlyArray<OptimisticOperation> | undefined
+    }
   | {
       readonly _tag: 'MutationSucceeded'
       readonly requestId: string
       readonly entities: readonly NormalizedPatch[]
+      /** Connection changes the server confirmed; they replace the request's own. */
+      readonly connections?: ReadonlyArray<ConnectionChange> | undefined
     }
   | { readonly _tag: 'MutationFailed'; readonly requestId: string; readonly error: RemoteError }
   | {
@@ -593,8 +602,6 @@ export type RemoteMessage =
   | { readonly _tag: 'ConnectionMerged'; readonly connection: string; readonly page: Segment }
   | { readonly _tag: 'ConnectionInvalidated'; readonly connection: string }
   | { readonly _tag: 'ConnectionRefreshed'; readonly connection: string }
-  | { readonly _tag: 'OptimisticAdded'; readonly layer: EntityLayer }
-  | { readonly _tag: 'OptimisticRemoved'; readonly id: string }
 
 const retentionRootsSchema = Schema.Struct({
   requirements: Schema.Array(ReadRequest),
@@ -615,11 +622,16 @@ const remoteMessageSchema = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal('RefreshStarted'), requests: Schema.Array(ReadRequest) }),
   Schema.Struct({ _tag: Schema.Literal('RetentionChanged'), roots: retentionRootsSchema }),
-  Schema.Struct({ _tag: Schema.Literal('MutationStarted'), requestId: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.Literal('MutationStarted'),
+    requestId: Schema.String,
+    optimistic: Schema.optional(Schema.Array(Schema.Unknown)),
+  }),
   Schema.Struct({
     _tag: Schema.Literal('MutationSucceeded'),
     requestId: Schema.String,
     entities: Schema.Array(NormalizedEntity),
+    connections: Schema.optional(Schema.Array(Schema.Unknown)),
   }),
   Schema.Struct({
     _tag: Schema.Literal('MutationFailed'),
@@ -641,8 +653,6 @@ const remoteMessageSchema = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal('ConnectionInvalidated'), connection: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal('ConnectionRefreshed'), connection: Schema.String }),
-  Schema.Struct({ _tag: Schema.Literal('OptimisticAdded'), layer: Schema.Unknown }),
-  Schema.Struct({ _tag: Schema.Literal('OptimisticRemoved'), id: Schema.String }),
 ]) as unknown as Schema.Schema<RemoteMessage>
 
 const setConnectionStale = (
@@ -688,28 +698,34 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
         ),
       }
     case 'MutationStarted':
-      return { ...model, mutations: beginMutation(model.mutations, message.requestId) }
+      return {
+        ...model,
+        mutations: beginMutation(model.mutations, message.requestId),
+        optimistic: Optimistic.begin(model.optimistic, message.requestId, message.optimistic ?? []),
+      }
     case 'MutationSucceeded': {
-      const reconciled = reconcileMutation(
+      // Settling is release-the-layer-and-overlays, so overlapping optimistic
+      // layers rebase instead of needing inverse patches.
+      const settled = settleSuccess(
         model.entities,
+        model.optimistic,
         model.mutations,
         message.requestId,
         message.entities,
+        message.connections ?? [],
       )
-      // Settling the layer is remove-the-layer, so overlapping optimistic layers
-      // rebase instead of needing inverse patches.
       return {
         ...model,
-        entities: reconciled.store,
-        mutations: reconciled.state,
-        optimistic: removeLayer(model.optimistic, message.requestId),
+        entities: settled.store,
+        mutations: settled.state,
+        optimistic: settled.optimistic,
       }
     }
     case 'MutationFailed':
       return {
         ...model,
         mutations: failMutation(model.mutations, message.requestId),
-        optimistic: removeLayer(model.optimistic, message.requestId),
+        optimistic: settleFailure(model.optimistic, message.requestId),
       }
     case 'LiveReceived': {
       const state = model.live[message.stream] ?? emptyLiveState
@@ -757,10 +773,6 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
         ...model,
         connections: setConnectionStale(model.connections, message.connection, false),
       }
-    case 'OptimisticAdded':
-      return { ...model, optimistic: addLayer(model.optimistic, message.layer) }
-    case 'OptimisticRemoved':
-      return { ...model, optimistic: removeLayer(model.optimistic, message.id) }
   }
 }
 
@@ -1108,6 +1120,16 @@ export interface RemoteRpcClient<R = never> {
   >
 }
 
+/** Reconstructs the client's `ConnectionChange` from the wire's flattened edge. */
+export const connectionChangeOf = (
+  change: Schema.Schema.Type<typeof ConnectionChangeSchema>,
+): ConnectionChange => {
+  const edge = { key: change.edge.key, ref: { entity: change.edge.entity, id: change.edge.id } }
+  return change._tag === 'Insert'
+    ? { _tag: 'Insert', connection: change.connection, position: change.position, edge }
+    : { _tag: 'Remove', connection: change.connection, edge }
+}
+
 /** Reconstructs the client's `LiveEvent` from the wire's flattened `LiveChange`. */
 export const liveEventOf = (change: Schema.Schema.Type<typeof LiveChange>): LiveEvent => {
   switch (change._tag) {
@@ -1171,7 +1193,11 @@ const mutateRemote = Effect.fn('Remote.mutate')(function* <Name extends string, 
       Effect.fail(new RemoteMutationError({ message: error.message })),
     ),
   )
-  return { output, entities: result.entities }
+  return {
+    output,
+    entities: result.entities,
+    connections: (result.connections ?? []).map(connectionChangeOf),
+  }
 })
 
 export const Remote = {
@@ -1430,7 +1456,9 @@ export const Remote = {
   /**
    * Runs a mutation and reconciles its patches into a `RemoteModel` in one step,
    * returning the new model alongside the typed Output. The model-level form of
-   * `MutationStarted` → `RemoteClient.mutate` → `MutationSucceeded`.
+   * `MutationStarted` → `RemoteClient.mutate` → `MutationSucceeded`; in an
+   * application the three are `update` (with `optimistic`), a Command, and the
+   * Message the Command returns, so the optimistic operations show meanwhile.
    */
   mutateInto: Effect.fn('Remote.mutateInto')(function* <
     Name extends string,
@@ -1444,13 +1472,19 @@ export const Remote = {
     mutation: MutationDescriptor<Name, Input, Output>,
     input: Input,
     requestId: string,
+    options: { readonly optimistic?: ReadonlyArray<OptimisticOperation> | undefined } = {},
   ) {
-    const started = updateRemote(bound.store.get(model), { _tag: 'MutationStarted', requestId })
+    const started = updateRemote(bound.store.get(model), {
+      _tag: 'MutationStarted',
+      requestId,
+      ...(options.optimistic === undefined ? {} : { optimistic: options.optimistic }),
+    })
     const outcome = yield* mutateRemote(mutation, input, requestId)
     const settled = updateRemote(started, {
       _tag: 'MutationSucceeded',
       requestId,
       entities: outcome.entities,
+      connections: outcome.connections,
     })
     return {
       output: outcome.output,

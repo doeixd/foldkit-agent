@@ -139,7 +139,7 @@ const removeEdgeOverlays = (
 ): Optimistic => ({
   ...optimistic,
   overlays: optimistic.overlays.map(overlay =>
-    overlay.connection !== connection
+    overlay.connection !== connection || overlay.position === 'remove'
       ? overlay
       : { ...overlay, edges: overlay.edges.filter(edge => edge.key !== key) },
   ),

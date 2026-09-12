@@ -12,7 +12,7 @@ import type { RelationRequirement } from 'foldkit-surface'
  * server refuses a mismatch with `RemoteProtocolError`, so a shape change never
  * drifts silently: bump it whenever `ReadRequest` or `LiveRequirement` change.
  */
-export const REMOTE_PROTOCOL_VERSION = 2
+export const REMOTE_PROTOCOL_VERSION = 3
 
 export class RemoteReadError extends Schema.TaggedError<RemoteReadError>()('RemoteReadError', {
   message: Schema.String,
@@ -86,9 +86,28 @@ export const MutationRequest = Schema.Struct({
   input: Schema.Unknown,
 })
 
+export const LiveEdge = Schema.Struct({
+  entity: Schema.String,
+  id: Schema.String,
+  key: Schema.String,
+})
+
+/** A connection change a mutation confirms: the same facts a live event carries, without a cursor. */
+export const ConnectionChangeSchema = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.Literal('Insert'),
+    connection: Schema.String,
+    position: Schema.Union([Schema.Literal('prepend'), Schema.Literal('append')]),
+    edge: LiveEdge,
+  }),
+  Schema.Struct({ _tag: Schema.Literal('Remove'), connection: Schema.String, edge: LiveEdge }),
+])
+
 export const MutationResult = Schema.Struct({
   output: Schema.Unknown,
   entities: Schema.Array(NormalizedEntity),
+  /** Connection changes the mutation made, applied alongside its entity patches. */
+  connections: Schema.optional(Schema.Array(ConnectionChangeSchema)),
 })
 
 export const LiveRequirement = Schema.Struct({
@@ -96,12 +115,6 @@ export const LiveRequirement = Schema.Struct({
   requirements: Schema.Array(ReadRequest),
   /** Resume cursor; events at or before it are duplicates. */
   after: Schema.Number,
-})
-
-export const LiveEdge = Schema.Struct({
-  entity: Schema.String,
-  id: Schema.String,
-  key: Schema.String,
 })
 
 /**

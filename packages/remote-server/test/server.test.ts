@@ -584,3 +584,51 @@ describe('RemoteServer', () => {
     expect(() => RemoteServer.validate(domain, server)).toThrow(/User.*not declared/)
   })
 })
+
+describe('RemoteServer mutation connection changes', () => {
+  it('returns the connection changes a mutation source reports', async () => {
+    const AddComment = Mutation.make('AddComment', {
+      Input: Schema.Struct({ body: Schema.String }),
+      Output: Schema.Struct({ id: Schema.String }),
+    })
+    const definition = RemoteServer.make({
+      entities: [],
+      mutations: [
+        RemoteServer.mutation(AddComment, () =>
+          Effect.succeed({
+            output: { id: 'c9' },
+            connections: [
+              {
+                _tag: 'Insert' as const,
+                connection: 'Feed',
+                position: 'prepend' as const,
+                edge: { entity: 'Comment', id: 'c9', key: 'Comment:c9' },
+              },
+            ],
+          }),
+        ),
+      ],
+    })
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteMutate({
+            requestId: 'r1',
+            mutation: 'AddComment',
+            input: { body: 'hi' },
+          })
+        }),
+      ).pipe(Effect.provide(RemoteRpc.toLayer(RemoteServer.handlers(definition, 'user')))),
+    )
+    expect(result.connections).toEqual([
+      {
+        _tag: 'Insert',
+        connection: 'Feed',
+        position: 'prepend',
+        edge: { entity: 'Comment', id: 'c9', key: 'Comment:c9' },
+      },
+    ])
+    expect(result.entities).toEqual([])
+  })
+})
