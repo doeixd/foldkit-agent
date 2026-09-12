@@ -122,6 +122,31 @@ wire error. An entity with no live source contributes nothing, so the client
 plans a refetch instead of failing the stream. A `LiveChange` is an entity patch
 or delete, or a connection insert/remove/invalidate.
 
+### `RemoteServer.liveHub`
+
+The higher-level signal. A hub tracks each live subscriber's requirements and
+principal, so the server says *what changed* and the hub works out *who cares*:
+
+```ts
+const hub = yield* RemoteServer.liveHub(server)
+const handlers = RemoteServer.handlers(server, principal, { live: hub })
+
+// Wherever the data changes (a mutation source, a database trigger):
+yield* hub.changed(Project.ref(projectId), ['status', 'updatedAt'])
+yield* hub.deleted(Project.ref(projectId))
+```
+
+`changed` intersects the fields with what each subscriber selects, re-reads
+that intersection through the entity's own source under the subscriber's
+principal (one read per principal; subscribers selecting none of the fields do
+no work), and streams an `EntityPatched` carrying only the fields that
+subscriber may see. `deleted` streams an `EntityDeleted` to the entity's
+subscribers. Cursors continue from the cursor each subscriber resumed at, so
+the client's duplicate and gap handling is unchanged. A hub and hand-written
+`RemoteServer.live` sources number their events independently; use one or the
+other for a given subscription. Nested relation targets are not subscribed by
+the hub, only the requirements' own entities.
+
 ## Authorization
 
 Authentication and authorization are separate. Authentication answers *who is

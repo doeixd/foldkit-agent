@@ -177,9 +177,10 @@ describe('RemoteServer.liveHub', () => {
           subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 9, 2),
         )
         yield* settle
+        // u2's deletion is not this subscriber's; it must not consume a cursor.
+        yield* hub.deleted({ entity: 'User', id: 'u2' })
         yield* hub.changed({ entity: 'User', id: 'u1' }, ['name'])
         yield* hub.deleted({ entity: 'User', id: 'u1' })
-        yield* hub.deleted({ entity: 'User', id: 'u2' })
         return [...(yield* Fiber.join(fiber))]
       }),
     )

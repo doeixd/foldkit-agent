@@ -144,6 +144,12 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote-server` (private)
 
+- **A live hub.** `RemoteServer.liveHub(server)` tracks each live
+  subscriber's requirements and principal; `hub.changed(ref, fields)` re-reads
+  the changed fields a subscriber selects through the entity source under its
+  principal and streams the patch, `hub.deleted(ref)` streams a delete, and
+  `handlers(server, principal, { live: hub })` registers every subscription
+  (#65, section 6).
 - **Nested resolution in one read.** `FoldkitRemoteRead` resolves a request's
   `relations` level by level: each level's refs become the next level's
   requests, a target the batch already read is not read again, every level is
