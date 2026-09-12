@@ -53,4 +53,18 @@ describe('Agent.forApplication', () => {
 
     expect(messages.variants.map(variant => variant.tag)).toEqual(['RequestedCreateTodo'])
   })
+
+  it('refuses a subset from another application', () => {
+    const OtherApp = Surface.application({
+      Model,
+      Message: MessageUnion,
+      initial: emptyModel,
+      update,
+    })
+    const OtherChanges = Surface.messages(OtherApp, [MessageUnion.RequestedCreateTodo])
+
+    expect(() =>
+      TodoAgent.exposeSubset(OtherChanges, { RequestedCreateTodo: 'Create a todo' }),
+    ).toThrow(/different application/)
+  })
 })

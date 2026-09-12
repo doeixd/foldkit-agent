@@ -59,8 +59,19 @@ export interface ApplicationAgent<Model, Principal> extends Omit<
 }
 
 const buildAgent = <Model, Principal>(
-  _app: Application<Model, any, any>,
+  app: Application<Model, any, any>,
 ): ApplicationAgent<Model, Principal> => {
+  // `Surface.pick`/`Surface.messages` carry a per-application owner token, so a
+  // subset from another application is refused even when the types match.
+  const appExposeSubset = ((subset: { readonly owner: object }, variants: unknown): unknown => {
+    if (subset.owner !== app.owner)
+      throw new Error('Agent.exposeSubset: the subset belongs to a different application')
+    return (exposeSubset as unknown as (subset: unknown, variants: unknown) => unknown)(
+      subset,
+      variants,
+    )
+  }) as ApplicationAgent<Model, Principal>['exposeSubset']
+
   const agentDefine = <
     R extends ReadableProjection<Model, any> | undefined,
     ByName,
@@ -80,7 +91,7 @@ const buildAgent = <Model, Principal>(
 
   return {
     expose: expose as ApplicationAgent<Model, Principal>['expose'],
-    exposeSubset: exposeSubset as ApplicationAgent<Model, Principal>['exposeSubset'],
+    exposeSubset: appExposeSubset,
     resource,
     bind,
     define: agentDefine,
