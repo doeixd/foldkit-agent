@@ -241,9 +241,12 @@ installed `.d.ts` before reaching for a remembered API.
 
 **Tooling**
 
-- **Vite 5 does not recognize `node:sqlite` as a builtin.** A static import in a
-  Vitest test is rewritten to `sqlite` and fails to load. Use `createRequire`
-  with a `typeof import('node:sqlite')` annotation at that test boundary.
+- **Vite 5 does not recognize `node:sqlite` as a builtin.** A static import
+  under Vitest is rewritten to a bare `sqlite` and fails to load;
+  `test.server.deps.external` does not help because resolution happens first.
+  `vitest.config.ts` aliases `node:sqlite` to `test-support/sqlite.ts`, so a
+  normal static import works in Vitest and tsx. Do not reinstate per-file
+  `createRequire`.
 
 - **Format with `pnpm format`, never bare `prettier`.** The config matches the
   style already in the tree; without it prettier rewrites files to its own
