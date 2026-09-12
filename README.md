@@ -24,13 +24,13 @@ same Messages.
 | [`foldkit-agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
 | [`foldkit-agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and Streamable HTTP. |
 | [`foldkit-agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
+| [`foldkit-agent-native`](./packages/agent-native) | The Agent Native adapter: compiles exposed capabilities into framework actions whose `run` only dispatches. |
 | [`foldkit-durable`](./packages/durable) | A durable, ordered operation log on `effect/unstable/sql`, with migrations, compaction, change streams, a durable effect ledger, and metrics. |
 | [`foldkit-sync`](./packages/sync) | A local-first replica: offline outbox, optimistic projection, reconciliation, presence, and a reconnecting WebSocket transport. |
 
 `foldkit-surface`, `foldkit-remote`, `foldkit-remote-server`,
 `foldkit-remote-drizzle`, and the `foldkit-mixins` view packages are in-tree and
-`private`; they are not published yet. `packages/agent-native` is a private
-prototype. The rest are published.
+`private`; they are not published yet. The rest are published.
 
 New to the state side? [Replicated state](./docs/replication.md) explains what
 `foldkit-durable` and `foldkit-sync` do, how they fit together, and when to reach
@@ -79,14 +79,14 @@ observation boundary:
                                 ▼
                          foldkit-surface
                  Projection · field refs · subsets
-                ┌───────────────┼───────────────┐
-                ▼               ▼               ▼
-         foldkit-agent    foldkit-remote   foldkit-durable
-                │         (normalized       (ordered log)
-    ┌───────────┼──────┐   server cache)        │
-    ▼           ▼      ▼        │           foldkit-sync
-  webmcp       mcp     a2a   remote-server   (local replica)
-                              remote-drizzle
+          ┌───────────┬──────────┴───────────┐
+          ▼           ▼                      ▼
+   foldkit-agent   foldkit-remote   foldkit-durable
+   (webmcp, mcp,   (normalized       (ordered log)
+    a2a, native)    server cache)         │
+                         │           foldkit-sync
+                    remote-server     (local replica)
+                    remote-drizzle
 ```
 
 None reimplements `update`: the agent layer projects it, Remote reduces its facts
@@ -107,7 +107,7 @@ packages/agent            foldkit-agent
 packages/agent-webmcp     foldkit-agent-webmcp
 packages/agent-mcp        foldkit-agent-mcp
 packages/agent-a2a        foldkit-agent-a2a
-packages/agent-native     foldkit-agent-native (prototype, private)
+packages/agent-native     foldkit-agent-native
 packages/durable          foldkit-durable
 packages/sync             foldkit-sync
 packages/mixins           foldkit-mixins (unpublished)
@@ -144,7 +144,6 @@ checks, then push a `vX.Y.Z` tag. The
 [release workflow](./.github/workflows/release.yml) re-runs the checks. It
 publishes with provenance when the `NPM_TOKEN` repository secret is set, and
 otherwise runs the checks and skips publishing.
-`foldkit-agent-native` is `private`, so it is skipped.
 
 ## License
 

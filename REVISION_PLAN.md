@@ -28,17 +28,21 @@ Self-contained orientation. Verify anything here before relying on it; things mo
 
 ```text
 packages/
+  surface/          foldkit-surface
+  remote/           foldkit-remote
+  remote-server/    foldkit-remote-server
+  remote-drizzle/   foldkit-remote-drizzle
   agent/            foldkit-agent            contract + AgentRuntime
   agent-webmcp/     foldkit-agent-webmcp
   agent-mcp/        foldkit-agent-mcp
   agent-a2a/        foldkit-agent-a2a
-  agent-native/     foldkit-agent-native     private prototype
+  agent-native/     foldkit-agent-native
   durable/          foldkit-durable
   sync/             foldkit-sync
-  surface/          (design docs only today — new code goes here)
+  mixins*/          foldkit-mixins*  (private)
 examples/
-  todo/  sync/
-docs/                 replication.md, benchmarks.md, sync-dx.md
+  todo/  sync/  mixins/
+docs/                 replication.md, sync-dx.md, sync-runtime-binding.md, benchmarks.md
 REVISION_PLAN.md      this file
 PLAN.md               git-ignored scratch tracker
 AGENTS.md             working agreements and a trap list — read it
@@ -51,7 +55,7 @@ AGENTS.md             working agreements and a trap list — read it
 - Published at `0.1.1`: `foldkit-durable`.
 - Published at `0.2.0`: `foldkit-sync`.
 - Git tag `v0.2.0`; GitHub Release created.
-- `foldkit-agent-native` is private.
+- `foldkit-agent-native` leaves prototype status at `0.1.0` in the next release.
 - npm names are the `foldkit-*` convention; new packages use it too.
 
 ### 1.3 Toolchain and commands

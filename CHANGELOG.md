@@ -7,8 +7,16 @@ version changed; `pnpm` skips versions already in the registry.
 
 ## Unreleased
 
-Correctness fixes from a review of the implementation. Breaking for `foldkit-sync`
-(the storage and presence APIs) and `foldkit-durable` (`append`'s result).
+Correctness fixes from a review of the implementation, and the first published
+`foldkit-agent-native`. Breaking for `foldkit-sync` (the storage and presence
+APIs) and `foldkit-durable` (`append`'s result).
+
+### `foldkit-agent-native`
+
+- **Published.** The Agent Native adapter leaves prototype status at `0.1.0`.
+  `AgentNative.actions` compiles an exposed contract into registry entries whose
+  `run` only dispatches, and advertises the encoded input schema as a Standard
+  Schema validator. It remains pinned to `@agent-native/core@0.177.1`.
 
 ### `foldkit-mixins` (private)
 

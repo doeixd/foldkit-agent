@@ -1,7 +1,14 @@
 {
   "name": "foldkit-agent-native",
-  "version": "0.0.0",
-  "description": "Prototype: compiles a Foldkit agent contract into Agent Native actions.",
+  "version": "0.1.0",
+  "description": "Agent Native adapter for foldkit-agent. Compiles an exposed Foldkit contract into Agent Native actions.",
+  "keywords": [
+    "foldkit",
+    "effect",
+    "agents",
+    "agent-native",
+    "tools"
+  ],
   "type": "module",
   "license": "MIT",
   "author": "Patrick Glenn <doeixd@gmail.com>",
@@ -15,6 +22,9 @@
     "url": "https://github.com/doeixd/foldkit-plus/issues"
   },
   "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
@@ -43,6 +53,5 @@
     "foldkit-agent": "workspace:*",
     "tsdown": "^0.23.0",
     "typescript": "^5.7.2"
-  },
-  "private": true
+  }
 }

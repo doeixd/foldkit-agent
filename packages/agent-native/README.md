@@ -1,10 +1,10 @@
-# `foldkit-agent-native` — prototype
+# `foldkit-agent-native`
 
 Compiles a [`foldkit-agent`](../agent) contract into Agent Native actions.
 
-**This is an unpublished prototype**, checked against `@agent-native/core@0.177.1`.
-The integration suite uses the real package registry, tool runtime, and schema
-wrapper. Full HTTP/MCP/A2A deployments remain outside this spike.
+It is checked against `@agent-native/core@0.177.1`; the integration suite uses
+the real package registry, tool runtime, and schema wrapper. Full HTTP/MCP/A2A
+deployments remain outside this package's test suite.
 
 ## What it does
 
@@ -77,7 +77,7 @@ itself, so identity has to survive — and both helpers return that same schema,
 sharing one `~standard`, so calling them in turn leaves a single object carrying
 `jsonSchema` and `validate` alike. That is what this package does.
 
-## What the spike proves
+## What it proves
 
 Run `pnpm exec vitest run packages/agent-native/test/framework.test.ts` at the
 repository root. No LLM credentials or network server are needed. The suite uses
@@ -113,6 +113,7 @@ those names and restart the host after changing a registered contract. The
 adapter's own returned record preserves these keys, but cannot fix that
 downstream registry behavior.
 
-The package stays private pending a deployment test. This completes the bounded
-proof of concept in [issue #22](https://github.com/doeixd/foldkit-plus/issues/22),
-not a claim that every Agent Native subsystem is independently reusable.
+This completes the bounded proof of concept in
+[issue #22](https://github.com/doeixd/foldkit-plus/issues/22), not a claim that
+every Agent Native subsystem is independently reusable. A full deployment test
+of the HTTP, MCP, A2A, CLI, auth, and UI surfaces remains future work.
