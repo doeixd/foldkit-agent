@@ -4,6 +4,10 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   resolve: {
     alias: {
+      // Vite 5's builtin list predates `node:sqlite` (it resolves to a bare
+      // `sqlite` and fails to load), so under Vitest a static import resolves to
+      // this shim. Node and tsx still resolve the real builtin.
+      'node:sqlite': fileURLToPath(new URL('./test-support/sqlite.ts', import.meta.url)),
       // Resolve the workspace package from source, so tests never depend on a
       // prior build of packages/agent.
       'foldkit-agent': fileURLToPath(new URL('./packages/agent/src/index.ts', import.meta.url)),

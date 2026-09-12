@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
-import { createRequire } from 'node:module'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,10 +9,6 @@ import { describe, expect, it } from 'vitest'
 import { cursor, makeJournal } from '../src/index.js'
 import { document, effectKey, journalOptions, operation } from './fixtures/recoveryModel.js'
 
-// Vite 5's builtin list predates node:sqlite; let Node resolve it directly.
-const { DatabaseSync } = createRequire(import.meta.url)(
-  'node:sqlite',
-) as typeof import('node:sqlite')
 const worker = fileURLToPath(new URL('./fixtures/effectRecoveryWorker.ts', import.meta.url))
 
 const runWorker = (journal: string, provider: string, phase: string, policy: string) =>

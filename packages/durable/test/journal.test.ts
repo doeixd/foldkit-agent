@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Config, Deferred, Effect, Fiber, Metric, Option, Stream, type Scope } from 'effect'
@@ -21,11 +21,6 @@ import {
   type Journal,
   type JournalOptions,
 } from '../src/index.js'
-
-// Vite 5's builtin list predates node:sqlite; let Node resolve it directly.
-const { DatabaseSync } = createRequire(import.meta.url)(
-  'node:sqlite',
-) as typeof import('node:sqlite')
 
 interface Operation {
   readonly opId: string
