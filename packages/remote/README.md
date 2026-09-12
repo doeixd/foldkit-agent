@@ -113,8 +113,9 @@ const ProjectPage = Surface.make(App, 'ProjectPage', {
 reads the store purely:
 
 - `Initial` — some selected field is not present yet,
-- `Ready` / `Refreshing` — present; `Refreshing` is a state a caller may set while
-  revalidating,
+- `Ready` — present,
+- `Refreshing` — present, and an observer is refetching a selected field under a
+  refreshing policy (below),
 - `Failed` — the assembled value did not decode against the Selection,
 - `NotFound` — the entity is a tombstone.
 
@@ -145,13 +146,39 @@ break both arrive as `RemoteMessage`s (`ReadFailed`), so one handler covers
 success and failure. `Remote.live` resumes from `RemoteModel.live`, so the
 application tracks no cursor.
 
+### Policies
+
+A `RemotePolicy` decides what a field the store already holds means:
+
+```ts
+Remote.observe(AppRemote, ProjectPage, params, toMessage, {
+  policy: RemotePolicy.staleWhileRevalidate({ maxAge: 30_000 }),
+})
+```
+
+- `RemotePolicy.cacheFirst` (default) — fetch only missing, stale, or
+  re-windowed fields.
+- `RemotePolicy.staleWhileRevalidate({ maxAge })` — keep present values
+  visible and refetch an entry older than `maxAge` milliseconds.
+- `RemotePolicy.networkOnly` — fetch every selected field regardless of
+  coverage; cached values stay visible meanwhile.
+
+A refreshing policy emits `RefreshStarted` before the read. `Remote.update` marks
+the refetched fields stale, so `Remote.select` reads them as `Refreshing` until
+`ReadReceived` lands. The policy compiles to planner options
+(`RemotePolicy.toPlan`); the planner stays pure, and the clock it reads is the
+`now` option (default `Date.now`), so tests inject time.
+
 Lower-level, pure planning is available when a Surface is not the right unit:
 
 ```ts
-Remote.planProjection(store, projection, freshness?)  // -> Requirement[]
-Remote.observeProjection(AppRemote, model, projection, freshness?)
-Remote.planSurface(AppRemote, model, ProjectPage, params, freshness?)
+Remote.planProjection(store, projection, options?)  // -> Requirement[]
+Remote.observeProjection(AppRemote, model, projection, options?)
+Remote.planSurface(AppRemote, model, ProjectPage, params, options?)
 ```
+
+`options` is a `PlanOptions`: `freshness` (`{ now, freshness }`) refreshes an
+entry older than the window, `force` plans every field.
 
 `Requirement` is plain data — entity, id, fields, and per-relation windows — so a
 plan can be inspected, serialized, diffed, or shown in DevTools.
@@ -162,14 +189,13 @@ render.
 
 ```ts
 const store = await Effect.runPromise(
-  Remote.prefetch(AppRemote, model, Projection.struct({ project }), { freshness: 30_000 }).pipe(
-    Effect.provide(clientLayer),
-  ),
+  Remote.prefetch(AppRemote, model, Projection.struct({ project }), {
+    policy: RemotePolicy.staleWhileRevalidate({ maxAge: 30_000 }),
+  }).pipe(Effect.provide(clientLayer)),
 )
 ```
 
-`freshness` (milliseconds) refetches present fields older than the window. The
-planner stays pure and time-injected; the caller reads the clock.
+`prefetch` takes the same `policy` and `now` options as `observe`.
 
 ## Mutations
 

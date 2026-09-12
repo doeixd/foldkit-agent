@@ -109,10 +109,18 @@ const subscriptions = (model: Model) => [
 emits a `RemoteMessage`. A fully-known Surface emits nothing. SSR, route/hover
 prefetch, and tests reuse the same plan through `Remote.prefetch`.
 
+What a field the store already holds means is a `RemotePolicy` on `observe` and
+`prefetch`: `cacheFirst` (default) fetches only what is missing,
+`staleWhileRevalidate({ maxAge })` refetches an entry older than the window, and
+`networkOnly` fetches every selected field. A policy compiles to planner options;
+it is not a second cache. A refreshing policy emits `RefreshStarted` before the
+read, which marks the refetched fields stale.
+
 In the view, a remote field is a `RemoteData`. `Remote.select` produces
-`Initial` until its selected fields are present, `Ready` once they are, `Failed`
-if the server data does not decode, and `NotFound` for a tombstone. `Loading` and
-`Refreshing` exist for a caller that tracks a request lifecycle explicitly. There
+`Initial` until its selected fields are present, `Ready` once they are,
+`Refreshing` while a selected field is stale (an observer is refetching it),
+`Failed` if the server data does not decode, and `NotFound` for a tombstone.
+`Loading` exists for a caller that tracks a request lifecycle explicitly. There
 is no hidden suspense; the states are explicit.
 
 ## Mutations and live data

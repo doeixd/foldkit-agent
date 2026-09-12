@@ -59,6 +59,14 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote` (private)
 
+- **Request policies.** `RemotePolicy.cacheFirst` / `staleWhileRevalidate({
+  maxAge })` / `networkOnly` on `Remote.observe` and `Remote.prefetch` decide
+  what a field the store already holds means. A refreshing policy emits
+  `RefreshStarted` (new `RemoteMessage`) before the read, marking the refetched
+  fields stale so `Remote.select` reads `Refreshing`, which was unreachable
+  before. Breaking: the pure planners take `PlanOptions` (`{ freshness, force }`)
+  instead of a bare `PlanFreshness`, and `prefetch` takes `{ policy, now }`
+  instead of `{ freshness }` (#65, section 4).
 - **A `Contract` for `Module`.** `Remote.at` attaches `contract`: the bound
   Remote owns its store's Model path, named after it.
 - **A real Remote submodel.** `RemoteModel` is the four producers' shared state
