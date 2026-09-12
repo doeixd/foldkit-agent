@@ -246,3 +246,64 @@ describe('RemoteServer.liveHub', () => {
     expect(result._tag).toBe('Failure')
   })
 })
+
+describe('RemoteServer.liveHub windows', () => {
+  const Post = Entity.make(
+    'Post',
+    Schema.Struct({ id: Schema.String, title: Schema.String, comments: Schema.String }),
+  )
+  const windowed: Array<unknown> = []
+  const paged = RemoteServer.make({
+    entities: [
+      RemoteServer.entity<string>(Post, {
+        read: ({ ids, fields, windows }) =>
+          Effect.sync(() => {
+            windowed.push(windows)
+            return ids.map(id => ({
+              id,
+              values: Object.fromEntries(
+                fields.map(field => [field, windows?.comments === undefined ? 'all' : 'page']),
+              ),
+            }))
+          }),
+      }),
+    ],
+  })
+
+  it('re-reads a paged field with the window the subscriber selected it with', async () => {
+    windowed.length = 0
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(paged)
+        const fiber = yield* Effect.forkChild(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const client = yield* RpcTest.makeClient(RemoteRpc)
+              return yield* client
+                .FoldkitRemoteLive({
+                  version: REMOTE_PROTOCOL_VERSION,
+                  requirements: [
+                    {
+                      entity: 'Post',
+                      id: 'p1',
+                      fields: ['title', 'comments'],
+                      windows: { comments: { first: 2 } },
+                    },
+                  ],
+                  after: 0,
+                })
+                .pipe(Stream.take(1), Stream.runCollect)
+            }),
+          ).pipe(
+            Effect.provide(RemoteRpc.toLayer(RemoteServer.handlers(paged, 'u', { live: hub }))),
+          ),
+        )
+        yield* settle
+        yield* hub.changed({ entity: 'Post', id: 'p1' }, ['comments', 'title'])
+        return [...(yield* Fiber.join(fiber))]
+      }),
+    )
+    expect(windowed).toEqual([{ comments: { first: 2 } }])
+    expect(events[0]).toMatchObject({ values: { comments: 'page', title: 'page' } })
+  })
+})

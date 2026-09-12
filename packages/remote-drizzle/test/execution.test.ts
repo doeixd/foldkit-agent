@@ -405,7 +405,7 @@ describe('RemoteDrizzle execution', () => {
       hasPrevious: true,
     })
     expect(calls).toHaveLength(3)
-    expect(Object.keys(calls[1]!.selection)).toEqual(['body'])
+    expect(Object.keys(calls[1]!.selection)).toEqual(['body', 'id'])
 
     const dialect = new PgDialect()
     expect(dialect.sqlToQuery(calls[2]!.where as SQL).sql).toContain('"comments"."body" <')

@@ -251,3 +251,50 @@ describe('RemoteDrizzle against in-process SQLite', () => {
     }
   })
 })
+
+describe('review: windowed relation boundaries', () => {
+  it('an empty page under a cursor keeps the cursor-side boundary', async () => {
+    const { sqlite, database } = setup()
+    try {
+      const forward = await read(ProjectBinding, database, {
+        ids: ['p1'],
+        fields: ['comments'],
+        principal: null,
+        windows: { comments: { first: 1, after: 'Comment:c2' } },
+      })
+      expect(forward[0]!.values.comments).toEqual({ refs: [], hasNext: false, hasPrevious: true })
+      const backward = await read(ProjectBinding, database, {
+        ids: ['p1'],
+        fields: ['comments'],
+        principal: null,
+        windows: { comments: { last: 1, before: 'Comment:c1' } },
+      })
+      expect(backward[0]!.values.comments).toEqual({ refs: [], hasNext: true, hasPrevious: false })
+    } finally {
+      sqlite.close()
+    }
+  })
+
+  it('a page over a non-unique order is stable: the id breaks ties in ranking and ordering alike', async () => {
+    const { sqlite, database } = setup()
+    try {
+      sqlite.exec(`update comments set created_at = '2020-01-01'`)
+      const first = await read(ProjectBinding, database, {
+        ids: ['p1'],
+        fields: ['comments'],
+        principal: null,
+        windows: { comments: { first: 1 } },
+      })
+      const second = await read(ProjectBinding, database, {
+        ids: ['p1'],
+        fields: ['comments'],
+        principal: null,
+        windows: { comments: { first: 1, after: 'Comment:c1' } },
+      })
+      expect(first[0]!.values.comments).toMatchObject({ refs: ['Comment:c1'], hasNext: true })
+      expect(second[0]!.values.comments).toMatchObject({ refs: ['Comment:c2'], hasNext: false })
+    } finally {
+      sqlite.close()
+    }
+  })
+})

@@ -14,6 +14,7 @@ import {
   RemoteQueryError,
   RemoteReadError,
   refsIn,
+  stableStringify,
   type Boundary,
   type ConnectionChangeSchema,
   type EntityDescriptor,
@@ -165,9 +166,15 @@ export interface LiveHub<P, R = never> {
   readonly size: Effect.Effect<number>
 }
 
+interface Selected {
+  readonly fields: Set<string>
+  /** The window each paged field was subscribed with, so a re-read pages the same way. */
+  readonly windows: Record<string, QueryWindow>
+}
+
 interface Subscriber<P> {
-  /** Per entity:id, the fields this subscriber selects. */
-  readonly selected: ReadonlyMap<string, ReadonlySet<string>>
+  /** Per entity:id, the fields (and their windows) this subscriber selects. */
+  readonly selected: ReadonlyMap<string, Selected>
   readonly principal: P
   readonly queue: Queue.Queue<LiveChangeValue>
   cursor: number
@@ -188,12 +195,13 @@ const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P,
       subscribe: ({ requirements, after, principal }) =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const selected = new Map<string, Set<string>>()
+            const selected = new Map<string, Selected>()
             for (const requirement of requirements) {
               const key = `${requirement.entity}:${requirement.id}`
-              const fields = selected.get(key) ?? new Set<string>()
-              for (const field of requirement.fields) fields.add(field)
-              selected.set(key, fields)
+              const entry = selected.get(key) ?? { fields: new Set<string>(), windows: {} }
+              for (const field of requirement.fields) entry.fields.add(field)
+              Object.assign(entry.windows, requirement.windows ?? {})
+              selected.set(key, entry)
             }
             const subscriber: Subscriber<P> = {
               selected,
@@ -213,25 +221,52 @@ const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P,
           const key = `${ref.entity}:${ref.id}`
           const source = server.entities.get(ref.entity)
           if (source === undefined) return
-          // One source read per principal: subscribers sharing one share the read.
-          const byPrincipal = new Map<P, Array<{ subscriber: Subscriber<P>; fields: string[] }>>()
+          // One source read per principal and window signature: subscribers
+          // sharing both share the read, and a paged field is re-read with
+          // the window the subscriber selected it with.
+          const groups = new Map<
+            string,
+            {
+              principal: P
+              windows: Record<string, QueryWindow>
+              entries: Array<{ subscriber: Subscriber<P>; fields: string[] }>
+            }
+          >()
           for (const subscriber of subscribers) {
-            const selectedFields = subscriber.selected.get(key)
-            if (selectedFields === undefined) continue
-            const wanted = fields.filter(field => selectedFields.has(field))
+            const selected = subscriber.selected.get(key)
+            if (selected === undefined) continue
+            const wanted = fields.filter(field => selected.fields.has(field))
             if (wanted.length === 0) continue
-            const group = byPrincipal.get(subscriber.principal) ?? []
-            group.push({ subscriber, fields: wanted })
-            byPrincipal.set(subscriber.principal, group)
+            const windows = Object.fromEntries(
+              wanted.flatMap(field =>
+                field in selected.windows ? [[field, selected.windows[field]!]] : [],
+              ),
+            )
+            const groupKey = stableStringify([subscriber.principal, windows])
+            const group = groups.get(groupKey) ?? {
+              principal: subscriber.principal,
+              windows,
+              entries: [],
+            }
+            group.entries.push({ subscriber, fields: wanted })
+            groups.set(groupKey, group)
           }
-          for (const [principal, group] of byPrincipal) {
+          for (const { principal, windows, entries: group } of groups.values()) {
             const requested = [...new Set(group.flatMap(entry => entry.fields))]
             const permitted =
               source.authorize === undefined ? requested : source.authorize(principal, requested)
             const permittedSet = new Set(permitted)
             const allowed = requested.filter(field => permittedSet.has(field))
             if (allowed.length === 0) continue
-            const records = yield* source.read({ ids: [ref.id], fields: allowed, principal })
+            const allowedWindows = Object.fromEntries(
+              Object.entries(windows).filter(([field]) => permittedSet.has(field)),
+            )
+            const records = yield* source.read({
+              ids: [ref.id],
+              fields: allowed,
+              principal,
+              ...(Object.keys(allowedWindows).length === 0 ? {} : { windows: allowedWindows }),
+            })
             const record = records.find(candidate => candidate.id === ref.id)
             if (record === undefined) continue
             for (const { subscriber, fields: wanted } of group) {
@@ -279,6 +314,7 @@ const protocolMismatch = (received: number): RemoteProtocolError | undefined =>
       })
 
 interface EntityGroup {
+  readonly entity: string
   readonly ids: string[]
   readonly seenIds: Set<string>
   readonly fields: Set<string>
@@ -286,20 +322,26 @@ interface EntityGroup {
   relations: Readonly<Record<string, RelationRequirement>> | undefined
 }
 
-/** One level's requests grouped per entity: ids and fields unioned, relations merged. */
+/**
+ * One level's requests grouped per entity and window signature: ids and
+ * fields unioned, relations merged. Requests that page a relation differently
+ * are separate groups, so one window never answers for another id.
+ */
 const groupByEntity = (requests: ReadonlyArray<Request>): Map<string, EntityGroup> => {
   const grouped = new Map<string, EntityGroup>()
   for (const request of requests) {
-    let group = grouped.get(request.entity)
+    const groupKey = `${request.entity}\u0000${stableStringify(request.windows ?? null)}`
+    let group = grouped.get(groupKey)
     if (group === undefined) {
       group = {
+        entity: request.entity,
         ids: [],
         seenIds: new Set(),
         fields: new Set(),
         windows: new Map(),
         relations: undefined,
       }
-      grouped.set(request.entity, group)
+      grouped.set(groupKey, group)
     }
     if (!group.seenIds.has(request.id)) {
       group.seenIds.add(request.id)
@@ -487,10 +529,11 @@ export const RemoteServer = {
           }
         }
 
-        for (const [name, group] of groupByEntity(pending)) {
+        for (const group of groupByEntity(pending).values()) {
+          const name = group.entity
           const source = server.entities.get(name)
           if (source === undefined) continue
-          const maxIds = options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY
+          const maxIds = Math.max(1, options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)
           // The limit guards the client's batch; a nested level's fan-out is
           // the server's own doing, so it is chunked rather than refused.
           if (depth === 0 && group.ids.length > maxIds) {
@@ -550,7 +593,13 @@ export const RemoteServer = {
             follow(values, group.relations ?? {})
           }
         }
-        pending = next
+        // A target read by this level (as another group's request) is not
+        // read again by the next.
+        pending = next.flatMap(request => {
+          const read = fetched.get(`${request.entity}:${request.id}`)
+          const fields = request.fields.filter(field => read?.has(field) !== true)
+          return fields.length === 0 ? [] : [{ ...request, fields }]
+        })
       }
 
       return { entities }

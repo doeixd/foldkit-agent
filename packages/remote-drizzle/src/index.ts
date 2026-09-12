@@ -261,10 +261,12 @@ export const source = <P = unknown>(
           }
 
           const targetId = idColumn(relation.entity)
-          const order: ReadonlyArray<OrderTerm> =
-            relation.orderBy === undefined || relation.orderBy.length === 0
-              ? [{ column: targetId, direction: 'asc' }]
-              : relation.orderBy
+          // The target id is the final tie-breaker, so ranking and ordering
+          // agree and a page never drops a row that ties on the order columns.
+          const declared = relation.orderBy ?? []
+          const order: ReadonlyArray<OrderTerm> = declared.some(term => term.column === targetId)
+            ? declared
+            : [...declared, { column: targetId, direction: 'asc' }]
           const naturalOrder = orderByTerms(order, 'forward')
           const parentKeys = [
             ...new Set(
@@ -347,12 +349,12 @@ export const source = <P = unknown>(
 
             for (const row of rows) {
               const key = row[field]
-              const childRows =
-                key === null || key === undefined ? [] : (byParent.get(String(key)) ?? [])
-              if (childRows.length === 0) {
+              if (key === null || key === undefined) {
                 row[field] = empty
                 continue
               }
+              // An empty page under a cursor still has its cursor-side boundary.
+              const childRows = byParent.get(String(key)) ?? []
               const natural = shape.traversal === 'backward' ? [...childRows].reverse() : childRows
               const page = buildPage({
                 rows: natural,
