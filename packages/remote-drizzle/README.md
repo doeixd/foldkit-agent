@@ -77,16 +77,16 @@ import { entity } from 'foldkit-remote-drizzle'
 const User = entity('User', users)
 ```
 
-`entity(name, table, { relations?, computed? })` derives an Effect Schema from
-the table with `drizzle-orm/effect-schema` and exposes the table columns. The
-result **is** a `foldkit-remote` `EntityDescriptor`, so `Selection.make` checks
-field names against the table without a second declaration. Each declared
-relation adds a ref field (`owner: Entity.ref(User)`, or an array of refs for a
-collection); each computed adds a number field.
+`entity(name, table, { fields?, relations?, computed? })` derives an Effect
+Schema from the table with `drizzle-orm/effect-schema` and exposes the table
+columns. The result **is** a `foldkit-remote` `EntityDescriptor`, so
+`Selection.make` checks field names against the table without a second
+declaration. Each declared relation adds a ref field (`owner: Entity.ref(User)`,
+or an array of refs for a collection); each computed adds a number field.
 
 A table must have an `id` column; every read needs it for normalization even when
 the client did not select it. Several mistakes are rejected at definition time: a
-relation (or computed) name that collides with a column; a computed naming an
+relation (or computed) name that collides with a field; a computed naming an
 undeclared or singular relation; and a `one` relation pointed at a nullable
 column without `{ nullable: true }` (below).
 
@@ -233,7 +233,7 @@ A collection relation can be filtered per principal at the source, e.g. to expos
 only rows the caller may see:
 
 ```ts
-const ProjectSource = source(Project, {
+const PostSource = source(Post, {
   policies: {
     comments: principal => eq(comments.visibleTo, principal.id),
   },
