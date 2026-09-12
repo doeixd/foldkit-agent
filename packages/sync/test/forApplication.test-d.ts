@@ -33,7 +33,7 @@ const _shared: { readonly todos: ReadonlyArray<string> } = TodoSync.projection.g
 forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
-  // @ts-expect-error `durable` must be a `MessageSet.make` subset, not a bare array
+  // @ts-expect-error `durable` must be a `MessageSet`, not a bare array
   durable: [Message.CreatedTodo],
 })
 
@@ -63,4 +63,73 @@ forApplication(App).make({
   replay: (value, message) =>
     // @ts-expect-error `SelectedTodo` is not in the durable subset, so it never reaches replay
     message._tag === 'SelectedTodo' ? value : value,
+})
+
+// --- fragments and authorization ------------------------------------------
+
+const WideModel = Schema.Struct({
+  todos: Schema.Array(Schema.String),
+  members: Schema.Array(Schema.String),
+  selectedTodoId: Schema.NullOr(Schema.String),
+})
+const WideMessage = defineMessageUnion({
+  CreatedTodo: { id: Schema.String },
+  Invited: { name: Schema.String },
+  SelectedTodo: { id: Schema.String },
+})
+const Wide = Surface.application({
+  Model: WideModel,
+  Message: WideMessage,
+  initial: { todos: [], members: [], selectedTodoId: null },
+  update: (model: typeof WideModel.Type, _message: typeof WideMessage.Type) => ({ model }),
+})
+const WideSync = forApplication(Wide).withPrincipal<{ readonly role: 'admin' | 'guest' }>()
+const TodosFragment = WideSync.fragment({
+  shared: Projection.pick(Wide.fields.todos),
+  durable: MessageSet.make(Wide, [WideMessage.CreatedTodo]),
+})
+const MembersFragment = WideSync.fragment({
+  shared: Projection.pick(Wide.fields.members),
+  durable: MessageSet.make(Wide, [WideMessage.Invited]),
+})
+
+const Composed = WideSync.make({
+  documentId: documentId('wide'),
+  ...WideSync.compose(TodosFragment, MembersFragment),
+  // `replay` sees the union of both fragments' Messages.
+  replay: (value, message) => {
+    const _tag: 'CreatedTodo' | 'Invited' = message._tag
+    return value
+  },
+  authorize: {
+    // `message` is exactly this variant; `principal` is the fixed type.
+    CreatedTodo: ({ principal, message, shared }) =>
+      principal.role === 'admin' && !shared.todos.includes(message.id) && shared.members.length > 0,
+  },
+})
+// The merged shared shape carries both fragments' fields and nothing local.
+const _wide: {
+  readonly todos: ReadonlyArray<string>
+  readonly members: ReadonlyArray<string>
+} = Composed.projection.get({ todos: [], members: [], selectedTodoId: null })
+
+WideSync.make({
+  documentId: documentId('wide'),
+  ...WideSync.compose(TodosFragment),
+  // @ts-expect-error `SelectedTodo` is not durable, so it has no rule
+  authorize: { SelectedTodo: () => true },
+})
+
+WideSync.make({
+  documentId: documentId('wide'),
+  ...WideSync.compose(TodosFragment),
+  // @ts-expect-error `CreatedTodo` has no `name`
+  authorize: { CreatedTodo: ({ message }) => message.name === 'x' },
+})
+
+WideSync.make({
+  documentId: documentId('wide'),
+  ...WideSync.compose(TodosFragment),
+  // @ts-expect-error the principal has no `owner`
+  authorize: { CreatedTodo: ({ principal }) => principal.owner === 'x' },
 })

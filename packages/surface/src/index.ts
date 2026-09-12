@@ -684,7 +684,7 @@ type Merge2<A, B> = {
 }
 
 /** Merges the fields of several projections; an overlapping key is rejected at runtime. */
-type MergeFields<Ps extends readonly WritableProjection<any, any>[]> = Ps extends readonly [
+export type MergeFields<Ps extends readonly WritableProjection<any, any>[]> = Ps extends readonly [
   infer Head extends WritableProjection<any, any>,
   ...infer Tail extends readonly WritableProjection<any, any>[],
 ]
@@ -826,7 +826,7 @@ type CasesOfSubset<S> = S extends MessageSet<any, any, any, any, infer C> ? C : 
 type Concat<A extends readonly unknown[], B extends readonly unknown[]> = [...A, ...B]
 
 /** Concatenates the constructor tuples of several subsets, preserving each. */
-type MergeConstructors<Subs extends readonly MessageSet<any, any, any, any, any>[]> =
+export type MergeConstructors<Subs extends readonly MessageSet<any, any, any, any, any>[]> =
   Subs extends readonly [
     infer Head extends MessageSet<any, any, any, any, any>,
     ...infer Tail extends readonly MessageSet<any, any, any, any, any>[],

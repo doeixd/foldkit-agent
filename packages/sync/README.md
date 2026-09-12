@@ -103,6 +103,53 @@ await mounted.dispose() // waits for in-flight persists; the replica stays open
 [docs/sync-runtime-binding.md](../../docs/sync-runtime-binding.md) for what the
 mount guarantees and why no Foldkit change is required.
 
+### Fragments
+
+A large application declares one fragment per feature and composes them:
+
+```ts
+const Sync = forApplication(App)
+const Todos = Sync.fragment({
+  shared: Projection.pick(App.fields.todos),
+  durable: MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo]),
+})
+const Members = Sync.fragment({
+  shared: Projection.pick(App.fields.members),
+  durable: MessageSet.make(App, [Message.Invited]),
+})
+const Board = Sync.make({ documentId: documentId('board'), ...Sync.compose(Todos, Members) })
+```
+
+`compose` merges the shared projections and the durable subsets and infers the
+merged shape. A field declared twice with a different codec, a Message declared
+durable twice, or a fragment from another application throws. Two contracts
+over the same field are a different mistake, which `Module.validate` reports.
+
+### Authorization
+
+Policy attaches to the contract per durable variant and compiles into the
+journal contract, so the server applies it with no glue:
+
+```ts
+const Sync = forApplication(App).withPrincipal<{ readonly role: 'admin' | 'guest' }>()
+const Board = Sync.make({
+  documentId: documentId('board'),
+  ...Sync.compose(Todos, Members),
+  authorize: {
+    // `message` is exactly `RenamedTodo`; `shared` is the authoritative snapshot.
+    RenamedTodo: ({ principal, message, shared }) =>
+      principal.role === 'admin' && shared.todos.some(todo => todo.id === message.id),
+  },
+})
+
+const journal = yield* makeJournal({ ...Board.journalContract(), file, opId, actorId })
+```
+
+A durable variant without a rule is allowed; a key that is not a durable tag is
+a compile error. The rule runs inside the append transaction against the
+snapshot, so keep it synchronous and local. The client does not run it: a
+replica has no principal, and a refused operation comes back as a rejection.
+
 ### Lower level
 
 `Sync.forApplication(App).make` compiles down to `defineSync`, the protocol

@@ -11,9 +11,14 @@ export { mount, type MountOptions, type Mounted } from './mount.js'
 export {
   forApplication,
   type ApplicationSync,
-  type MakeOptions,
+  type AuthorizePolicy,
+  type AuthorizeRequest,
   type DefinedSync,
+  type FragmentMessages,
+  type MakeOptions,
   type MsgOf,
+  type PolicyJournalContract,
+  type SyncFragment,
 } from './make.js'
 export {
   DocumentId,

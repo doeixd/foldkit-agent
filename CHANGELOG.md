@@ -308,6 +308,19 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-sync`
 
+- **Fragments.** `Sync.forApplication(App).fragment({ shared, durable })`
+  declares one feature's shared fields and durable Messages, and
+  `compose(...fragments)` merges them into a value to spread into `make`,
+  inferring the merged shared shape and Message union. A field declared twice
+  with a different codec, a duplicate durable tag, or a fragment from another
+  application throws (#63).
+- **Authorization on the contract.** `make({ authorize: { Tag: rule } })` takes
+  one rule per durable variant, with `message` typed as that variant, `shared`
+  as the snapshot, and `principal` fixed by `withPrincipal<P>()`; a key that is
+  not a durable tag is a compile error. `journalContract()` now returns a
+  `PolicyJournalContract` carrying the compiled `authorize`, so
+  `makeJournal({ ...contract })` applies it; an unruled variant is allowed and a
+  contract without rules declares none (#63).
 - **`Sync.mount`.** Runs a Foldkit application over an open replica with one
   reducer: a durable Message is applied at once through `update` and persisted
   afterwards in a Command; a failed persist reverts it and reports through
