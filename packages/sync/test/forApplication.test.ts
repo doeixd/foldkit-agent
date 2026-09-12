@@ -71,6 +71,77 @@ describe('Sync.forApplication', () => {
     if (refused._tag === 'Failure') expect(refused.failure._tag).toBe('InvalidOutboxError')
   })
 
+  /**
+   * An application whose `CreatedTodo` transition breaks the durable contract in
+   * one way: it returns a Command, or it also writes the local `selectedTodoId`.
+   * `commands: []` is the control: an empty collection is still state-only.
+   */
+  let ran = false
+  const faultyApp = (fault: 'command' | 'local' | 'none') => {
+    const faultyUpdate = (model: Model, message: Message): Update.Return<Model, Message> =>
+      Message.match<Update.Return<Model, Message>>(message, {
+        CreatedTodo: ({ id, title }) => {
+          const todos = [...model.todos, { id, title }]
+          switch (fault) {
+            case 'command':
+              return {
+                model: { ...model, todos },
+                commands: [
+                  {
+                    name: 'select',
+                    effect: Effect.sync(() => {
+                      ran = true
+                      return Message.SelectedTodo({ id })
+                    }),
+                  },
+                ],
+              }
+            case 'local':
+              return { model: { ...model, todos, selectedTodoId: id } }
+            case 'none':
+              return { model: { ...model, todos }, commands: [] }
+          }
+        },
+        RenamedTodo: () => ({ model }),
+        SelectedTodo: ({ id }) => ({ model: { ...model, selectedTodoId: id } }),
+      })
+    const Faulty = Surface.application({
+      Model: ModelSchema,
+      Message,
+      initial,
+      update: faultyUpdate,
+    })
+    const sync = forApplication(Faulty, {
+      documentId: documentId('todos'),
+      shared: Surface.pick(Faulty.fields.todos),
+      durable: Surface.messages(Faulty, [Message.CreatedTodo, Message.RenamedTodo]),
+    })
+    return Effect.runPromise(sync.openReplica(replicaId('a'), memoryStorage()))
+  }
+
+  it('accepts a durable transition that returns no Commands', async () => {
+    const replica = await faultyApp('none')
+    await submit(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
+    expect(shared(replica)).toEqual({ todos: [{ id: 'a', title: 'A' }] })
+  })
+
+  it('refuses a durable transition that returns a Command', async () => {
+    const replica = await faultyApp('command')
+    await submit(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
+    expect(() => shared(replica)).toThrow(
+      'durable "CreatedTodo" returned 1 Command(s); a durable transition is state-only',
+    )
+    expect(ran).toBe(false)
+  })
+
+  it('refuses a durable transition that changes a field outside the shared projection', async () => {
+    const replica = await faultyApp('local')
+    await submit(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
+    expect(() => shared(replica)).toThrow(
+      'durable "CreatedTodo" changed Model fields outside the shared projection: selectedTodoId',
+    )
+  })
+
   it('refuses a durable subset from another application', () => {
     const OtherModel = Schema.Struct({ todos: Schema.Array(Schema.String) })
     const OtherMessage = defineMessageUnion({ Ping: {} })

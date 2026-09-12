@@ -164,9 +164,9 @@ result = update(baseline, message)
 get(result.model)
 ```
 
-The two guards are exactly what `examples/sync/src/app.ts` does by hand today;
-they move into the library. Failure is a typed development error naming the
-offending field, not a silent divergence. If Foldkit ever exposes a transition
+`Sync.forApplication` applies both guards; `examples/sync` no longer carries a
+hand-written copy. Failure is an error naming the Message and the offending
+fields, not a silent divergence, and the refused Command's effect never runs. If Foldkit ever exposes a transition
 driver that can reject a transition before it applies, this is where it plugs in;
 until then, deterministic replay plus these guards is the contract.
 

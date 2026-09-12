@@ -165,8 +165,14 @@ export interface ForApplicationConfig<
  * contract from a `Surface.application`: the initial shared value, the durable
  * predicate, and replay. Replay installs the shared slice into the application's
  * initial Model, applies the Message with the application's own `update`, and
- * reads the shared slice back — the state-only, deterministic subset. Use
- * `Sync.make` or `defineSync` when replay must be custom.
+ * reads the shared slice back.
+ *
+ * A durable Message must be a deterministic, state-only transition of the shared
+ * projection. Replay refuses one that returns a Command (a live effect cannot be
+ * replayed) or that changes a Model field outside the projection (the change
+ * would be silently lost), so a Message that needs either stays local and emits
+ * a durable fact once the effect settles. Use `Sync.make` or `defineSync` when
+ * replay must be custom.
  */
 export const forApplication = <
   AppModel,
@@ -192,18 +198,44 @@ export const forApplication = <
   // types cannot separate them; the owner token can.
   if (config.durable.owner !== app.owner)
     throw new Error('Sync.forApplication: the durable subset belongs to a different application')
+  // Per-field equivalences for the fields the projection does not own outright,
+  // built once, so a violation names the fields and replay (which runs per
+  // pending operation on every optimistic read) does not re-compare the shared
+  // slice against itself. A partially shared field is still compared.
+  const owned = new Set(shared.dependencies.filter(path => path.length === 1).map(path => path[0]))
+  const fields = Object.entries(app.Model.fields)
+    .filter(([key]) => !owned.has(key))
+    .map(
+      ([key, field]) =>
+        [key, Schema.toEquivalence(field as unknown as Schema.Schema<unknown>)] as const,
+    )
   return compile(app, config.name ?? String(config.documentId), {
     documentId: config.documentId,
     initial,
     shared,
     durable: config.durable.constructors,
-    replay: (value, message) =>
-      shared.get(
-        update(
-          shared.set(initial, value),
-          // Only durable Messages reach replay, so the subset is an App Message.
-          message as Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>,
-        ).model,
-      ),
+    replay: (value, message) => {
+      // Only durable Messages reach replay, so the subset is an App Message.
+      const result = update(
+        shared.set(initial, value),
+        message as Schema.Schema.Type<AppScope<AppModel, F, Cases>['Message']>,
+      )
+      const tag = (message as { readonly _tag?: string })._tag
+      if (result.commands !== undefined && result.commands.length > 0)
+        throw new Error(
+          `Sync.forApplication: durable "${tag}" returned ${result.commands.length} Command(s); a durable transition is state-only`,
+        )
+      const next = shared.get(result.model)
+      // Writing the projection back into the baseline reproduces `update`'s
+      // result exactly when it touched only shared fields.
+      const written = shared.set(initial, next) as Record<string, unknown>
+      const actual = result.model as Record<string, unknown>
+      const changed = fields.filter(([key, equal]) => !equal(actual[key], written[key]))
+      if (changed.length > 0)
+        throw new Error(
+          `Sync.forApplication: durable "${tag}" changed Model fields outside the shared projection: ${changed.map(([key]) => key).join(', ')}`,
+        )
+      return next
+    },
   })
 }

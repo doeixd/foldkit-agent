@@ -283,6 +283,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Consistent config and subset ownership.** `Sync.make`'s config uses
   `shared`/`durable`, matching `Sync.forApplication`, and `forApplication`
   refuses a durable subset whose owner token belongs to a different application.
+- **Derived replay is guarded.** `Sync.forApplication`'s replay refuses a durable
+  Message whose `update` returns a Command or changes a Model field outside the
+  shared projection, naming the Message and the fields, instead of silently
+  dropping the Command or the change. A durable Message is a deterministic,
+  state-only transition of the shared projection; an effectful Message stays
+  local and emits a durable fact when its Command settles. The Command's effect
+  is never run. `examples/sync` drops its hand-written copy of the same guards.
 - **Replay documented at the definition.** `SyncConfig.replay` states that a
   durable Message's Commands are dropped during replay and optimistic projection
   (only state changes apply) and that each replay starts from the initial Model,

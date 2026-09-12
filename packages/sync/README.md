@@ -54,9 +54,15 @@ const TodoSync = forApplication(App, {
 
 Only `todos` is replicated; `selectedTodoId` stays local. The derived `replay`
 installs the shared slice into the application's initial Model, applies the
-durable Message through `update`, and reads the shared slice back — the
-state-only, deterministic subset. `Sync.make` below takes a custom `replay` when
-an application needs one.
+durable Message through `update`, and reads the shared slice back.
+
+A durable Message must therefore be a deterministic, state-only transition of
+the shared projection. Replay refuses one whose `update` returns a Command (a
+live effect cannot be replayed) or changes a field outside the projection (the
+change would be silently lost), naming the Message and the fields. A Message that
+needs an effect stays local and emits a durable fact once the effect settles:
+`RequestedChargeCard` runs the Command; `CardCharged` is what replicates.
+`Sync.make` below takes a custom `replay` when an application needs one.
 
 On the server, the same contract produces the journal's codecs and reducer, so
 neither is written twice:
