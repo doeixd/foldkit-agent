@@ -395,6 +395,46 @@ describe('the replica', () => {
     await expect(open(replicaId, storage)).rejects.toThrow('Invalid outbox')
   })
 
+  it.each([
+    [
+      'duplicate committed ids',
+      { committedIds: ['a:1', 'a:1'], pending: [] },
+      'Invalid replica history',
+    ],
+    [
+      'a pending operation from another replica',
+      { committedIds: [], pending: [operation('b', 1, created('t'))] },
+      'Invalid outbox',
+    ],
+    [
+      'a pending operation that is already committed',
+      { committedIds: ['a:1'], pending: [operation('a', 1, created('t'))] },
+      'Invalid outbox',
+    ],
+    [
+      'duplicate pending operations',
+      {
+        committedIds: [],
+        pending: [operation('a', 1, created('t')), operation('a', 1, created('t'))],
+      },
+      'Invalid outbox',
+    ],
+  ])('refuses a stored history with %s', async (_, override, message) => {
+    const storage = memoryStorage({
+      protocolVersion: 1,
+      schemaVersion: 1,
+      documentId: 'todos',
+      replicaId: 'a',
+      revision: 1,
+      nextLocalSequence: 2,
+      cursor: 0,
+      committed: { todos: [] },
+      ...override,
+    })
+
+    await expect(open('a', storage)).rejects.toThrow(message)
+  })
+
   it('refuses work after close and tolerates a second close', async () => {
     const replica = await open('a')
     await close(replica)
@@ -446,6 +486,9 @@ describe('the replica', () => {
     expect(cursor(replica)).toBe(1100)
     const saved = (await Effect.runPromise(storage.load())) as ReplicaState<Shared>
     expect(saved.committedIds.length).toBeLessThan(1100)
+    // The window keeps the newest ids, not the oldest.
+    expect(saved.committedIds).toContain('seed:1100')
+    expect(saved.committedIds).not.toContain('seed:1')
   })
 
   it('recovers a long offline outbox and converges on the committed order', async () => {
@@ -580,6 +623,65 @@ describe('the replica', () => {
     release({ operations: [], acknowledged: [opId('a:1'), opId('a:2')], rejected: [] })
     await expect(running).rejects.toThrow('acknowledged an operation that was not sent')
     expect(pending(replica).map(op => op.opId)).toEqual(['a:1', 'a:2'])
+  })
+
+  it('skips a committed operation it has already applied', async () => {
+    const replica = await open('a')
+    const applied = committed('b', 1, 1, created('t'))
+
+    await sync(replica, { exchange: async () => ({ operations: [applied], rejected: [] }) })
+    expect(cursor(replica)).toBe(1)
+
+    // A server that resends the last applied operation is idempotent, not a gap.
+    await sync(replica, { exchange: async () => ({ operations: [applied], rejected: [] }) })
+    expect(cursor(replica)).toBe(1)
+    expect(shared(replica).todos).toEqual([{ id: 't', title: 't' }])
+  })
+
+  it('drops an acknowledged operation that is not in the committed log', async () => {
+    const replica = await open('a')
+    await submit(replica, created('t'))
+
+    await sync(replica, {
+      exchange: async () => ({ operations: [], acknowledged: [opId('a:1')], rejected: [] }),
+    })
+
+    expect(pending(replica)).toEqual([])
+    // The optimistic effect is gone because the server owns the commit.
+    expect(shared(replica)).toEqual({ todos: [] })
+  })
+
+  it('reports the most recent rejection first', async () => {
+    const replica = await open('a')
+    await submit(replica, created('t1'))
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: [opId('a:1')] }) })
+    await submit(replica, created('t2'))
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: [opId('a:2')] }) })
+
+    expect((await status(replica)).rejected).toEqual([opId('a:2'), opId('a:1')])
+  })
+
+  it('refuses an exchange that resolves after the replica closed', async () => {
+    const replica = await open('a')
+    let release!: (value: Exchange<Shared>) => void
+    let started!: () => void
+    const ready = new Promise<void>(resolve => {
+      started = resolve
+    })
+    const response = new Promise<Exchange<Shared>>(resolve => {
+      release = resolve
+    })
+    const running = sync(replica, {
+      exchange: () => {
+        started()
+        return response
+      },
+    })
+    await ready
+    await close(replica)
+    release({ operations: [], rejected: [] })
+
+    await expect(running).rejects.toThrow('Replica is closed')
   })
 
   it('refuses a response that both acknowledges and rejects one operation', async () => {

@@ -275,6 +275,105 @@ describe('presence', () => {
       }),
     ))
 
+  it('does not store or re-announce the echo of its own broadcast', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        yield* settle
+        let notifications = 0
+        a.subscribe(() => {
+          notifications += 1
+        })
+
+        yield* a.set({ cursor: 1 })
+        yield* settle
+
+        // The set notifies once; the channel's echo of our own update must not.
+        expect(notifications).toBe(1)
+      }),
+    ))
+
+  it('keeps consuming after dropping a value that fails the contract', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        yield* settle
+
+        yield* PubSub.publish(channel.updates, {
+          id: 'a',
+          value: { cursor: 'not a number' } as unknown as Cursor,
+        })
+        yield* settle
+        expect(yield* b.peers).toEqual([])
+
+        // The invalid value must not kill the consumer: a later valid update
+        // still arrives.
+        yield* a.set({ cursor: 3 })
+        yield* settle
+        expect((yield* b.peers).map(peer => [peer.id, peer.value.cursor])).toEqual([['a', 3]])
+      }),
+    ))
+
+  it('does not notify when a departure names an unknown peer', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        yield* settle
+        let notifications = 0
+        b.subscribe(() => {
+          notifications += 1
+        })
+
+        yield* PubSub.publish(channel.updates, { id: 'ghost', value: null })
+        yield* settle
+
+        expect(notifications).toBe(0)
+      }),
+    ))
+
+  it('does not broadcast a departure after close', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+        yield* settle
+        yield* b.set({ cursor: 2 })
+        yield* settle
+        expect((yield* a.peers).map(peer => peer.id)).toEqual(['b'])
+
+        yield* b.close
+        yield* b.leave
+        yield* settle
+
+        // A closed presence never touches the channel.
+        expect((yield* a.peers).map(peer => peer.id)).toEqual(['b'])
+      }),
+    ))
+
+  it('ignores a socket frame without a server-stamped id', () =>
+    run(
+      Effect.gen(function* () {
+        const { client, server } = socketPair()
+        const presence = yield* make({
+          id: 'a',
+          ttl: '100 millis',
+          channel: yield* socketPresenceChannel<Cursor>(client),
+        })
+        yield* settle
+
+        // The server owns peer identity; an unstamped frame is dropped.
+        server.send(JSON.stringify({ presence: { value: { cursor: 1 } } }))
+        yield* settle
+
+        expect(yield* presence.peers).toEqual([])
+      }),
+    ))
+
   it('ignores mutations after close', () =>
     run(
       Effect.gen(function* () {
