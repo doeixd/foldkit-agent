@@ -26,7 +26,7 @@ const rows: Record<string, Record<string, unknown>> = {
   'Team:t1': { name: 'core' },
 }
 const table = (entity: { readonly name: string }) =>
-  RemoteServer.entity<string>(entity as never, {
+  RemoteServer.entity<string>(entity, {
     read: ({ ids, fields }) =>
       Effect.succeed(
         ids.flatMap(id => {
@@ -86,7 +86,7 @@ describe('a nested relation is followed even when its target was already fetched
 describe('review: grouping and levels', () => {
   const reads: Array<{ entity: string; ids: ReadonlyArray<string>; windows: unknown }> = []
   const recording = (entity: { readonly name: string }) =>
-    RemoteServer.entity<string>(entity as never, {
+    RemoteServer.entity<string>(entity, {
       read: ({ ids, fields, windows }) =>
         Effect.sync(() => {
           reads.push({ entity: entity.name, ids, windows })
@@ -101,7 +101,7 @@ describe('review: grouping and levels', () => {
   const recorded = RemoteServer.make({
     entities: [recording(Project), recording(Comment), recording(User), recording(Team)],
   })
-  const read = (requests: ReadonlyArray<Request>, options: HandlerOptions = {}) => {
+  const read = (requests: ReadonlyArray<Request>, options: HandlerOptions<string> = {}) => {
     reads.length = 0
     return Effect.runPromise(
       Effect.scoped(

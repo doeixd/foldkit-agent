@@ -13,17 +13,18 @@ import {
   RemoteProtocolError,
   RemoteQueryError,
   RemoteReadError,
+  connectionIdentity,
+  entityKey,
   refsIn,
   stableStringify,
   type Boundary,
   type ConnectionChangeSchema,
-  type EntityDescriptor,
+  type ConnectionIdentity,
   type LiveChange,
   type MutationDescriptor,
   type NormalizedPatch,
   type QueryDescriptor,
   type QueryWindow,
-  type ReadRequest,
   type RelationRequirement,
   type RemoteDescriptor,
   type RemoteRpcClient,
@@ -52,6 +53,8 @@ export interface EntitySourceContext<P> {
 
 export interface EntitySource<P, R = never> {
   readonly entity: string
+  /** The fields the entity declares; a request for any other never reaches `read`. */
+  readonly fields?: ReadonlySet<string> | undefined
   readonly read: (
     context: EntitySourceContext<P>,
   ) => Effect.Effect<ReadonlyArray<EntityRecord>, RemoteServerError, R>
@@ -61,6 +64,50 @@ export interface EntitySource<P, R = never> {
 
 /** A connection change a mutation made, as the wire carries it. */
 export type ConnectionChange = Schema.Schema.Type<typeof ConnectionChangeSchema>
+
+const connectionChange = (
+  connection: ConnectionIdentity,
+  ref: { readonly entity: string; readonly id: string },
+  position: 'prepend' | 'append' | 'remove',
+): ConnectionChange => {
+  const edge = { entity: ref.entity, id: ref.id, key: entityKey(ref.entity, ref.id) }
+  return position === 'remove'
+    ? { _tag: 'Remove', connection: connectionIdentity(connection), edge }
+    : { _tag: 'Insert', connection: connectionIdentity(connection), position, edge }
+}
+
+/**
+ * The requested fields, in request order, that the source declares and the
+ * principal may read. Never a field the client did not request, even if a
+ * permissive `authorize` returns more.
+ */
+const allowedFields = <P, R>(
+  source: EntitySource<P, R>,
+  principal: P,
+  requested: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const declared =
+    source.fields === undefined ? requested : requested.filter(field => source.fields!.has(field))
+  if (declared.length === 0) return []
+  const permitted = new Set(
+    source.authorize === undefined ? declared : source.authorize(principal, declared),
+  )
+  return declared.filter(field => permitted.has(field))
+}
+
+/** The windows of the fields being read; only a field being read carries its window. */
+const windowsOf = (
+  windows: Readonly<Record<string, QueryWindow>> | undefined,
+  fields: ReadonlyArray<string>,
+): { readonly windows?: Readonly<Record<string, QueryWindow>> } => {
+  if (windows === undefined) return {}
+  const kept = Object.fromEntries(
+    fields.flatMap(field =>
+      Object.hasOwn(windows, field) ? [[field, windows[field]!] as const] : [],
+    ),
+  )
+  return Object.keys(kept).length === 0 ? {} : { windows: kept }
+}
 
 export interface MutationOutcome<Output> {
   readonly output: Output
@@ -107,7 +154,7 @@ export interface QuerySource<P, R = never> {
 export interface LiveSource<P, R = never> {
   readonly entity: string
   readonly subscribe: (context: {
-    readonly requirements: ReadonlyArray<Schema.Schema.Type<typeof ReadRequest>>
+    readonly requirements: ReadonlyArray<Requirement>
     readonly after: number
     readonly principal: P
   }) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteServerError, R>
@@ -126,11 +173,28 @@ const DEFAULT_MAX_IDS_PER_ENTITY = 1000
 /** A nested selection may not reach further than this many relation levels. */
 const DEFAULT_MAX_DEPTH = 8
 
-export interface HandlerOptions {
+export interface HandlerOptions<P, R = never> {
+  /** A read or live subscription may not name more ids of one entity than this; default 1000. */
   readonly maxIdsPerEntity?: number | undefined
+  /** A nested selection may not reach further than this many relation levels; default 8. */
   readonly maxDepth?: number | undefined
   /** A hub whose `changed`/`deleted` signals reach the subscribers this handler registers. */
-  readonly live?: LiveHub<any, any> | undefined
+  readonly live?: LiveHub<P, R> | undefined
+}
+
+/** Fails when the requirements name more distinct ids of one entity than `maxIds`. */
+const checkIdsPerEntity = (
+  requirements: ReadonlyArray<Requirement>,
+  maxIds: number,
+): string | undefined => {
+  const ids = new Map<string, Set<string>>()
+  for (const requirement of requirements) {
+    const seen = ids.get(requirement.entity) ?? new Set<string>()
+    seen.add(requirement.id)
+    ids.set(requirement.entity, seen)
+    if (seen.size > maxIds) return requirement.entity
+  }
+  return undefined
 }
 
 type LiveChangeValue = Schema.Schema.Type<typeof LiveChange>
@@ -158,10 +222,12 @@ export interface LiveHub<P, R = never> {
   readonly deleted: (ref: LiveRef) => Effect.Effect<void>
   /** Registers a subscriber for the stream's lifetime; `handlers` calls this. */
   readonly subscribe: (context: {
-    readonly requirements: ReadonlyArray<Request>
+    readonly requirements: ReadonlyArray<Requirement>
     readonly after: number
     readonly principal: P
-  }) => Stream.Stream<LiveChangeValue>
+    /** Refuses a subscription naming more ids of one entity than this. */
+    readonly maxIdsPerEntity?: number | undefined
+  }) => Stream.Stream<LiveChangeValue, RemoteServerError>
   /** How many subscribers are registered now. */
   readonly size: Effect.Effect<number>
 }
@@ -169,7 +235,13 @@ export interface LiveHub<P, R = never> {
 interface Selected {
   readonly fields: Set<string>
   /** The window each paged field was subscribed with, so a re-read pages the same way. */
-  readonly windows: Record<string, QueryWindow>
+  readonly windows: Map<string, QueryWindow>
+}
+
+/** The subscribers one source read answers, and the fields each wants of it. */
+interface ReadGroup<P> {
+  readonly windows: Readonly<Record<string, QueryWindow>>
+  readonly entries: Array<{ readonly subscriber: Subscriber<P>; readonly fields: string[] }>
 }
 
 interface Subscriber<P> {
@@ -180,8 +252,9 @@ interface Subscriber<P> {
   cursor: number
 }
 
-const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P, R>> =>
+const liveHub = <P, R>(entities: ReadonlyArray<EntitySource<P, R>>): Effect.Effect<LiveHub<P, R>> =>
   Effect.sync(() => {
+    const sources = new Map(entities.map(source => [source.entity, source]))
     const subscribers = new Set<Subscriber<P>>()
     const emit = (subscriber: Subscriber<P>, change: Uncursored<LiveChangeValue>) => {
       subscriber.cursor += 1
@@ -192,15 +265,26 @@ const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P,
     }
 
     return {
-      subscribe: ({ requirements, after, principal }) =>
+      subscribe: ({ requirements, after, principal, maxIdsPerEntity }) =>
         Stream.unwrap(
           Effect.gen(function* () {
+            const over = checkIdsPerEntity(
+              requirements,
+              Math.max(1, maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY),
+            )
+            if (over !== undefined) {
+              return yield* new RemoteServerError({
+                message: `Too many "${over}" ids in one live subscription`,
+              })
+            }
             const selected = new Map<string, Selected>()
             for (const requirement of requirements) {
               const key = `${requirement.entity}:${requirement.id}`
-              const entry = selected.get(key) ?? { fields: new Set<string>(), windows: {} }
+              const entry = selected.get(key) ?? { fields: new Set<string>(), windows: new Map() }
               for (const field of requirement.fields) entry.fields.add(field)
-              Object.assign(entry.windows, requirement.windows ?? {})
+              for (const [field, window] of Object.entries(requirement.windows ?? {})) {
+                entry.windows.set(field, window)
+              }
               selected.set(key, entry)
             }
             const subscriber: Subscriber<P> = {
@@ -219,72 +303,61 @@ const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P,
       changed: (ref, fields) =>
         Effect.gen(function* () {
           const key = `${ref.entity}:${ref.id}`
-          const source = server.entities.get(ref.entity)
+          const source = sources.get(ref.entity)
           if (source === undefined) return
-          // One source read per principal and window signature: subscribers
-          // sharing both share the read, and a paged field is re-read with
-          // the window the subscriber selected it with.
-          const groups = new Map<
-            string,
-            {
-              principal: P
-              windows: Record<string, QueryWindow>
-              entries: Array<{ subscriber: Subscriber<P>; fields: string[] }>
-            }
-          >()
+          // One source read per principal (by identity) and window signature:
+          // subscribers sharing both share the read, and a paged field is
+          // re-read with the window the subscriber selected it with.
+          const groups = new Map<P, Map<string, ReadGroup<P>>>()
           for (const subscriber of subscribers) {
             const selected = subscriber.selected.get(key)
             if (selected === undefined) continue
             const wanted = fields.filter(field => selected.fields.has(field))
             if (wanted.length === 0) continue
             const windows = Object.fromEntries(
-              wanted.flatMap(field =>
-                field in selected.windows ? [[field, selected.windows[field]!]] : [],
-              ),
+              wanted.flatMap(field => {
+                const window = selected.windows.get(field)
+                return window === undefined ? [] : [[field, window] as const]
+              }),
             )
-            const groupKey = stableStringify([subscriber.principal, windows])
-            const group = groups.get(groupKey) ?? {
-              principal: subscriber.principal,
-              windows,
-              entries: [],
-            }
+            const byWindows = groups.get(subscriber.principal) ?? new Map<string, ReadGroup<P>>()
+            groups.set(subscriber.principal, byWindows)
+            const windowKey = stableStringify(windows)
+            const group = byWindows.get(windowKey) ?? { windows, entries: [] }
+            byWindows.set(windowKey, group)
             group.entries.push({ subscriber, fields: wanted })
-            groups.set(groupKey, group)
           }
-          for (const { principal, windows, entries: group } of groups.values()) {
-            const requested = [...new Set(group.flatMap(entry => entry.fields))]
-            const permitted =
-              source.authorize === undefined ? requested : source.authorize(principal, requested)
-            const permittedSet = new Set(permitted)
-            const allowed = requested.filter(field => permittedSet.has(field))
-            if (allowed.length === 0) continue
-            const allowedWindows = Object.fromEntries(
-              Object.entries(windows).filter(([field]) => permittedSet.has(field)),
-            )
-            const records = yield* source.read({
-              ids: [ref.id],
-              fields: allowed,
-              principal,
-              ...(Object.keys(allowedWindows).length === 0 ? {} : { windows: allowedWindows }),
-            })
-            const record = records.find(candidate => candidate.id === ref.id)
-            if (record === undefined) continue
-            for (const { subscriber, fields: wanted } of group) {
-              const values: Record<string, unknown> = Object.create(null)
-              for (const field of wanted) {
-                if (permittedSet.has(field) && Object.hasOwn(record.values, field)) {
-                  values[field] = record.values[field]
-                }
-              }
-              const changed = Object.keys(values)
-              if (changed.length === 0) continue
-              yield* emit(subscriber, {
-                _tag: 'EntityPatched',
-                entity: ref.entity,
-                id: ref.id,
-                values,
-                changed,
+          for (const [principal, byWindows] of groups) {
+            for (const { windows, entries: group } of byWindows.values()) {
+              const requested = [...new Set(group.flatMap(entry => entry.fields))]
+              const allowed = allowedFields(source, principal, requested)
+              if (allowed.length === 0) continue
+              const allowedSet = new Set(allowed)
+              const records = yield* source.read({
+                ids: [ref.id],
+                fields: allowed,
+                principal,
+                ...windowsOf(windows, allowed),
               })
+              const record = records.find(candidate => candidate.id === ref.id)
+              if (record === undefined) continue
+              for (const { subscriber, fields: wanted } of group) {
+                const values: Record<string, unknown> = Object.create(null)
+                for (const field of wanted) {
+                  if (allowedSet.has(field) && Object.hasOwn(record.values, field)) {
+                    values[field] = record.values[field]
+                  }
+                }
+                const changed = Object.keys(values)
+                if (changed.length === 0) continue
+                yield* emit(subscriber, {
+                  _tag: 'EntityPatched',
+                  entity: ref.entity,
+                  id: ref.id,
+                  values,
+                  changed,
+                })
+              }
             }
           }
         }),
@@ -302,8 +375,6 @@ const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P,
     }
   })
 
-type Request = Schema.Schema.Type<typeof ReadRequest>
-
 const protocolMismatch = (received: number): RemoteProtocolError | undefined =>
   received === REMOTE_PROTOCOL_VERSION
     ? undefined
@@ -314,57 +385,73 @@ const protocolMismatch = (received: number): RemoteProtocolError | undefined =>
       })
 
 interface EntityGroup {
-  readonly entity: string
-  readonly ids: string[]
-  readonly seenIds: Set<string>
-  readonly fields: Set<string>
-  readonly windows: Map<string, QueryWindow>
-  relations: Readonly<Record<string, RelationRequirement>> | undefined
+  readonly ids: Set<string>
+  /** The union of the requests' fields, windows, and relations. */
+  slice: RelationRequirement
 }
 
 /**
  * One level's requests grouped per entity and window signature: ids and
- * fields unioned, relations merged. Requests that page a relation differently
- * are separate groups, so one window never answers for another id.
+ * slices unioned. Requests that page a relation differently are separate
+ * groups, so one window never answers for another id.
  */
-const groupByEntity = (requests: ReadonlyArray<Request>): Map<string, EntityGroup> => {
+const groupByEntity = (requests: ReadonlyArray<Requirement>): EntityGroup[] => {
   const grouped = new Map<string, EntityGroup>()
   for (const request of requests) {
     const groupKey = `${request.entity}\u0000${stableStringify(request.windows ?? null)}`
-    let group = grouped.get(groupKey)
+    const group = grouped.get(groupKey)
     if (group === undefined) {
-      group = {
-        entity: request.entity,
-        ids: [],
-        seenIds: new Set(),
-        fields: new Set(),
-        windows: new Map(),
-        relations: undefined,
-      }
-      grouped.set(groupKey, group)
+      grouped.set(groupKey, {
+        ids: new Set([request.id]),
+        slice: Requirement.mergeRelation({ entity: request.entity, fields: [] }, request),
+      })
+    } else {
+      group.ids.add(request.id)
+      group.slice = Requirement.mergeRelation(group.slice, request)
     }
-    if (!group.seenIds.has(request.id)) {
-      group.seenIds.add(request.id)
-      group.ids.push(request.id)
-    }
-    for (const field of request.fields) group.fields.add(field)
-    for (const [field, window] of Object.entries(request.windows ?? {})) {
-      group.windows.set(field, window)
-    }
-    group.relations = Requirement.mergeRelations(group.relations, request.relations)
   }
-  return grouped
+  return [...grouped.values()]
+}
+
+/** A descriptor's name and, when it declares them, its fields. */
+interface EntityName {
+  readonly name: string
+  readonly fields?: Readonly<Record<string, unknown>> | undefined
 }
 
 export const RemoteServer = {
+  /** A mutation outcome's report that `ref` now heads the connection. */
+  prepend: (
+    connection: ConnectionIdentity,
+    ref: { readonly entity: string; readonly id: string },
+  ): ConnectionChange => connectionChange(connection, ref, 'prepend'),
+
+  /** A mutation outcome's report that `ref` now ends the connection. */
+  append: (
+    connection: ConnectionIdentity,
+    ref: { readonly entity: string; readonly id: string },
+  ): ConnectionChange => connectionChange(connection, ref, 'append'),
+
+  /** A mutation outcome's report that `ref` left the connection. */
+  remove: (
+    connection: ConnectionIdentity,
+    ref: { readonly entity: string; readonly id: string },
+  ): ConnectionChange => connectionChange(connection, ref, 'remove'),
+
+  /**
+   * An entity source. Given the Entity (or anything with its `name` and
+   * `fields`), a request for a field the entity does not declare never
+   * reaches `read` or `authorize`.
+   */
   entity: <P = unknown, R = never>(
-    entity: EntityDescriptor<any, any>,
+    entity: EntityName,
     options: {
       readonly read: EntitySource<P, R>['read']
       readonly authorize?: EntitySource<P, R>['authorize']
     },
   ): EntitySource<P, R> => ({
     entity: entity.name,
+    ...(entity.fields === undefined ? {} : { fields: new Set(Object.keys(entity.fields)) }),
     read: options.read,
     ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
   }),
@@ -411,7 +498,7 @@ export const RemoteServer = {
 
   /** Streams live entity patches for a client's live requirements. */
   live: <P = unknown, R = never>(
-    entity: EntityDescriptor<any, any>,
+    entity: EntityName,
     options: { readonly subscribe: LiveSource<P, R>['subscribe'] },
   ): LiveSource<P, R> => ({
     entity: entity.name,
@@ -419,11 +506,12 @@ export const RemoteServer = {
   }),
 
   /**
-   * A `LiveHub` over the server's entity sources. Pass it to `handlers` as
-   * `live`, then call `hub.changed(ref, fields)` from wherever the data
-   * changes (a mutation source, a database trigger); each subscriber that
-   * selects any of those fields receives them, re-read through the entity
-   * source under its own principal.
+   * A `LiveHub` over entity sources. Pass it to `handlers` as `live`, then
+   * call `hub.changed(ref, fields)` from wherever the data changes (a mutation
+   * source, a database trigger); each subscriber that selects any of those
+   * fields receives them, re-read through the entity source under its own
+   * principal. It needs only the entity sources, so the mutation sources that
+   * signal it can be built after it.
    */
   liveHub,
 
@@ -469,7 +557,7 @@ export const RemoteServer = {
   handlers: <P, R>(
     server: ServerDefinition<P, R>,
     principal: P,
-    options: HandlerOptions = {},
+    options: HandlerOptions<P, R> = {},
   ): RemoteRpcClient<R> => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
       const mismatch = protocolMismatch(payload.version)
@@ -487,16 +575,25 @@ export const RemoteServer = {
       const fetched = new Map<string, Set<string>>()
       const fetchedValues = new Map<string, Record<string, unknown>>()
       const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH
+      const maxIds = Math.max(1, options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)
+
+      // The limit guards the client's batch, whatever windows split it into;
+      // a nested level's fan-out is the server's own doing, so it is chunked
+      // rather than refused.
+      const over = checkIdsPerEntity(payload.requests, maxIds)
+      if (over !== undefined) {
+        return yield* new RemoteReadError({ message: `Too many "${over}" ids in one read batch` })
+      }
 
       // Level by level: a level's relation refs become the next level's requests.
-      let pending: ReadonlyArray<Request> = payload.requests
+      let pending: ReadonlyArray<Requirement> = payload.requests
       for (let depth = 0; pending.length > 0; depth++) {
         if (depth > maxDepth) {
           return yield* new RemoteReadError({
             message: `Nested selection deeper than ${maxDepth} relation levels`,
           })
         }
-        const next: Request[] = []
+        const next: Requirement[] = []
 
         /**
          * Follows each relation's refs in `values` into the next level, asking
@@ -529,41 +626,24 @@ export const RemoteServer = {
           }
         }
 
-        for (const group of groupByEntity(pending).values()) {
-          const name = group.entity
+        for (const { ids, slice } of groupByEntity(pending)) {
+          const name = slice.entity
           const source = server.entities.get(name)
           if (source === undefined) continue
-          const maxIds = Math.max(1, options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)
-          // The limit guards the client's batch; a nested level's fan-out is
-          // the server's own doing, so it is chunked rather than refused.
-          if (depth === 0 && group.ids.length > maxIds) {
-            return yield* new RemoteReadError({
-              message: `Too many "${name}" ids in one read batch`,
-            })
-          }
-          const requested = [...group.fields]
-          const permitted =
-            source.authorize === undefined ? requested : source.authorize(principal, requested)
-          // Never read or return a field the client did not request, even if a
-          // permissive `authorize` allows more.
-          const permittedSet = new Set(permitted)
-          const allowed = requested.filter(field => permittedSet.has(field))
+          const allowed = allowedFields(source, principal, slice.fields)
           if (allowed.length === 0) continue
 
-          // Only a field being read carries its window.
-          const allowedSet = new Set(allowed)
-          const windows = Object.fromEntries(
-            [...group.windows].filter(([field]) => allowedSet.has(field)),
-          )
+          const windows = windowsOf(slice.windows, allowed)
+          const idList = [...ids]
           const records: EntityRecord[] = []
-          for (let start = 0; start < group.ids.length; start += maxIds) {
+          for (let start = 0; start < idList.length; start += maxIds) {
             records.push(
               ...(yield* source
                 .read({
-                  ids: group.ids.slice(start, start + maxIds),
+                  ids: idList.slice(start, start + maxIds),
                   fields: allowed,
                   principal,
-                  ...(Object.keys(windows).length === 0 ? {} : { windows }),
+                  ...windows,
                 })
                 .pipe(
                   Effect.catchTag('RemoteServerError', error =>
@@ -590,7 +670,7 @@ export const RemoteServer = {
 
             // `values` holds only allowed fields, so a relation the principal
             // may not read is never followed.
-            follow(values, group.relations ?? {})
+            follow(values, slice.relations ?? {})
           }
         }
         // A target read by this level (as another group's request) is not
@@ -686,10 +766,11 @@ export const RemoteServer = {
       )
       if (options.live !== undefined) {
         streams.push(
-          (options.live as LiveHub<P, R>).subscribe({
+          options.live.subscribe({
             requirements: payload.requirements,
             after: payload.after,
             principal,
+            maxIdsPerEntity: options.maxIdsPerEntity,
           }),
         )
       }

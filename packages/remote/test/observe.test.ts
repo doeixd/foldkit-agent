@@ -4,7 +4,7 @@ import { Projection, Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
-  Optimistic,
+  beginOptimistic,
   Remote,
   RemoteClient,
   RemoteReadError,
@@ -113,7 +113,7 @@ describe('Remote observation', () => {
     const start = {
       ...initialRemoteModel,
       entities: writeEntity(emptyStore, entityKey('User', 'u1'), { name: 'x' }, 0),
-      optimistic: Optimistic.begin(initialRemoteModel.optimistic, 'm1', [
+      optimistic: beginOptimistic(initialRemoteModel.optimistic, 'm1', [
         { entity: 'User', id: 'u1', values: { name: 'ada' } },
       ]),
     }
@@ -126,7 +126,7 @@ describe('Remote observation', () => {
     expect(store).toBe(Remote.storeOf(AppRemote, { ...model, remote: { ...start } }))
     const patched = {
       ...start,
-      optimistic: Optimistic.begin(start.optimistic, 'm2', [
+      optimistic: beginOptimistic(start.optimistic, 'm2', [
         { entity: 'User', id: 'u1', values: { name: 'bob' } },
       ]),
     }

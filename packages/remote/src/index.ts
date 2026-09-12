@@ -18,7 +18,8 @@ import {
 } from 'foldkit-surface'
 import { emptyConnection, merge, type Connection, type Edge, type Segment } from './connection.js'
 import {
-  Optimistic,
+  ConnectionChange,
+  beginOptimistic,
   connectionIdentity,
   emptyOptimistic,
   pruneOverlays,
@@ -26,7 +27,6 @@ import {
   settleSuccess,
   visibleItems,
   visibleStore,
-  type ConnectionChange,
   type ConnectionIdentity,
   type OptimisticState,
   type OptimisticOperation,
@@ -764,7 +764,7 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
       return {
         ...model,
         mutations: beginMutation(model.mutations, message.requestId),
-        optimistic: Optimistic.begin(model.optimistic, message.requestId, message.optimistic ?? []),
+        optimistic: beginOptimistic(model.optimistic, message.requestId, message.optimistic ?? []),
       }
     case 'MutationSucceeded': {
       // Settling is release-the-layer-and-overlays, so overlapping optimistic

@@ -59,6 +59,21 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote` (private)
 
+- **Review hardening.** One plan: `Remote.plan(bound, model, projection,
+  options?)` replaces `planProjection`/`observeProjection`/`planSurface`
+  (a Surface's is `surface.projection(params)`); `Remote.retain(projections,
+  toMessage?, options)` drops the bound remote, and `observe`/`live`/`retain`
+  default `toMessage` to the identity; `Remote.storeOf(bound, model)` is the
+  visible store (base under pending layers), memoized per model state so every
+  read and plan of one render shares it; `Remote.live` takes `{ now }`;
+  `Remote.visibleItems` and `RetainOptions.connections` accept a `QueryRef`.
+  A merged cursor page keeps the stored page's near boundary instead of
+  inventing one, and pages merged within one read result see each other.
+  `ConnectionChange.prepend`/`append`/`remove` (was `Optimistic.*`) build the
+  connection half of `MutateOptions.optimistic`; `OptimisticState` is the
+  model slice. Persistence is namespace-only (`RemotePersistence.*`); the
+  wire caps `MAX_FIELDS_PER_REQUEST` (256) and `MAX_RELATION_DEPTH` (8) with
+  static nesting; `Entity.patch` takes wire-shaped values.
 - **Recursive nested selections.** `Selection.make(Project, { owner:
   UserSummary })` now reads through the ref into the target instead of failing
   to decode: the field codec follows the entity field's shape (ref, nullable
@@ -67,7 +82,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   items), `Remote.select` assembles every level from the normalized store and
   reads `Initial` until each is present, and the requirement carries the graph
   (`relations`, on `foldkit-surface`'s `Requirement`, with `Requirement.merge`
-  and `Requirement.mergeRelations`). `plan` attaches a relation to a field
+  and `Requirement.mergeRelation`). `plan` attaches a relation to a field
   being fetched and follows a known relation's refs into concrete
   requirements. `Entity.ref`/`refPage` codecs are annotated, and `refsIn` /
   `relationShape` are exported. Breaking wire change: `ReadBatch` and
@@ -102,7 +117,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   section 7).
 - **A mutation owns its optimistic operations.** `MutationStarted { requestId,
   optimistic }` applies entity patches (`Entity.patch`) and connection changes
-  (`Optimistic.prepend`/`append`/`remove`, new) as a layer and overlays owned
+  (`ConnectionChange.prepend`/`append`/`remove`, new) as a layer and overlays owned
   by the request; `MutationSucceeded` releases both and records the result's
   confirmed `connections` (new on `MutationResult` and the server's
   `MutationOutcome`) in the same position, and `MutationFailed` drops both.
@@ -164,7 +179,18 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote-server` (private)
 
-- **A live hub.** `RemoteServer.liveHub(server)` tracks each live
+- **Review hardening.** A request for a field the Entity does not declare
+  never reaches `read` or `authorize` (`RemoteServer.entity(Project, …)`
+  records the declared fields; `EntitySource.fields`); the per-entity id cap
+  counts a batch's distinct ids across its window groups, and a live
+  subscription is refused over the same cap; the wire refuses, rather than
+  silently truncates, a selection nested past `MAX_RELATION_DEPTH`.
+  `RemoteServer.liveHub(entities)` takes the entity sources, so the mutation
+  sources that signal it can be built after it; subscribers sharing a
+  principal share a read by the principal's identity, not its serialization;
+  `HandlerOptions<P, R>` types the hub; `RemoteServer.prepend`/`append`/
+  `remove(connection, ref)` build a mutation outcome's connection changes.
+- **A live hub.** `RemoteServer.liveHub(entities)` tracks each live
   subscriber's requirements and principal; `hub.changed(ref, fields)` re-reads
   the changed fields a subscriber selects through the entity source under its
   principal and streams the patch, `hub.deleted(ref)` streams a delete, and

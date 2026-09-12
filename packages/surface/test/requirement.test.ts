@@ -91,18 +91,51 @@ describe('Requirement relations', () => {
     ).toEqual([{ entity: 'Project', id: 'p1', fields: ['name', 'owner'], relations: { owner } }])
   })
 
-  it('mergeRelations passes an absent side through', () => {
-    expect(Requirement.mergeRelations(undefined, undefined)).toBeUndefined()
-    expect(Requirement.mergeRelations({ owner }, undefined)).toEqual({ owner })
-    expect(Requirement.mergeRelations(undefined, { owner })).toEqual({ owner })
+  it('mergeRelation unions fields, windows, and nested relations of one target', () => {
+    const current = { entity: 'Project', fields: ['name'], relations: { owner } }
+    expect(
+      Requirement.mergeRelation(current, { entity: 'Project', fields: ['name', 'id'] }),
+    ).toEqual({
+      entity: 'Project',
+      fields: ['name', 'id'],
+      relations: { owner },
+    })
+    expect(
+      Requirement.mergeRelation(
+        { entity: 'Project', fields: [] },
+        {
+          entity: 'Project',
+          fields: [],
+          windows: { comments: { first: 1 } },
+          relations: { owner },
+        },
+      ),
+    ).toEqual({
+      entity: 'Project',
+      fields: [],
+      windows: { comments: { first: 1 } },
+      relations: { owner },
+    })
   })
 
   it('later windows win inside a relation', () => {
     expect(
-      Requirement.mergeRelations(
-        { comments: { entity: 'Comment', fields: [], windows: { replies: { first: 1 } } } },
-        { comments: { entity: 'Comment', fields: [], windows: { replies: { first: 9 } } } },
-      ),
+      Requirement.mergeRelation(
+        {
+          entity: 'Project',
+          fields: [],
+          relations: {
+            comments: { entity: 'Comment', fields: [], windows: { replies: { first: 1 } } },
+          },
+        },
+        {
+          entity: 'Project',
+          fields: [],
+          relations: {
+            comments: { entity: 'Comment', fields: [], windows: { replies: { first: 9 } } },
+          },
+        },
+      ).relations,
     ).toEqual({ comments: { entity: 'Comment', fields: [], windows: { replies: { first: 9 } } } })
   })
 })

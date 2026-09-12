@@ -17,7 +17,6 @@ import { Effect, Layer, Schema, Stream } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import * as Update from 'foldkit/update'
 import {
-  Entity,
   Mutation,
   Query,
   REMOTE_PROTOCOL_VERSION,
@@ -126,9 +125,7 @@ export const CreateProject = Mutation.make('CreateProject', {
  * entity source under its own principal. It needs only the entity sources.
  */
 const entitySources = [source(User), source(Project)]
-export const liveHub = Effect.runSync(
-  RemoteServer.liveHub(RemoteServer.make({ entities: entitySources })),
-)
+export const liveHub = Effect.runSync(RemoteServer.liveHub(entitySources))
 
 const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
   Effect.gen(function* () {
@@ -167,12 +164,10 @@ const CreateProjectSource = RemoteServer.mutation(CreateProject, ({ input }) =>
       output: { id: input.id },
       entities: normalize(Project, rows, fields),
       connections: [
-        {
-          _tag: 'Insert' as const,
-          connection: ProjectsByOwner.ref({ ownerId: input.ownerId }).identity,
-          position: 'prepend' as const,
-          edge: { entity: 'Project', id: input.id, key: Entity.refKey(Project.ref(input.id)) },
-        },
+        RemoteServer.prepend(
+          ProjectsByOwner.ref({ ownerId: input.ownerId }),
+          Project.ref(input.id),
+        ),
       ],
     }
   }),

@@ -54,7 +54,7 @@ const tableSource = <Name extends string>(
   authorize?: (principal: string, fields: readonly string[]) => readonly string[],
   leaky = false,
 ) =>
-  RemoteServer.entity<string>(entity as never, {
+  RemoteServer.entity<string>(entity, {
     ...(authorize === undefined ? {} : { authorize }),
     read: ({ ids, fields }) =>
       Effect.sync(() => {
@@ -85,7 +85,11 @@ const server = RemoteServer.make({
   ],
 })
 
-const read = (principal: string, requests: ReadonlyArray<Request>, options?: HandlerOptions) => {
+const read = (
+  principal: string,
+  requests: ReadonlyArray<Request>,
+  options?: HandlerOptions<string>,
+) => {
   reads.length = 0
   return Effect.runPromise(
     Effect.scoped(

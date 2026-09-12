@@ -64,8 +64,12 @@ const change = (
     ? { _tag: 'Remove', connection: connectionIdentity(connection), edge: edge(ref) }
     : { _tag: 'Insert', connection: connectionIdentity(connection), position, edge: edge(ref) }
 
-/** Constructors for the connection half of a request's optimistic operations. */
-export const Optimistic = {
+/**
+ * Constructors for connection changes: what a request shows optimistically
+ * (`MutateOptions.optimistic`) and what a mutation source reports it made
+ * (`MutationOutcome.connections`).
+ */
+export const ConnectionChange = {
   /** Show `ref` at the front of the connection until the request settles. */
   prepend: (
     connection: ConnectionIdentity,
@@ -83,29 +87,27 @@ export const Optimistic = {
     connection: ConnectionIdentity,
     ref: { readonly entity: string; readonly id: string },
   ): ConnectionChange => change(connection, ref, 'remove'),
+}
 
-  /**
-   * Applies a request's operations: its patches become one layer and its
-   * connection changes become overlays, all owned by `requestId` so settling
-   * removes every one of them together.
-   */
-  begin: (
-    optimistic: OptimisticState,
-    requestId: string,
-    operations: ReadonlyArray<OptimisticOperation>,
-  ): OptimisticState => {
-    const patches = operations.filter(
-      (operation): operation is NormalizedPatch => !isConnectionChange(operation),
-    )
-    const changes = operations.filter(isConnectionChange)
-    return {
-      layers:
-        patches.length === 0
-          ? optimistic.layers
-          : [...optimistic.layers, { id: requestId, patches }],
-      overlays: [...optimistic.overlays, ...toOverlays(requestId, changes)],
-    }
-  },
+/**
+ * Applies a request's operations: its patches become one layer and its
+ * connection changes become overlays, all owned by `requestId` so settling
+ * removes every one of them together.
+ */
+export const beginOptimistic = (
+  optimistic: OptimisticState,
+  requestId: string,
+  operations: ReadonlyArray<OptimisticOperation>,
+): OptimisticState => {
+  const patches = operations.filter(
+    (operation): operation is NormalizedPatch => !isConnectionChange(operation),
+  )
+  const changes = operations.filter(isConnectionChange)
+  return {
+    layers:
+      patches.length === 0 ? optimistic.layers : [...optimistic.layers, { id: requestId, patches }],
+    overlays: [...optimistic.overlays, ...toOverlays(requestId, changes)],
+  }
 }
 
 /**

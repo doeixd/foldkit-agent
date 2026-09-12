@@ -5,7 +5,7 @@
  * note, a human, and an agent; the four agent adapters project one contract.
  */
 import { Effect, Fiber, Stream } from 'effect'
-import { Entity, Optimistic, RemotePersistence } from 'foldkit-remote'
+import { ConnectionChange, Entity, RemotePersistence } from 'foldkit-remote'
 import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
@@ -160,7 +160,7 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
     requestId: 'req-2',
     optimistic: [
       Entity.patch(Project.ref('p3'), { id: 'p3', name: 'Calypso', status: 'active' }),
-      Optimistic.prepend(ref, Project.ref('p3')),
+      ConnectionChange.prepend(ref, Project.ref('p3')),
     ],
   })
   const visible = () =>

@@ -287,14 +287,14 @@ Data.update(model.remote, {
   requestId,
   optimistic: [
     Entity.patch(Comment.ref(tempId), { id: tempId, body }),
-    Optimistic.prepend(commentsRef, Comment.ref(tempId)),
+    ConnectionChange.prepend(commentsRef, Comment.ref(tempId)),
   ],
 })
 ```
 
 Patches are ordered layers over the base store, not inverse patches: the visible
 store (`visibleStore`) is recomputed, and settling removes the layer, so
-overlapping layers rebase for free. Connection changes (`Optimistic.prepend`,
+overlapping layers rebase for free. Connection changes (`ConnectionChange.prepend`,
 `append`, `remove`) are overlays outside the server-known region; `visibleItems`
 places inserts newest-first and hides a removed edge until a later insert brings
 it back. `MutationSucceeded` writes
@@ -403,8 +403,8 @@ the same as once.
 - **The normalized store.** Values, per-field presence, staleness, and tombstones
   are tracked separately, so `undefined`, `null`, absent, stale, and not-found
   are distinct. Presence is never inferred from `value === undefined`.
-- **The requirement planner.** `Remote.plan*`/`plan` diff requirements against the
-  store and return only missing or stale fields, deterministically.
+- **The requirement planner.** `Remote.plan` diffs requirements against the
+  visible store and returns only missing or stale fields, deterministically.
 - **The Remote submodel.** `Remote.make` returns `Model`, `initial`, `Message`,
   `update`, `rpc`, and a name-keyed `registry` of the declared entities, queries,
   and mutations (consumed by `RemoteServer.validate` and available to tooling);

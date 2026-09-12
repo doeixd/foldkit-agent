@@ -323,35 +323,24 @@ function mergeRelations(
 
 /** Unions requirements for the same entity + id, dropping duplicate fields. */
 function mergeRequirements(requirements: readonly Requirement[]): readonly Requirement[] {
-  const grouped = new Map<string, RelationRequirement & { readonly id: string }>()
+  const grouped = new Map<string, Requirement>()
   for (const requirement of requirements) {
     const key = `${requirement.entity}\u0000${requirement.id}`
-    const group = grouped.get(key)
     // Later windows win; a duplicate is a caller bug, not a merge policy.
-    grouped.set(
-      key,
-      group === undefined
-        ? {
-            entity: requirement.entity,
-            id: requirement.id,
-            fields: [...new Set(requirement.fields)],
-            ...(requirement.windows === undefined ? {} : { windows: requirement.windows }),
-            ...(requirement.relations === undefined ? {} : { relations: requirement.relations }),
-          }
-        : { ...mergeRelation(group, requirement), id: group.id },
-    )
+    const group = grouped.get(key) ?? { entity: requirement.entity, fields: [] }
+    grouped.set(key, { ...mergeRelation(group, requirement), id: requirement.id })
   }
   return [...grouped.values()]
 }
 
 /**
  * Requirement helpers, for the packages that plan and serve requirements.
- * `merge` unions same-entity+id requirements; `mergeRelations` unions two
- * relation maps.
+ * `merge` unions same-entity+id requirements; `mergeRelation` unions two
+ * slices of one target (fields, windows, nested relations).
  */
 export const Requirement = {
   merge: mergeRequirements,
-  mergeRelations,
+  mergeRelation,
 }
 
 export interface Projection<Root, Value> {

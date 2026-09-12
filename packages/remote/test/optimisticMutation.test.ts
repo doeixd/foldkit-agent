@@ -6,7 +6,7 @@ import {
   Entity,
   Mutation,
   MutationResult,
-  Optimistic,
+  ConnectionChange,
   Query,
   Remote,
   RemoteClient,
@@ -73,7 +73,7 @@ const start = (model: RemoteModel, requestId: string, tempId: string) =>
     requestId,
     optimistic: [
       Entity.patch(Comment.ref(tempId), { id: tempId, body: `draft ${tempId}` }),
-      Optimistic.prepend(feed, Comment.ref(tempId)),
+      ConnectionChange.prepend(feed, Comment.ref(tempId)),
     ],
   })
 
@@ -90,7 +90,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationSucceeded',
       requestId: 'req-1',
       entities: [{ entity: 'Comment', id: 'c9', values: { id: 'c9', body: 'draft tmp-1' } }],
-      connections: [Optimistic.prepend(feed, Comment.ref('c9'))],
+      connections: [ConnectionChange.prepend(feed, Comment.ref('c9'))],
     })
     expect(body(settled, 'tmp-1')).toEqual(Option.none())
     expect(body(settled, 'c9')).toEqual(Option.some('draft tmp-1'))
@@ -103,7 +103,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationSucceeded',
       requestId: 'req-1',
       entities: [{ entity: 'Comment', id: 'c9', values: { body: 'retry' } }],
-      connections: [Optimistic.prepend(feed, Comment.ref('c9'))],
+      connections: [ConnectionChange.prepend(feed, Comment.ref('c9'))],
     })
     expect(body(retried, 'c9')).toEqual(Option.some('draft tmp-1'))
     expect(visible(retried)).toEqual(['c9', 'c1', 'c2'])
@@ -128,7 +128,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationSucceeded',
       requestId: 'req-1',
       entities: [],
-      connections: [Optimistic.prepend(feed, Comment.ref('c9'))],
+      connections: [ConnectionChange.prepend(feed, Comment.ref('c9'))],
     })
     expect(visible(one)).toEqual(['tmp-2', 'c9', 'c1', 'c2'])
   })
@@ -138,7 +138,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationSucceeded',
       requestId: 'req-1',
       entities: [],
-      connections: [Optimistic.prepend(feed, Comment.ref('c9'))],
+      connections: [ConnectionChange.prepend(feed, Comment.ref('c9'))],
     })
     const paged = updateRemote(settled, {
       _tag: 'ConnectionMerged',
@@ -153,7 +153,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationSucceeded',
       requestId: 'req-1',
       entities: [],
-      connections: [Optimistic.prepend(feed, Comment.ref('c9'))],
+      connections: [ConnectionChange.prepend(feed, Comment.ref('c9'))],
     })
     const event: LiveEvent = {
       _tag: 'ConnectionInsert',
@@ -170,7 +170,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
     const removing = updateRemote(withFeed(), {
       _tag: 'MutationStarted',
       requestId: 'req-3',
-      optimistic: [Optimistic.remove(feed, Comment.ref('c1'))],
+      optimistic: [ConnectionChange.remove(feed, Comment.ref('c1'))],
     })
     expect(visible(removing)).toEqual(['c2'])
     const failed = updateRemote(removing, {
@@ -183,7 +183,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationSucceeded',
       requestId: 'req-3',
       entities: [],
-      connections: [Optimistic.remove(feed, Comment.ref('c1'))],
+      connections: [ConnectionChange.remove(feed, Comment.ref('c1'))],
     })
     expect(visible(confirmed)).toEqual(['c2'])
   })
@@ -192,7 +192,7 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
     const removing = updateRemote(withFeed(), {
       _tag: 'MutationStarted',
       requestId: 'req-3',
-      optimistic: [Optimistic.remove(feed, Comment.ref('c1'))],
+      optimistic: [ConnectionChange.remove(feed, Comment.ref('c1'))],
     })
     const event: LiveEvent = {
       _tag: 'ConnectionRemove',
@@ -209,16 +209,16 @@ describe('a mutation owns its optimistic entity layer and connection overlays', 
       _tag: 'MutationStarted',
       requestId: 'req-4',
       optimistic: [
-        Optimistic.prepend(feed, Comment.ref('x')),
-        Optimistic.append(feed, Comment.ref('x')),
+        ConnectionChange.prepend(feed, Comment.ref('x')),
+        ConnectionChange.append(feed, Comment.ref('x')),
       ],
     })
     expect(visible(both)).toEqual(['x', 'c1', 'c2'])
   })
 
   it('accepts a connection identity string as well as a QueryRef', () => {
-    expect(Optimistic.append(feed.identity, Comment.ref('z'))).toEqual(
-      Optimistic.append(feed, Comment.ref('z')),
+    expect(ConnectionChange.append(feed.identity, Comment.ref('z'))).toEqual(
+      ConnectionChange.append(feed, Comment.ref('z')),
     )
   })
 })
@@ -254,7 +254,7 @@ describe('Remote.mutateInto with optimistic operations', () => {
         {
           optimistic: [
             Entity.patch(Comment.ref('tmp'), { id: 'tmp', body: 'hi' }),
-            Optimistic.prepend(feed, Comment.ref('tmp')),
+            ConnectionChange.prepend(feed, Comment.ref('tmp')),
           ],
         },
       ).pipe(Effect.provide(Client)),
@@ -269,7 +269,7 @@ describe('Remote.mutateInto with optimistic operations', () => {
     const outcome = await Effect.runPromise(
       Remote.mutate(AddComment, { postId: 'p1', body: 'hi' }, 'req-1').pipe(Effect.provide(Client)),
     )
-    expect(outcome.connections).toEqual([Optimistic.prepend(feed, Comment.ref('c9'))])
+    expect(outcome.connections).toEqual([ConnectionChange.prepend(feed, Comment.ref('c9'))])
   })
 
   it('the wire carries connection changes on a mutation result', () => {

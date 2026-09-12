@@ -2,7 +2,7 @@ import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   Entity,
-  Optimistic,
+  ConnectionChange,
   Remote,
   cursor,
   edge,
@@ -66,7 +66,7 @@ describe('live removal and deletion', () => {
     const inserted = updateRemote(deleted, {
       _tag: 'MutationStarted',
       requestId: 'r',
-      optimistic: [Optimistic.prepend(feed, Comment.ref('c2'))],
+      optimistic: [ConnectionChange.prepend(feed, Comment.ref('c2'))],
     })
     expect(visible(inserted)).toEqual(['c1'])
   })
@@ -115,8 +115,8 @@ describe('a merged page supersedes settled overlays', () => {
       _tag: 'MutationStarted',
       requestId: 'r1',
       optimistic: [
-        Optimistic.remove(feed, Comment.ref('c1')),
-        Optimistic.prepend(feed, Comment.ref('x')),
+        ConnectionChange.remove(feed, Comment.ref('c1')),
+        ConnectionChange.prepend(feed, Comment.ref('x')),
       ],
     })
     const paged = updateRemote(pending, {

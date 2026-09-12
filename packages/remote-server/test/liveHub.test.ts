@@ -19,24 +19,23 @@ const reads: Array<{
   principal: string
 }> = []
 
-const server = RemoteServer.make({
-  entities: [
-    RemoteServer.entity<string>(User, {
-      authorize: (principal, fields) =>
-        principal === 'admin' ? fields : fields.filter(field => field !== 'email'),
-      read: ({ ids, fields, principal }) =>
-        Effect.sync(() => {
-          reads.push({ ids, fields, principal })
-          return ids.flatMap(id => {
-            const row = rows[id]
-            return row === undefined
-              ? []
-              : [{ id, values: Object.fromEntries(fields.map(field => [field, row[field]])) }]
-          })
-        }),
-    }),
-  ],
-})
+const entities = [
+  RemoteServer.entity<string>(User, {
+    authorize: (principal, fields) =>
+      principal === 'admin' ? fields : fields.filter(field => field !== 'email'),
+    read: ({ ids, fields, principal }) =>
+      Effect.sync(() => {
+        reads.push({ ids, fields, principal })
+        return ids.flatMap(id => {
+          const row = rows[id]
+          return row === undefined
+            ? []
+            : [{ id, values: Object.fromEntries(fields.map(field => [field, row[field]])) }]
+        })
+      }),
+  }),
+]
+const server = RemoteServer.make({ entities })
 
 type Request = Schema.Schema.Type<typeof ReadRequest>
 
@@ -67,7 +66,7 @@ describe('RemoteServer.liveHub', () => {
     reads.length = 0
     const events = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const fiber = yield* Effect.forkChild(
           subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 4, 1),
         )
@@ -93,7 +92,7 @@ describe('RemoteServer.liveHub', () => {
     reads.length = 0
     const events = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const fiber = yield* Effect.forkChild(
           subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 0, 1),
         )
@@ -112,7 +111,7 @@ describe('RemoteServer.liveHub', () => {
   it('authorizes the re-read under each subscriber’s principal', async () => {
     const events = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const member = yield* Effect.forkChild(
           subscribe(hub, 'member', [{ entity: 'User', id: 'u1', fields: ['name', 'email'] }], 0, 1),
         )
@@ -135,7 +134,7 @@ describe('RemoteServer.liveHub', () => {
     reads.length = 0
     await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const fiber = yield* Effect.forkChild(
           subscribe(hub, 'member', [{ entity: 'User', id: 'u1', fields: ['email'] }], 0, 1),
         )
@@ -152,7 +151,7 @@ describe('RemoteServer.liveHub', () => {
     reads.length = 0
     await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const a = yield* Effect.forkChild(
           subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 0, 1),
         )
@@ -172,7 +171,7 @@ describe('RemoteServer.liveHub', () => {
   it('deleted reaches every subscriber of the entity, with the next cursor', async () => {
     const events = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const fiber = yield* Effect.forkChild(
           subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 9, 2),
         )
@@ -193,7 +192,7 @@ describe('RemoteServer.liveHub', () => {
   it('a subscriber leaves the hub when its stream ends', async () => {
     const sizes = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(server)
+        const hub = yield* RemoteServer.liveHub(entities)
         const fiber = yield* Effect.forkChild(
           subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 0, 1),
         )
@@ -218,7 +217,7 @@ describe('RemoteServer.liveHub', () => {
     })
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(failing)
+        const hub = yield* RemoteServer.liveHub([...failing.entities.values()])
         const fiber = yield* Effect.forkChild(
           Effect.scoped(
             Effect.gen(function* () {
@@ -244,6 +243,141 @@ describe('RemoteServer.liveHub', () => {
       }),
     )
     expect(result._tag).toBe('Failure')
+  })
+})
+
+describe('RemoteServer.liveHub guards', () => {
+  it('a change of an id the source no longer returns reaches nobody', async () => {
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(entities)
+        const fiber = yield* Effect.forkChild(
+          subscribe(hub, 'admin', [{ entity: 'User', id: 'gone', fields: ['name'] }], 0, 1),
+        )
+        yield* settle
+        yield* hub.changed({ entity: 'User', id: 'gone' }, ['name'])
+        yield* hub.deleted({ entity: 'User', id: 'gone' })
+        return [...(yield* Fiber.join(fiber))]
+      }),
+    )
+    expect(events).toEqual([{ _tag: 'EntityDeleted', cursor: 1, entity: 'User', id: 'gone' }])
+  })
+
+  it('a change of no fields does no source work', async () => {
+    reads.length = 0
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(entities)
+        const fiber = yield* Effect.forkChild(
+          subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 0, 1),
+        )
+        yield* settle
+        yield* hub.changed({ entity: 'User', id: 'u1' }, [])
+        yield* hub.changed({ entity: 'Unknown', id: 'u1' }, ['name'])
+        expect(reads).toEqual([])
+        yield* Fiber.interrupt(fiber)
+      }),
+    )
+  })
+
+  it('forwards only the selected, permitted fields of a leaky source', async () => {
+    const leaky = [
+      RemoteServer.entity<string>(User, {
+        authorize: (principal, fields) =>
+          principal === 'admin' ? fields : fields.filter(field => field !== 'email'),
+        read: ({ ids }) =>
+          Effect.succeed(ids.map(id => ({ id, values: { ...rows[id], secret: 's' } }))),
+      }),
+    ]
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(leaky)
+        const fiber = yield* Effect.forkChild(
+          subscribe(hub, 'member', [{ entity: 'User', id: 'u1', fields: ['name', 'email'] }], 0, 1),
+        )
+        yield* settle
+        yield* hub.changed({ entity: 'User', id: 'u1' }, ['name', 'email', 'secret'])
+        return [...(yield* Fiber.join(fiber))]
+      }),
+    )
+    expect(events).toEqual([
+      {
+        _tag: 'EntityPatched',
+        cursor: 1,
+        entity: 'User',
+        id: 'u1',
+        values: { name: 'ada' },
+        changed: ['name'],
+      },
+    ])
+  })
+
+  it('refuses a subscription naming more ids of one entity than the handler allows', async () => {
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(entities)
+        const layer = RemoteRpc.toLayer(
+          RemoteServer.handlers(server, 'admin', { live: hub, maxIdsPerEntity: 1 }),
+        )
+        return yield* Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* Effect.result(
+            client
+              .FoldkitRemoteLive({
+                version: REMOTE_PROTOCOL_VERSION,
+                requirements: [
+                  { entity: 'User', id: 'u1', fields: ['name'] },
+                  { entity: 'User', id: 'u1', fields: ['email'] },
+                  { entity: 'User', id: 'u2', fields: ['name'] },
+                ],
+                after: 0,
+              })
+              .pipe(Stream.runCollect),
+          )
+        }).pipe(Effect.scoped, Effect.provide(layer))
+      }),
+    )
+    expect(outcome._tag).toBe('Failure')
+    expect(String(outcome)).toContain('Too many "User" ids')
+  })
+
+  it('shares a read between subscribers only when their principals are the same value', async () => {
+    const seen: Array<object> = []
+    const byObject = [
+      RemoteServer.entity<{ readonly role: string }>(User, {
+        read: ({ ids, fields, principal }) => {
+          seen.push(principal)
+          return Effect.succeed(
+            ids.map(id => ({
+              id,
+              values: Object.fromEntries(fields.map(field => [field, rows[id]?.[field]])),
+            })),
+          )
+        },
+      }),
+    ]
+    const requirements = [{ entity: 'User', id: 'u1', fields: ['name'] }]
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(byObject)
+        const shared = { role: 'admin' }
+        const listen = (principal: { readonly role: string }) =>
+          Effect.forkChild(
+            hub
+              .subscribe({ requirements, after: 0, principal })
+              .pipe(Stream.take(1), Stream.runCollect),
+          )
+        const fibers = [
+          yield* listen(shared),
+          yield* listen(shared),
+          yield* listen({ role: 'admin' }),
+        ]
+        yield* settle
+        yield* hub.changed({ entity: 'User', id: 'u1' }, ['name'])
+        for (const fiber of fibers) yield* Fiber.join(fiber)
+      }),
+    )
+    expect(seen).toHaveLength(2)
   })
 })
 
@@ -274,7 +408,7 @@ describe('RemoteServer.liveHub windows', () => {
     windowed.length = 0
     const events = await Effect.runPromise(
       Effect.gen(function* () {
-        const hub = yield* RemoteServer.liveHub(paged)
+        const hub = yield* RemoteServer.liveHub([...paged.entities.values()])
         const fiber = yield* Effect.forkChild(
           Effect.scoped(
             Effect.gen(function* () {

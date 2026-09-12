@@ -5,7 +5,8 @@
 import { Option } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
-  Optimistic,
+  ConnectionChange,
+  beginOptimistic,
   applyConnectionEvent,
   applyEntityEvent,
   cursor,
@@ -239,9 +240,9 @@ describe('optimistic convergence', () => {
       }))
       let optimistic: OptimisticState = emptyOptimistic
       for (const request of requests) {
-        optimistic = Optimistic.begin(optimistic, request.id, [
+        optimistic = beginOptimistic(optimistic, request.id, [
           { entity: 'E', id: 'x', values: { [request.field]: request.value } },
-          Optimistic.prepend('Feed', { entity: 'E', id: request.id }),
+          ConnectionChange.prepend('Feed', { entity: 'E', id: request.id }),
         ])
       }
       // While pending, the latest layer wins per field and every edge shows once.
@@ -271,7 +272,7 @@ describe('optimistic convergence', () => {
           state,
           request.id,
           [{ entity: 'E', id: 'x', values: { [request.field]: request.value } }],
-          [Optimistic.prepend('Feed', { entity: 'E', id: `${request.id}-real` })],
+          [ConnectionChange.prepend('Feed', { entity: 'E', id: `${request.id}-real` })],
         )
         store = settled.store
         state = settled.state

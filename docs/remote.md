@@ -152,7 +152,7 @@ twice. The application could equally reduce the patches by hand; `Remote.mutateI
 is the one-step form.
 
 Optimistic changes belong to the mutation: `MutationStarted` carries its entity
-patches and connection changes (`Optimistic.prepend`/`append`/`remove`), and
+patches and connection changes (`ConnectionChange.prepend`/`append`/`remove`), and
 success or failure releases them together by request id. Patches are ordered
 **layers** over the base store, not inverse patches: the visible store is
 recomputed as base + layers, so overlapping layers rebase for free. Connection
