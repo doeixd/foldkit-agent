@@ -186,8 +186,9 @@ export const entity = <
   >
 
   for (const [field, relation] of Object.entries(relations)) {
-    // `selectColumns` gives a column priority and `source` treats the name as a
-    // relation, so a collision is silently wrong. Refuse it up front.
+    // A relation field would overwrite a same-named field in the schema, and
+    // `selectColumns` would read a same-named column instead of the relation.
+    // A collision is silently wrong either way, so refuse it up front.
     if (baseFields[field] !== undefined) {
       throw new Error(
         `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" collides with a field of the same name`,
@@ -218,7 +219,7 @@ export const entity = <
 
   const fields: Record<string, Schema.Schema<unknown>> = { ...baseFields }
   for (const [field, relation] of Object.entries(relations)) {
-    const target = relation.entity as EntityDescriptor<any, any>
+    const target = relation.entity
     if (relation.kind === 'one') {
       const ref = Entity.ref(target) as Schema.Schema<unknown>
       fields[field] = relation.nullable === true ? Schema.NullOr(ref) : ref
