@@ -1,4 +1,4 @@
-import { Effect, Exit, Metric, Ref, Schema, SynchronizedRef } from 'effect'
+import { Effect, Exit, Metric, Queue, Ref, Schema, SynchronizedRef } from 'effect'
 import {
   CheckpointRegressionError,
   CommittedOrderError,
@@ -124,6 +124,13 @@ export interface Replica<Message, Shared> {
   readonly submit: (message: Message) => Effect.Effect<void, ReplicaError>
   /** Reconciles against the server. The `Transport` service must be provided. */
   readonly synchronize: Effect.Effect<void, ReplicaError | TransportError, Transport>
+  /**
+   * The exchange loop: exchanges once, then after every `submit`, until the
+   * replica closes or the fiber is interrupted. A transport failure is recorded
+   * in `status.lastError` and retried on the next wake, so the fiber never
+   * fails. Fork it with `Effect.forkScoped` and provide `Transport`.
+   */
+  readonly start: Effect.Effect<void, never, Transport>
   readonly close: Effect.Effect<void>
 }
 
@@ -364,6 +371,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       const closed = yield* Ref.make(false)
       const lastError = yield* Ref.make<string | undefined>(undefined)
       const rejectedOps = yield* Ref.make<ReadonlyArray<OpId>>([])
+      // One pending wake-up is enough: the loop exchanges the whole outbox.
+      const wake = yield* Queue.sliding<void>(1)
       // The projection is pure over an immutable state, so a cached value is
       // reused until a write replaces the state object. A UI reads `shared` far
       // more often than it writes, and replaying a large outbox per read is
@@ -419,6 +428,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
               pending: [...current.pending, operation],
             }
             yield* persist(next, current)
+            yield* Queue.offer(wake, undefined)
             return [undefined, next] as const
           }),
         )
@@ -544,6 +554,15 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           )
       })()
 
+      const start: Effect.Effect<void, never, Transport> = Effect.gen(function* () {
+        yield* synchronize.pipe(Effect.catch(() => Effect.void))
+        while (!(yield* Ref.get(closed))) {
+          yield* Queue.take(wake)
+          if (yield* Ref.get(closed)) return
+          yield* synchronize.pipe(Effect.catch(() => Effect.void))
+        }
+      })
+
       return {
         shared,
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
@@ -559,6 +578,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         })(),
         submit,
         synchronize,
+        start,
         close: Effect.fn('Sync.close')(function* () {
           yield* Ref.set(closed, true)
           yield* storage.close

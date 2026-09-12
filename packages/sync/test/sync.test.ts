@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { Deferred, Effect, Schema } from 'effect'
+import { Deferred, Effect, Fiber, Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   defineSync,
@@ -643,5 +643,41 @@ describe('a transforming shared codec', () => {
     expect(Effect.runSync(replica.cursor)).toBe(5)
     expect(Effect.runSync(replica.shared)).toEqual({ count: 5 })
     await Effect.runPromise(replica.close)
+  })
+})
+
+describe('Replica.start', () => {
+  it('exchanges after a submit until the fiber is interrupted', async () => {
+    const replica = await open('a')
+    const exchange = layerFromPromise({
+      exchange: async (cursor, pending) => ({
+        operations: pending.map((operation, index) => ({
+          ...operation,
+          serverSequence: cursor + index + 1,
+          actorId: 'server',
+        })),
+        rejected: [],
+      }),
+    })
+
+    const applied = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(replica.start)
+          yield* replica.submit(created('a'))
+          let current = yield* replica.cursor
+          for (let attempt = 0; attempt < 200 && current === 0; attempt += 1) {
+            yield* Effect.sleep('2 millis')
+            current = yield* replica.cursor
+          }
+          yield* Fiber.interrupt(fiber)
+          return current
+        }).pipe(Effect.provide(exchange)),
+      ),
+    )
+
+    expect(applied).toBe(1)
+    expect(shared(replica)).toEqual({ todos: [{ id: 'a', title: 'a' }] })
+    await close(replica)
   })
 })

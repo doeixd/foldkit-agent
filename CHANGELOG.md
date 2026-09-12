@@ -261,6 +261,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   durable Message's Commands are dropped during replay and optimistic projection
   (only state changes apply) and that each replay starts from the initial Model,
   so cost tracks the Model rather than the shared slice.
+- **An exchange loop.** `Replica.start` exchanges once and then after every
+  `submit`, until the replica closes or the fiber is interrupted; a transport
+  failure is recorded and retried on the next wake, so the application does not
+  have to hand-roll the synchronize loop.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.

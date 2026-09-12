@@ -111,7 +111,9 @@ const shared = Effect.runSync(replica.shared)
   immediately and rebased onto the authoritative order.
 - Reconciliation: committed operations are replayed in order, acknowledged or
   refused pending entries are dropped, and a checkpoint replaces the compacted
-  prefix.
+  prefix. `replica.start` is the exchange loop: fork it to exchange once and then
+  after every `submit`, with a transport failure recorded in `status.lastError`
+  and retried on the next wake, so the application does not hand-roll it.
 - A redacted status (`replica.status`): the pending count, the cursor, the last
   exchange failure, and the operations the server refused — enough for a UI to
   explain and recover without exposing Messages or the Model.
