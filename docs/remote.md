@@ -186,11 +186,16 @@ once.
 
 ## Persistence and recovery
 
-`RemotePersistence.save`/`restore` snapshot the entity store through Effect's
-`KeyValueStore`. The cache is server-derived and **disposable**: a version
-mismatch or malformed snapshot is removed and the planner refetches. This is the
-opposite of Sync's preserve-and-recover policy, because Remote holds no unsent
-user edits; there is nothing to lose.
+A snapshot is the entity store and nothing else; runtime state stays with the
+session. `dehydrate`/`hydrate` are the deterministic text forms (SSR embeds
+one in the page), `RemotePersistence.save`/`restore` keep one in Effect's
+`KeyValueStore`, and the `Hydrated` Message merges one into the Model by policy
+(`replace` or `preserve-existing`). A snapshot names its version and `scope`
+and may be bounded by `maxBytes`. The cache is server-derived and
+**disposable**: a snapshot that is another version, another scope, oversized,
+or malformed is removed and the planner refetches. This is the opposite of
+Sync's preserve-and-recover policy, because Remote holds no unsent user edits;
+there is nothing to lose.
 
 ## When not to use Remote
 

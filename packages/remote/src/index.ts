@@ -59,6 +59,7 @@ import { RemotePolicy } from './policy.js'
 import { RelationAnnotation, isRefPage, refsIn, relationShape } from './relation.js'
 import { coalesceReads, type CoalesceOptions } from './coalesce.js'
 import { gc, type RetentionRoots } from './retain.js'
+import { mergeStores, type MergePolicy } from './persistence.js'
 import {
   MutationRequest,
   MutationResult,
@@ -579,6 +580,8 @@ export type RemoteMessage =
   | { readonly _tag: 'RefreshStarted'; readonly requests: readonly Requirement[] }
   /** The active Surfaces' roots changed; everything they do not reach is collected. */
   | { readonly _tag: 'RetentionChanged'; readonly roots: RetentionRoots }
+  /** A restored snapshot meets the store; runtime state is untouched. */
+  | { readonly _tag: 'Hydrated'; readonly entities: EntityStore; readonly merge: MergePolicy }
   /** A mutation began; its optimistic operations show until it settles. */
   | {
       readonly _tag: 'MutationStarted'
@@ -624,6 +627,11 @@ const remoteMessageSchema = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal('RefreshStarted'), requests: Schema.Array(ReadRequest) }),
   Schema.Struct({ _tag: Schema.Literal('RetentionChanged'), roots: retentionRootsSchema }),
+  Schema.Struct({
+    _tag: Schema.Literal('Hydrated'),
+    entities: runtimeSchema,
+    merge: Schema.Union([Schema.Literal('replace'), Schema.Literal('preserve-existing')]),
+  }),
   Schema.Struct({
     _tag: Schema.Literal('MutationStarted'),
     requestId: Schema.String,
@@ -690,6 +698,8 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
       return model
     case 'RetentionChanged':
       return { ...model, ...gc(model, message.roots) }
+    case 'Hydrated':
+      return { ...model, entities: mergeStores(model.entities, message.entities, message.merge) }
     case 'RefreshStarted':
       return {
         ...model,

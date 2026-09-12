@@ -349,17 +349,37 @@ applies, or on a `GapCleared` message. An `EntityPatched` updates the store;
 `EntityDeleted` writes a tombstone; `ConnectionInsert`/`ConnectionRemove`/
 `ConnectionInvalidate` change connection membership and ordering.
 
-## Persistence
+## Persistence and hydration
+
+A snapshot is the entity store and nothing else: connections' live cursors,
+optimistic layers, the mutation ledger, gaps, and retention roots belong to the
+session and never appear in one.
 
 ```ts
-RemotePersistence.save(store, { key: 'remote-cache' })
-RemotePersistence.restore({ key: 'remote-cache' })
+// SSR: the server prefetches, dehydrates for the page, the client hydrates.
+const html = dehydrate(serverStore, { scope: userId })
+Data.update(model.remote, {
+  _tag: 'Hydrated',
+  entities: hydrate(html, { scope: userId }) ?? emptyStore,
+  merge: 'preserve-existing',
+})
+
+// A browser cache, through Effect's KeyValueStore:
+RemotePersistence.save(store, { key: 'remote-cache', scope: userId, maxBytes: 512_000 })
+RemotePersistence.restore({ key: 'remote-cache', scope: userId, maxBytes: 512_000 })
 ```
 
-Both require Effect's `KeyValueStore`, so the backend (memory, filesystem, Web
-Storage, SQL) is the application's choice. The cache is server-derived and
-disposable: a version mismatch or malformed snapshot is discarded and the
-planner refetches.
+`dehydrate` and `hydrate` are the string forms; `save` and `restore` put them
+behind `KeyValueStore`, so the backend (memory, filesystem, Web Storage, SQL) is
+the application's choice. The text is deterministic (equal stores give
+byte-equal snapshots), a `scope` (a user, a tenant, a build) keeps one reader's
+cache from another, and `maxBytes` bounds what is written and read. The cache is
+server-derived and disposable: a snapshot that is oversized, another version,
+another scope, or malformed is discarded (and its key removed) and the planner
+refetches. `Hydrated` is a Message like every other cache change; `replace`
+takes the snapshot's entries and `preserve-existing` keeps entries the store
+already holds, which are at least as fresh. Hydrating the same snapshot twice is
+the same as once.
 
 ## What it owns
 
@@ -394,7 +414,9 @@ planner refetches.
   `mutate`, and `live`; the wire schemas and `RemoteRpc` group.
   `Remote.clientLayer(rpcClient)` adapts an Effect RPC client for `RemoteRpc` to
   `RemoteClient`, including the `LiveChange`-to-`LiveEvent` mapping.
-- **Disposable cache persistence.** Snapshot encode/decode over `KeyValueStore`.
+- **Disposable cache persistence.** Deterministic, scoped, size-bounded
+  snapshots of the entity store: `dehydrate`/`hydrate` as text, `save`/`restore`
+  over `KeyValueStore`, and `Hydrated` to merge one into the Model.
 
 ## Limits
 

@@ -74,6 +74,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
   `relations`, and a version mismatch fails with `RemoteProtocolError`
   (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
+- **Hydration hardening.** Snapshots are deterministic (equal stores give
+  byte-equal text), carry a `scope`, and respect `maxBytes` on save and
+  restore; `dehydrate`/`hydrate` are the text forms for SSR, `mergeStores`
+  and the new `Hydrated { entities, merge }` Message bring one into the Model
+  by `replace` or `preserve-existing`, and runtime state is never in a
+  snapshot. `REMOTE_CACHE_VERSION` is 3; `stableStringify` is exported (#65,
+  section 8).
 - **Live pruning.** A live `ConnectionRemove` hides a server-known edge (a
   `remove` overlay), not only a pending insert; `ConnectionMerged` prunes the
   settled overlays a page supersedes and leaves a pending request's alone;
