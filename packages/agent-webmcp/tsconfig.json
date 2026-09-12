@@ -11,5 +11,5 @@
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
-  "references": [{ "path": "../agent" }]
+  "references": [{ "path": "../agent/tsconfig.build.json" }]
 }

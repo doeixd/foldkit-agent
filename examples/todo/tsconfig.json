@@ -14,8 +14,8 @@
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "references": [
-    { "path": "../../packages/agent" },
-    { "path": "../../packages/agent-webmcp" },
-    { "path": "../../packages/surface" }
+    { "path": "../../packages/agent/tsconfig.build.json" },
+    { "path": "../../packages/agent-webmcp/tsconfig.build.json" },
+    { "path": "../../packages/surface/tsconfig.build.json" }
   ]
 }

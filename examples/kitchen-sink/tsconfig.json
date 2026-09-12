@@ -24,19 +24,19 @@
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "references": [
-    { "path": "../../packages/agent" },
-    { "path": "../../packages/agent-a2a" },
-    { "path": "../../packages/agent-mcp" },
-    { "path": "../../packages/agent-native" },
-    { "path": "../../packages/agent-webmcp" },
-    { "path": "../../packages/durable" },
+    { "path": "../../packages/agent/tsconfig.build.json" },
+    { "path": "../../packages/agent-a2a/tsconfig.build.json" },
+    { "path": "../../packages/agent-mcp/tsconfig.build.json" },
+    { "path": "../../packages/agent-native/tsconfig.build.json" },
+    { "path": "../../packages/agent-webmcp/tsconfig.build.json" },
+    { "path": "../../packages/durable/tsconfig.build.json" },
     { "path": "../../packages/mixins" },
     { "path": "../../packages/mixins-surface" },
     { "path": "../../packages/mixins-ui" },
-    { "path": "../../packages/remote" },
+    { "path": "../../packages/remote/tsconfig.build.json" },
     { "path": "../../packages/remote-drizzle" },
-    { "path": "../../packages/remote-server" },
-    { "path": "../../packages/sync" },
-    { "path": "../../packages/surface" }
+    { "path": "../../packages/remote-server/tsconfig.build.json" },
+    { "path": "../../packages/sync/tsconfig.build.json" },
+    { "path": "../../packages/surface/tsconfig.build.json" }
   ]
 }

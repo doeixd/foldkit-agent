@@ -13,5 +13,8 @@
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
-  "references": [{ "path": "../agent" }, { "path": "../surface" }]
+  "references": [
+    { "path": "../agent/tsconfig.build.json" },
+    { "path": "../surface/tsconfig.build.json" }
+  ]
 }

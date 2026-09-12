@@ -17,7 +17,7 @@
   "references": [
     { "path": "../../packages/mixins" },
     { "path": "../../packages/mixins-surface" },
-    { "path": "../../packages/remote" },
-    { "path": "../../packages/surface" }
+    { "path": "../../packages/remote/tsconfig.build.json" },
+    { "path": "../../packages/surface/tsconfig.build.json" }
   ]
 }

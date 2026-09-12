@@ -16,6 +16,6 @@
   "references": [
     { "path": "../../packages/mixins" },
     { "path": "../../packages/mixins-surface" },
-    { "path": "../../packages/surface" }
+    { "path": "../../packages/surface/tsconfig.build.json" }
   ]
 }

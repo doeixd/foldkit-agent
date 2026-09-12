@@ -15,10 +15,10 @@
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
   "references": [
-    { "path": "../../packages/agent" },
-    { "path": "../../packages/agent-mcp" },
-    { "path": "../../packages/durable" },
-    { "path": "../../packages/sync" },
-    { "path": "../../packages/surface" }
+    { "path": "../../packages/agent/tsconfig.build.json" },
+    { "path": "../../packages/agent-mcp/tsconfig.build.json" },
+    { "path": "../../packages/durable/tsconfig.build.json" },
+    { "path": "../../packages/sync/tsconfig.build.json" },
+    { "path": "../../packages/surface/tsconfig.build.json" }
   ]
 }
