@@ -7,6 +7,7 @@
  */
 import { Deferred, Duration, Effect, Request, RequestResolver, type Schema } from 'effect'
 import { Requirement } from 'foldkit-surface'
+import { stableStringify } from './query.js'
 import { REMOTE_PROTOCOL_VERSION, type ReadBatch, type ReadBatchResult } from './wire.js'
 import type { RemoteProtocolError, RemoteReadError } from './wire.js'
 
@@ -25,13 +26,25 @@ export interface CoalesceOptions {
 
 /** A stable key for a requirement, so an equal requirement in flight is joined. */
 export const requirementKey = (requirement: Requirement): string =>
-  JSON.stringify([
+  stableStringify([
     requirement.entity,
     requirement.id,
     [...requirement.fields].sort(),
     requirement.windows ?? null,
     requirement.relations ?? null,
   ])
+
+/**
+ * Merges a batch's requirements for the wire. Requirements without windows
+ * union per entity and id; a windowed requirement stays its own request, so
+ * two readers paging the same relation differently each get their own page
+ * (merging would let one window win for both).
+ */
+const mergeForBatch = (requirements: ReadonlyArray<Requirement>): ReadonlyArray<Requirement> => {
+  const windowed = requirements.filter(requirement => requirement.windows !== undefined)
+  const plain = requirements.filter(requirement => requirement.windows === undefined)
+  return [...Requirement.merge(plain), ...windowed]
+}
 
 class ReadRequirement extends Request.Class<
   { readonly key: string; readonly requirement: Requirement },
@@ -79,7 +92,7 @@ export const coalesceReads = (
           const exit = yield* Effect.exit(
             read({
               version: REMOTE_PROTOCOL_VERSION,
-              requests: Requirement.merge(
+              requests: mergeForBatch(
                 entries
                   .filter(entry => own.has(entry.request.key))
                   .map(entry => entry.request.requirement),

@@ -438,9 +438,12 @@ export const RemoteServer = {
         readonly id: string
         readonly values: Record<string, unknown>
       }> = []
-      // What this batch has already read per entity:id, so a target several
-      // relations share is fetched once and a cyclic selection stays finite.
+      // What this batch has already read per entity:id (fields and values), so
+      // a target several relations share is fetched once, a later spec's nested
+      // relation is followed from the values already in hand, and a cyclic
+      // selection stays finite.
       const fetched = new Map<string, Set<string>>()
+      const fetchedValues = new Map<string, Record<string, unknown>>()
       const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH
 
       // Level by level: a level's relation refs become the next level's requests.
@@ -452,6 +455,37 @@ export const RemoteServer = {
           })
         }
         const next: Request[] = []
+
+        /**
+         * Follows each relation's refs in `values` into the next level, asking
+         * only for fields this batch has not read of the target; a target read
+         * in full already is followed further from its fetched values.
+         */
+        const follow = (
+          values: Record<string, unknown>,
+          relations: Readonly<Record<string, RelationRequirement>>,
+        ): void => {
+          for (const [field, relation] of Object.entries(relations)) {
+            if (!Object.hasOwn(values, field)) continue
+            for (const ref of refsIn(values[field])) {
+              if (ref.entity !== relation.entity) continue
+              const key = `${relation.entity}:${ref.id}`
+              const read = fetched.get(key)
+              const fields = relation.fields.filter(name => read?.has(name) !== true)
+              if (fields.length > 0) {
+                next.push({
+                  entity: relation.entity,
+                  id: ref.id,
+                  fields,
+                  ...(relation.windows === undefined ? {} : { windows: relation.windows }),
+                  ...(relation.relations === undefined ? {} : { relations: relation.relations }),
+                })
+              } else if (relation.relations !== undefined) {
+                follow(fetchedValues.get(key) ?? {}, relation.relations)
+              }
+            }
+          }
+        }
 
         for (const [name, group] of groupByEntity(pending)) {
           const source = server.entities.get(name)
@@ -509,25 +543,11 @@ export const RemoteServer = {
             const known = fetched.get(key) ?? new Set<string>()
             for (const field of allowed) known.add(field)
             fetched.set(key, known)
+            fetchedValues.set(key, { ...fetchedValues.get(key), ...values })
 
-            // Follow each allowed relation's refs into the next level, asking
-            // only for fields this batch has not read of that target yet.
-            for (const [field, relation] of Object.entries(group.relations ?? {})) {
-              if (!allowedSet.has(field) || !Object.hasOwn(values, field)) continue
-              for (const ref of refsIn(values[field])) {
-                if (ref.entity !== relation.entity) continue
-                const read = fetched.get(`${relation.entity}:${ref.id}`)
-                const fields = relation.fields.filter(name => read?.has(name) !== true)
-                if (fields.length === 0) continue
-                next.push({
-                  entity: relation.entity,
-                  id: ref.id,
-                  fields,
-                  ...(relation.windows === undefined ? {} : { windows: relation.windows }),
-                  ...(relation.relations === undefined ? {} : { relations: relation.relations }),
-                })
-              }
-            }
+            // `values` holds only allowed fields, so a relation the principal
+            // may not read is never followed.
+            follow(values, group.relations ?? {})
           }
         }
         pending = next

@@ -32,8 +32,16 @@ export const reachable = (
   optimistic: Optimistic,
 ): ReadonlySet<EntityKey> => {
   const kept = new Set<EntityKey>()
+  // A target is walked once per relation spec that reaches it: two specs may
+  // select different nested relations of the same entity, and a spec tree is
+  // finite, so this terminates on cyclic data too.
+  const walked = new Map<EntityKey, Set<Omit<Requirement, 'id'>>>()
   const visit = (key: EntityKey, requirement: Omit<Requirement, 'id'>): void => {
     kept.add(key)
+    const seen = walked.get(key) ?? new Set()
+    if (seen.has(requirement)) return
+    seen.add(requirement)
+    walked.set(key, seen)
     for (const field of requirement.fields) {
       const value = readField(store, key, field)
       if (value._tag === 'None') continue
@@ -44,7 +52,7 @@ export const reachable = (
           kept.add(target)
           continue
         }
-        if (!kept.has(target)) visit(target, relation)
+        visit(target, relation)
       }
     }
   }
