@@ -71,14 +71,14 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   being fetched and follows a known relation's refs into concrete
   requirements. `Entity.ref`/`refPage` codecs are annotated, and `refsIn` /
   `relationShape` are exported. Breaking wire change: `ReadBatch` and
-  `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
+  `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (now 3), `ReadRequest` gains
   `relations`, and a version mismatch fails with `RemoteProtocolError`
   (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
 - **One statement per windowed relation.** `foldkit-remote-drizzle` ranks a
   windowed relation's children per parent in a window function and keeps the
   first `pageSize + 1` of each, so a `Selection.connection` over many parents
-  no longer runs one page query per parent (1000 parents: 7 statements and
-  52 ms in-process SQLite, down from 1006 and 220 ms) (#65, Phase E item 16).
+  no longer runs one page query per parent; the statement count of a windowed
+  nested read no longer grows with the number of parents (#65, Phase E item 16).
 - **Property tests and two fixes they found.** Seeded property checks over
   connection merge, live event ordering, and optimistic convergence. `merge`
   now puts a terminal-start segment first and a terminal-end segment last, so

@@ -78,8 +78,10 @@ RemoteServer.entity(Project, {
 })
 ```
 
-`read` is called once per entity for a whole id batch. `windows` carries the
-pagination window for each requested relation field. The result may be a partial
+`read` is called once per entity, id batch, and window per read level: ids are
+batched up to `maxIdsPerEntity`, ids that page a relation differently are read
+separately, and a nested selection reads its next level after the refs arrive.
+`windows` carries the pagination window for each requested relation field. The result may be a partial
 entity: a field the source omits is simply not present, and presence metadata on
 the client reflects that.
 
@@ -99,13 +101,19 @@ inferring adjacency from row count.
 
 ```ts
 RemoteServer.mutation(RenameProject, ({ input, principal }) =>
-  Effect.Effect<{ output: Output; entities?: NormalizedPatch[] }, RemoteServerError, R>,
+  Effect.Effect<
+    { output: Output; entities?: NormalizedPatch[]; connections?: ConnectionChange[] },
+    RemoteServerError,
+    R
+  >,
 )
 ```
 
 `input` is decoded against the mutation's `Input` schema first, so the callback
 receives the typed input. `output` is encoded against `Output`; `entities` are
-the normalized cache patches the client will reconcile.
+the normalized cache patches the client will reconcile, and `connections` the
+confirmed connection inserts and removes that replace the client's optimistic
+ones in place.
 
 ### `RemoteServer.live`
 

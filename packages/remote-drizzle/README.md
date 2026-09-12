@@ -53,9 +53,11 @@ const ProjectSummary = Selection.make(Project, { id: true, name: true, owner: tr
 
 const Data = Remote.make({ entities: [User, Project] })
 
-const Server = RemoteServer.make(Data, {
+const Server = RemoteServer.make({
   entities: [source(User), source(Project)],
 })
+// Every source names a descriptor the domain declared.
+RemoteServer.validate(Data, Server)
 
 // The handlers require `DrizzleDatabase`; provide it with the application's db.
 const handlers = RemoteServer.handlers(Server, principal)
@@ -306,10 +308,11 @@ return { output: { id }, entities: normalize(Project, rows, fields) }
 ```ts
 import { RemoteServer } from 'foldkit-remote-server'
 
-const Server = RemoteServer.make(Data, {
+const Server = RemoteServer.make({
   entities: [UserSource, ProjectSource],
   queries: [ProjectsByOwnerSource],
 })
+RemoteServer.validate(Data, Server)
 
 // handlers require DrizzleDatabase
 const handlers = RemoteServer.handlers(Server, principal)
@@ -378,8 +381,9 @@ joins, grouping and limits, but not Postgres NULL ordering.
   built.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - Nested pagination needs window functions and row-value `IN` in the database
-  (Postgres, SQLite 3.25+, MySQL 8+). `bench/nested.bench.ts` measures the
-  cost; in-process SQLite pages 1000 parents in 7 statements.
+  (Postgres, SQLite 3.25+, MySQL 8+). `bench/nested.bench.ts` times one source
+  read over 50 parents; `test/nested.test.ts` pins that the statement count
+  of a windowed nested read does not grow with the number of parents.
 
 ## License
 

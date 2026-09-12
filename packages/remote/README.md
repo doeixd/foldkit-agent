@@ -212,9 +212,12 @@ const store = await Effect.runPromise(
 Reads through `Remote.clientLayer` coalesce: requirements issued together
 become one `ReadBatch` (ids batched, overlapping fields unioned), a requirement
 already in flight is joined rather than re-requested, and a failed read releases
-it. Every waiter receives the whole batch result; `Remote.update` writes it
-idempotently. `Remote.coalesced(layer, { window })` wraps a hand-written client
-the same way; `window` widens the batching delay beyond "issued concurrently".
+it. Requirements that page nothing share one read and every waiter may write
+its whole result, since plain values are the same whoever asked; a requirement
+that pages a relation anywhere in its graph reads alone, because a page
+answers exactly one window. `Remote.coalesced(layer, { window })` wraps a
+hand-written client the same way; `window` widens the batching delay beyond
+"issued concurrently".
 
 ### Retention
 
@@ -239,8 +242,8 @@ roots have been stable for `grace`, and a root change restarts the wait, so a
 route transition that comes straight back does not thrash. `Remote.update`
 applies the pure `gc(state, roots)`: a root entity, the targets its retained
 fields refer to, the targets a nested relation selects, a retained connection's
-edges, and anything a pending optimistic layer or overlay touches survive;
-everything else is dropped. Roots live outside the Model, so GC is a Message
+edges, and anything a pending request's layer or overlays touch survive;
+everything else is dropped, settled overlays on a dropped connection included. Roots live outside the Model, so GC is a Message
 like every other cache change.
 
 ## Mutations
@@ -294,7 +297,8 @@ Patches are ordered layers over the base store, not inverse patches: the visible
 store (`visibleStore`) is recomputed, and settling removes the layer, so
 overlapping layers rebase for free. Connection changes (`Optimistic.prepend`,
 `append`, `remove`) are overlays outside the server-known region; `visibleItems`
-places inserts newest-first and hides removed edges. `MutationSucceeded` writes
+places inserts newest-first and hides a removed edge until a later insert brings
+it back. `MutationSucceeded` writes
 the server's patches, releases the request's layer and overlays, and records the
 result's confirmed `connections` in the position the request's overlays held,
 so a temporary edge becomes the real one without a flicker and a page or live
@@ -434,9 +438,6 @@ the same as once.
   `LiveRequirement` name `REMOTE_PROTOCOL_VERSION`; a server refuses another
   version with `RemoteProtocolError`, so a wire change is a version bump, never
   silent drift.
-- A nested connection's page is merged onto the stored page only when it is a
-  top-level requirement; "load more" through a nested relation refetches the
-  page.
 - The wire `LiveChange` union carries entity patches, deletes, and connection
   insert/remove/invalidate changes; the client adapter reconstructs a `LiveEvent`
   from it. `RemoteServer.live` serves them as a stream.
