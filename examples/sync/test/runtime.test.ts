@@ -13,7 +13,7 @@ afterEach(async () => {
   await closeStorages()
 })
 
-it('runs the wrapped Foldkit application and renders durable changes only after storage commits', async () => {
+it('runs the application over Sync.mount: durable changes render at once and persist after', async () => {
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
     setTimeout(() => callback(performance.now()), 0),
   )
@@ -38,17 +38,17 @@ it('runs the wrapped Foldkit application and renders durable changes only after 
   document.body.appendChild(container)
   const runtime = mountReplica(replica, container)
   try {
-    runtime.send(Message.CreatedTodo({ id: 'a', title: 'Persisted first' }))
+    runtime.send(Message.CreatedTodo({ id: 'a', title: 'Applied first' }))
     runtime.send(Message.SelectedTodo({ id: 'a' }))
     await vi.waitFor(() => expect(document.body.textContent).toContain('Selection: a'))
-    expect(document.body.textContent).not.toContain('Persisted first')
+    expect(document.body.textContent).toContain('Applied first')
+    expect(Effect.runSync(replica.pending)).toHaveLength(0)
     release()
-    await vi.waitFor(() => expect(document.body.textContent).toContain('Persisted first'))
-    expect(document.body.textContent).toContain('Selection: a')
-    expect(Effect.runSync(replica.pending)).toHaveLength(1)
+    await vi.waitFor(() => expect(Effect.runSync(replica.pending)).toHaveLength(1))
+    expect(document.body.textContent).toContain('Applied first')
   } finally {
     release()
-    runtime.dispose()
+    await runtime.dispose()
     await Effect.runPromise(replica.close)
     container.remove()
   }

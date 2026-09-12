@@ -1,78 +1,12 @@
-import { Effect, Schema } from 'effect'
-import { defineMessageUnion } from 'foldkit/message'
-import * as Port from 'foldkit/port'
-import * as Runtime from 'foldkit/runtime'
-import * as Subscription from 'foldkit/subscription'
-import type * as Update from 'foldkit/update'
+import { Effect } from 'effect'
 import { layerFromPromise, type Replica, type TransportClient } from 'foldkit-sync'
-import { Message, Model, durableTags, initialModel, update, type Shared } from './app.js'
+import type { Message, Shared } from './app.js'
+import { mountTodos } from './sync.js'
 
-const RuntimeMessage = defineMessageUnion({
-  ApplicationMessage: { message: Message },
-  RefreshShared: {},
-  PersistenceFailed: {},
-})
-type RuntimeMessage = typeof RuntimeMessage.Type
-
-/** The wrapper delays durable updates until their IndexedDB transaction commits. */
+/** The browser application: the example's view over `Sync.mount`. */
 export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLElement) => {
-  const ports = {
-    inbound: {
-      message: Port.inbound(Message),
-      refresh: Port.inbound(Schema.Boolean),
-    },
-  }
-  const wrappedUpdate = (
-    model: Model,
-    message: RuntimeMessage,
-  ): Update.Return<Model, RuntimeMessage> =>
-    RuntimeMessage.match(message, {
-      ApplicationMessage: ({ message }) => {
-        if (durableTags.has(message._tag))
-          return {
-            model,
-            commands: [
-              {
-                name: 'PersistOperation',
-                effect: replica.submit(message).pipe(
-                  Effect.map(() => RuntimeMessage.RefreshShared()),
-                  Effect.catch(() => Effect.succeed(RuntimeMessage.PersistenceFailed())),
-                ),
-              },
-            ],
-          }
-        const result = update(model, message)
-        return {
-          model: result.model,
-          ...(result.commands === undefined
-            ? {}
-            : {
-                commands: result.commands.map(command => ({
-                  ...command,
-                  effect: Effect.map(command.effect, message =>
-                    RuntimeMessage.ApplicationMessage({ message }),
-                  ),
-                })),
-              }),
-        }
-      },
-      RefreshShared: () => ({ model: { ...model, ...Effect.runSync(replica.shared) } }),
-      PersistenceFailed: () => ({
-        model: { ...model, lastError: 'Could not persist this change' },
-      }),
-    })
-  const program = Runtime.makeApplication({
-    Model,
+  const mounted = mountTodos(replica, {
     container,
-    ports,
-    init: () => ({ model: { ...initialModel, ...Effect.runSync(replica.shared) } }),
-    update: wrappedUpdate,
-    subscriptions: Subscription.make<Model, RuntimeMessage>()(() => ({
-      message: Port.subscription(ports.inbound.message, message =>
-        RuntimeMessage.ApplicationMessage({ message }),
-      ),
-      refresh: Port.subscription(ports.inbound.refresh, () => RuntimeMessage.RefreshShared()),
-    })),
     view: (model, h) => ({
       title: 'Foldkit sync spike',
       body: h.div(
@@ -87,14 +21,13 @@ export const mountReplica = (replica: Replica<Message, Shared>, container: HTMLE
         ],
       ),
     }),
+    onPersistenceFailure: model => ({ ...model, lastError: 'Could not persist this change' }),
   })
-  const handle = Runtime.embed(program)
   return {
-    send: handle.ports.message.send,
-    synchronize: async (transport: TransportClient) => {
-      await Effect.runPromise(Effect.provide(replica.synchronize, layerFromPromise(transport)))
-      handle.ports.refresh.send(true)
-    },
-    dispose: handle.dispose,
+    send: mounted.dispatch,
+    // The mount re-installs the shared slice itself when the exchange moves the cursor.
+    synchronize: (transport: TransportClient) =>
+      Effect.runPromise(Effect.provide(replica.synchronize, layerFromPromise(transport))),
+    dispose: mounted.dispose,
   }
 }

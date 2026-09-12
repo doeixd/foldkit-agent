@@ -2215,9 +2215,12 @@ specializes and `make(config)` constructs across Surface, Agent, and Sync (no
 first-class primitives; the derived replay refuses Commands and local writes and
 `submit` fails closed with `ReplayError`; `Module.make(App, [contracts])`
 collects the contracts Sync, Remote, and Agent now carry and validates ownership,
-naming, and Message claims. Deferred from #60: the shared host seam (section 5,
-waits on the admission hook), a tagged requirement algebra (section 7, no second
-interpreter yet), and `Sync.for(Surface)` (a Surface's projection is read-only).
+naming, and Message claims. `Sync.mount` then closed the runtime seam (section
+5) in userland: with replay guaranteed state-only, a durable Message applies
+through `update` at once and persists after, so no admission hook is needed
+(`docs/sync-runtime-binding.md`). Still deferred: a tagged requirement algebra
+(section 7, no second interpreter yet) and `Sync.for(Surface)` (a Surface's
+projection is read-only).
 The remaining integration work is the Foldkit binding (step 3 onward in
 `packages/agent/DESIGN.md`). Work through the review findings and open questions
 below.

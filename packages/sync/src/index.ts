@@ -7,6 +7,7 @@
  * journal provides authoritative order.
  */
 export { indexedDb, type Storage } from './indexedDb.js'
+export { mount, type MountOptions, type Mounted } from './mount.js'
 export {
   forApplication,
   type ApplicationSync,

@@ -6,8 +6,9 @@
   `foldkit-remote` Submodel.
 - [Inside-out view composition](./mixins.md) — `foldkit-mixins` slot contracts,
   Style and Behavior, and the `@foldkit/ui` adapters.
-- [Runtime binding](./sync-runtime-binding.md) — the Foldkit admission-hook
-  proposal that would make Sync and Agent transparent.
+- [Runtime binding](./sync-runtime-binding.md) — how `Sync.mount` runs a
+  Foldkit application over a replica with one reducer, and why no upstream hook
+  is needed.
 - [Improvements](./improvements.md) — suggestions for the project and design.
 - [Benchmarks](./benchmarks.md).
 - [Releases](./releases.md) — every workspace package's version, publish status,

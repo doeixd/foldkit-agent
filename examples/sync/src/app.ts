@@ -39,6 +39,5 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
   }),
 })
 
-export const durableTags = new Set<Message['_tag']>(['CreatedTodo', 'RenamedTodo', 'DeletedTodo'])
 export const decodeMessage = Schema.decodeUnknownSync(Message, { onExcessProperty: 'error' })
 export const encodeMessage = Schema.encodeSync(Message)

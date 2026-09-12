@@ -308,6 +308,16 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-sync`
 
+- **`Sync.mount`.** Runs a Foldkit application over an open replica with one
+  reducer: a durable Message is applied at once through `update` and persisted
+  afterwards in a Command; a failed persist reverts it and reports through
+  `onPersistenceFailure`; the shared slice is re-installed when an exchange or a
+  rejection moves the replica; `dispose` waits for in-flight persists; the
+  runtime's union is the application's plus three private variants, so Commands
+  from `update` need no re-wrapping. `mounted.model`/`mounted.dispatch` are the
+  host an agent binds to. `foldkit` becomes a peer dependency. This closes the
+  runtime seam (#60, section 5) without an upstream hook; `examples/sync` drops
+  its hand-written wrapper.
 - **A `Contract` for `Module`.** `Sync.forApplication(App).make` attaches
   `contract`: the replica owns the shared projection's paths and records the
   durable tags, so `Module.validate` catches two replication contracts over the

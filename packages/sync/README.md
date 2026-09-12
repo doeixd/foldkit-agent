@@ -79,6 +79,30 @@ const journal = yield* makeJournal({
 })
 ```
 
+### Mounting
+
+`Sync.mount` runs the application over an open replica with one reducer. A
+durable Message is applied at once through the application's `update` and
+persisted afterwards in a Command; the shared slice is re-installed from the
+replica when an exchange or a rejection changes it, or when a persist fails.
+
+```ts
+const replica = yield* TodoSync.openReplica(replicaId('tab-1'), yield* indexedDb('todos'))
+const mounted = mount(App, TodoSync, {
+  replica,
+  container: document.getElementById('app')!, // Foldkit needs the id
+  view: (model, h) => ({ title: 'Todos', body: h.ul([], model.todos.map(todo => h.li([], [todo.title]))) }),
+  onPersistenceFailure: (model, error) => ({ ...model, lastError: error.message }),
+})
+mounted.dispatch(Message.CreatedTodo({ id, title: 'Milk' }))
+mounted.model() // the Model after the last transition
+await mounted.dispose() // waits for in-flight persists; the replica stays open
+```
+
+`mounted.model` and `mounted.dispatch` are the host an agent binds to. See
+[docs/sync-runtime-binding.md](../../docs/sync-runtime-binding.md) for what the
+mount guarantees and why no Foldkit change is required.
+
 ### Lower level
 
 `Sync.forApplication(App).make` compiles down to `defineSync`, the protocol
