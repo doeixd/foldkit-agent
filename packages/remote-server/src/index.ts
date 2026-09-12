@@ -5,7 +5,7 @@
  * turning them into Effect RPC handlers. It does not own HTTP, serialization, or
  * auth protocol; `principal` is resolved outside and passed in.
  */
-import { Effect, Schema, Stream } from 'effect'
+import { Effect, Queue, Schema, Stream } from 'effect'
 import {
   REMOTE_PROTOCOL_VERSION,
   RemoteLiveError,
@@ -128,7 +128,144 @@ const DEFAULT_MAX_DEPTH = 8
 export interface HandlerOptions {
   readonly maxIdsPerEntity?: number | undefined
   readonly maxDepth?: number | undefined
+  /** A hub whose `changed`/`deleted` signals reach the subscribers this handler registers. */
+  readonly live?: LiveHub<any, any> | undefined
 }
+
+type LiveChangeValue = Schema.Schema.Type<typeof LiveChange>
+type Uncursored<T> = T extends unknown ? Omit<T, 'cursor'> : never
+
+interface LiveRef {
+  readonly entity: string
+  readonly id: string
+}
+
+/**
+ * The server-side "these fields changed" signal. A hub tracks each live
+ * subscriber's requirements (entity, id, fields) and principal; `changed`
+ * re-reads the changed fields a subscriber selects through the entity's own
+ * source, under that subscriber's principal, and streams the patch to it.
+ * Subscribers that select none of the changed fields do no work. Cursors
+ * continue from the cursor each subscriber resumed at, so the client's
+ * duplicate and gap handling is unchanged.
+ */
+export interface LiveHub<P, R = never> {
+  readonly changed: (
+    ref: LiveRef,
+    fields: ReadonlyArray<string>,
+  ) => Effect.Effect<void, RemoteServerError, R>
+  readonly deleted: (ref: LiveRef) => Effect.Effect<void>
+  /** Registers a subscriber for the stream's lifetime; `handlers` calls this. */
+  readonly subscribe: (context: {
+    readonly requirements: ReadonlyArray<Request>
+    readonly after: number
+    readonly principal: P
+  }) => Stream.Stream<LiveChangeValue>
+  /** How many subscribers are registered now. */
+  readonly size: Effect.Effect<number>
+}
+
+interface Subscriber<P> {
+  /** Per entity:id, the fields this subscriber selects. */
+  readonly selected: ReadonlyMap<string, ReadonlySet<string>>
+  readonly principal: P
+  readonly queue: Queue.Queue<LiveChangeValue>
+  cursor: number
+}
+
+const liveHub = <P, R>(server: ServerDefinition<P, R>): Effect.Effect<LiveHub<P, R>> =>
+  Effect.sync(() => {
+    const subscribers = new Set<Subscriber<P>>()
+    const emit = (subscriber: Subscriber<P>, change: Uncursored<LiveChangeValue>) => {
+      subscriber.cursor += 1
+      return Queue.offer(subscriber.queue, {
+        ...change,
+        cursor: subscriber.cursor,
+      } as LiveChangeValue)
+    }
+
+    return {
+      subscribe: ({ requirements, after, principal }) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const selected = new Map<string, Set<string>>()
+            for (const requirement of requirements) {
+              const key = `${requirement.entity}:${requirement.id}`
+              const fields = selected.get(key) ?? new Set<string>()
+              for (const field of requirement.fields) fields.add(field)
+              selected.set(key, fields)
+            }
+            const subscriber: Subscriber<P> = {
+              selected,
+              principal,
+              queue: yield* Queue.unbounded<LiveChangeValue>(),
+              cursor: after,
+            }
+            subscribers.add(subscriber)
+            return Stream.fromQueue(subscriber.queue).pipe(
+              Stream.ensuring(Effect.sync(() => void subscribers.delete(subscriber))),
+            )
+          }),
+        ),
+
+      changed: (ref, fields) =>
+        Effect.gen(function* () {
+          const key = `${ref.entity}:${ref.id}`
+          const source = server.entities.get(ref.entity)
+          if (source === undefined) return
+          // One source read per principal: subscribers sharing one share the read.
+          const byPrincipal = new Map<P, Array<{ subscriber: Subscriber<P>; fields: string[] }>>()
+          for (const subscriber of subscribers) {
+            const selectedFields = subscriber.selected.get(key)
+            if (selectedFields === undefined) continue
+            const wanted = fields.filter(field => selectedFields.has(field))
+            if (wanted.length === 0) continue
+            const group = byPrincipal.get(subscriber.principal) ?? []
+            group.push({ subscriber, fields: wanted })
+            byPrincipal.set(subscriber.principal, group)
+          }
+          for (const [principal, group] of byPrincipal) {
+            const requested = [...new Set(group.flatMap(entry => entry.fields))]
+            const permitted =
+              source.authorize === undefined ? requested : source.authorize(principal, requested)
+            const permittedSet = new Set(permitted)
+            const allowed = requested.filter(field => permittedSet.has(field))
+            if (allowed.length === 0) continue
+            const records = yield* source.read({ ids: [ref.id], fields: allowed, principal })
+            const record = records.find(candidate => candidate.id === ref.id)
+            if (record === undefined) continue
+            for (const { subscriber, fields: wanted } of group) {
+              const values: Record<string, unknown> = Object.create(null)
+              for (const field of wanted) {
+                if (permittedSet.has(field) && Object.hasOwn(record.values, field)) {
+                  values[field] = record.values[field]
+                }
+              }
+              const changed = Object.keys(values)
+              if (changed.length === 0) continue
+              yield* emit(subscriber, {
+                _tag: 'EntityPatched',
+                entity: ref.entity,
+                id: ref.id,
+                values,
+                changed,
+              })
+            }
+          }
+        }),
+
+      deleted: ref =>
+        Effect.gen(function* () {
+          const key = `${ref.entity}:${ref.id}`
+          for (const subscriber of subscribers) {
+            if (!subscriber.selected.has(key)) continue
+            yield* emit(subscriber, { _tag: 'EntityDeleted', entity: ref.entity, id: ref.id })
+          }
+        }),
+
+      size: Effect.sync(() => subscribers.size),
+    }
+  })
 
 type Request = Schema.Schema.Type<typeof ReadRequest>
 
@@ -238,6 +375,15 @@ export const RemoteServer = {
     entity: entity.name,
     subscribe: options.subscribe,
   }),
+
+  /**
+   * A `LiveHub` over the server's entity sources. Pass it to `handlers` as
+   * `live`, then call `hub.changed(ref, fields)` from wherever the data
+   * changes (a mutation source, a database trigger); each subscriber that
+   * selects any of those fields receives them, re-read through the entity
+   * source under its own principal.
+   */
+  liveHub,
 
   make: <P = unknown, R = never>(config: {
     readonly entities: readonly EntitySource<P, R>[]
@@ -448,17 +594,28 @@ export const RemoteServer = {
       const mismatch = protocolMismatch(payload.version)
       if (mismatch !== undefined) return Stream.fail(mismatch)
       const entities = [...new Set(payload.requirements.map(request => request.entity))]
-      const streams = entities.flatMap(entity => {
-        const source = server.live.get(entity)
-        if (source === undefined) return []
-        return [
-          source.subscribe({
-            requirements: payload.requirements.filter(request => request.entity === entity),
+      const streams: Array<Stream.Stream<LiveChangeValue, RemoteServerError, R>> = entities.flatMap(
+        entity => {
+          const source = server.live.get(entity)
+          if (source === undefined) return []
+          return [
+            source.subscribe({
+              requirements: payload.requirements.filter(request => request.entity === entity),
+              after: payload.after,
+              principal,
+            }),
+          ]
+        },
+      )
+      if (options.live !== undefined) {
+        streams.push(
+          (options.live as LiveHub<P, R>).subscribe({
+            requirements: payload.requirements,
             after: payload.after,
             principal,
           }),
-        ]
-      })
+        )
+      }
       // An entity with no live source simply contributes nothing; the client's
       // planner refetches it rather than the stream failing.
       return Stream.mergeAll(streams, { concurrency: 'unbounded' }).pipe(
