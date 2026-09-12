@@ -102,10 +102,11 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `container`/`nest` compile to a deterministic class (FNV-1a of the canonical
   rule text) plus CSS text; `Style.keyframes` and `Style.global` contribute
   class-independent CSS. Declarations are kebab-cased and equal rules share a
-  class. `NamedStyle.css`/`globalCss` and `Style.stylesheet` expose the CSS as
-  data, so SSR and the browser agree and nothing mutates the DOM. Rules inside
-  `Style.whenInput` are rejected (`style:conditional-rules-unsupported`). A real
-  rule registry and style extraction are still out of scope.
+  class. `NamedStyle.css`/`globalCss` plus structured `rules`/`globalRules`, and
+  `Style.stylesheet`, expose deduplicated CSS as data, so SSR and the browser
+  agree and nothing mutates the DOM. Rules inside `Style.whenInput` are rejected
+  (`style:conditional-rules-unsupported`). Render-time collection/extraction is
+  still out of scope.
 - **A11y patterns.** `A11y.pattern` is a portable requirements map and
   `A11y.validate` reports every mismatch as a stable `a11y:*` diagnostic
   (missing or hidden slot, capability mismatch, missing event or attribute). It

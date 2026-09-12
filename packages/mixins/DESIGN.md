@@ -334,17 +334,19 @@ text; collection stays caller-owned.
   canonical text. Equal rules share a class; different rules differ.
 - **No render-time collection and no import-time DOM mutation.** The CSS text is
   data (`NamedStyle.css`/`globalCss`), so SSR and the browser derive the same
-  class and rules, and the application decides where to inject it.
-  `Style.stylesheet([...styles])` concatenates global then scoped text at
-  build/list time, not from inside a render.
+  class and rules, and the application decides where to inject it. `NamedStyle`
+  also carries structured `rules`/`globalRules`, so `Style.stylesheet([...styles])`
+  deduplicates by generated class and by global chunk at build/list time, not
+  from inside a render. A test compiles a style twice and asserts the class, CSS
+  and stylesheet are identical, standing in for server/client equality.
 - Rules under `Style.whenInput` are **rejected** in v1, because the class is
   static while the condition is not. The diagnostic is
   `style:conditional-rules-unsupported`. Keyframes/global CSS under a condition
   are allowed: the CSS is emitted either way and only the reference is
   conditional.
-- Not in v1: a real rule registry / style extraction, `@font-face` sugar, and
+- Not in v1: render-time collection/extraction, `@font-face` sugar, and
   animation-orchestration helpers. Style stays in `foldkit-mixins` for now;
-  extract `foldkit-style` only if the compiler grows a real AST and registry.
+  extract `foldkit-style` only if the compiler grows a real AST.
 
 ## Phase plan (this package)
 

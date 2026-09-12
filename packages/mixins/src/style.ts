@@ -36,10 +36,14 @@ export interface NamedStyle<Slots> {
   readonly name?: string
   readonly pieces: StylePieces<Slots>
   readonly mixin: MixinValue<never>
-  /** Concatenated rule CSS for every static piece; identical rules share a class. */
+  /** Concatenated rule CSS for every static piece. */
   readonly css: string
   /** Concatenated class-independent CSS (keyframes, layers, global rules). */
   readonly globalCss: string
+  /** One entry per generated class, for a deduplicating stylesheet. */
+  readonly rules: ReadonlyArray<{ readonly className: string; readonly css: string }>
+  /** Class-independent rule chunks, for a deduplicating stylesheet. */
+  readonly globalRules: ReadonlyArray<string>
 }
 
 const tokens = (value: string): ReadonlyArray<string> =>
@@ -188,7 +192,8 @@ interface CompiledStyle {
   readonly classes: ReadonlyArray<string>
   readonly style: Readonly<Record<string, string>>
   readonly css?: string
-  readonly globalCss?: string
+  readonly ruleClass?: string
+  readonly globalRules?: ReadonlyArray<string>
 }
 
 /** Global CSS is emitted whether or not its condition is active. */
@@ -200,13 +205,13 @@ const collectGlobalCss = (style: StyleValue): ReadonlyArray<string> => [
 /** A rule-bearing style gets one deterministic class and its CSS text. */
 const compileStyle = (style: StyleValue): CompiledStyle => {
   const rules = style.rules ?? []
-  const globalCss = collectGlobalCss(style)
+  const globalRules = collectGlobalCss(style)
   const generated = rules.length === 0 ? undefined : Rules.className(rules)
   return {
     classes: generated === undefined ? style.classes : Object.freeze([...style.classes, generated]),
     style: style.style,
-    ...(generated === undefined ? {} : { css: Rules.css(generated, rules) }),
-    ...(globalCss.length === 0 ? {} : { globalCss: globalCss.join('') }),
+    ...(generated === undefined ? {} : { css: Rules.css(generated, rules), ruleClass: generated }),
+    ...(globalRules.length === 0 ? {} : { globalRules }),
   }
 }
 
@@ -226,11 +231,12 @@ export const toContribution = (style: StyleValue): SlotContribution<never> => {
     })
   }
   const compiled = compileStyle(style)
+  const globalCss = compiled.globalRules?.join('')
   const base = {
     classes: compiled.classes,
     style: compiled.style,
     ...(compiled.css === undefined ? {} : { css: compiled.css }),
-    ...(compiled.globalCss === undefined ? {} : { globalCss: compiled.globalCss }),
+    ...(globalCss === undefined ? {} : { globalCss }),
   }
   if ((style.conditions ?? []).length === 0) return Object.freeze(base)
   const contribution: InputContribution<never> = context => {
@@ -239,7 +245,7 @@ export const toContribution = (style: StyleValue): SlotContribution<never> => {
       classes: resolved.classes,
       style: resolved.style,
       ...(compiled.css === undefined ? {} : { css: compiled.css }),
-      ...(compiled.globalCss === undefined ? {} : { globalCss: compiled.globalCss }),
+      ...(globalCss === undefined ? {} : { globalCss }),
     })
   }
   return contribution
@@ -250,6 +256,8 @@ export const forSlots =
   (pieces: StylePieces<Slots>, options?: { readonly name?: string }): NamedStyle<Slots> => {
     const known = slots as unknown as Record<string, unknown>
     const contributions: Record<string, SlotContribution<never>> = Object.create(null)
+    const rules: Array<{ className: string; css: string }> = []
+    const globalRules: Array<string> = []
     let css = ''
     let globalCss = ''
     for (const [key, piece] of Object.entries(pieces as Record<string, StyleValue | undefined>)) {
@@ -267,8 +275,14 @@ export const forSlots =
         // Rule and global CSS are static even when the contribution is deferred,
         // so gather them from the compiled piece, not from the contribution.
         const compiled = compileStyle(piece)
-        if (compiled.css !== undefined) css += compiled.css
-        if (compiled.globalCss !== undefined) globalCss += compiled.globalCss
+        if (compiled.ruleClass !== undefined && compiled.css !== undefined) {
+          rules.push({ className: compiled.ruleClass, css: compiled.css })
+          css += compiled.css
+        }
+        if (compiled.globalRules !== undefined) {
+          globalRules.push(...compiled.globalRules)
+          globalCss += compiled.globalRules.join('')
+        }
       }
     }
     return Object.freeze({
@@ -277,13 +291,28 @@ export const forSlots =
       mixin: Mixin.dynamic<never>(options?.name ?? 'Style', contributions),
       css,
       globalCss,
+      rules: Object.freeze(rules),
+      globalRules: Object.freeze(globalRules),
     })
   }
 
-/** Concatenate global then scoped CSS for one `<style>` block. */
+/** Deduplicated global then scoped CSS for one `<style>` block, first seen wins. */
 export const stylesheet = (
-  ...styles: ReadonlyArray<{ readonly css: string; readonly globalCss: string }>
-): string => styles.map(style => `${style.globalCss}${style.css}`).join('')
+  ...styles: ReadonlyArray<{
+    readonly rules: ReadonlyArray<{ readonly className: string; readonly css: string }>
+    readonly globalRules: ReadonlyArray<string>
+  }>
+): string => {
+  const scoped = new Map<string, string>()
+  const global = new Set<string>()
+  for (const style of styles) {
+    for (const rule of style.rules) {
+      if (!scoped.has(rule.className)) scoped.set(rule.className, rule.css)
+    }
+    for (const rule of style.globalRules) global.add(rule)
+  }
+  return [...global, ...scoped.values()].join('')
+}
 
 export const attach =
   <Slots>(style: NamedStyle<Slots>) =>

@@ -166,4 +166,37 @@ describe('Style rule compiler', () => {
     expect(Primary.css).toContain(':hover{color:red}')
     expect(Ghost.css).toBe('')
   })
+
+  it('deduplicates identical scoped rules across styles', () => {
+    const a = Style.forSlots(RuleSlots)({ root: Style.pseudo(':hover', { color: 'red' }) })
+    const b = Style.forSlots(RuleSlots)({ root: Style.pseudo(':hover', { color: 'red' }) })
+    const c = Style.forSlots(RuleSlots)({ root: Style.pseudo(':hover', { color: 'blue' }) })
+    expect(Style.stylesheet(a, b)).toBe(a.css)
+    const both = Style.stylesheet(a, c)
+    expect(both).toContain('color:red')
+    expect(both).toContain('color:blue')
+    expect(both).toHaveLength(a.css.length + c.css.length)
+  })
+
+  it('deduplicates shared keyframes across styles', () => {
+    const Fade = Style.keyframes({ from: { opacity: '0' }, to: { opacity: '1' } })
+    const a = Style.forSlots(RuleSlots)({ root: Fade.style })
+    const b = Style.forSlots(RuleSlots)({ root: Fade.style })
+    expect(Style.stylesheet(a, b)).toBe(`@keyframes ${Fade.name}{from{opacity:0}to{opacity:1}}`)
+  })
+
+  it('compiles identically across independent evaluations', () => {
+    const build = () =>
+      Style.forSlots(RuleSlots)({
+        root: Style.compose(
+          Style.pseudo(':hover', { color: 'red' }),
+          Style.media('(min-width: 40rem)', { display: 'grid' }),
+        ),
+      })
+    const a = build()
+    const b = build()
+    expect(a.css).toBe(b.css)
+    expect(a.rules.map(rule => rule.className)).toEqual(b.rules.map(rule => rule.className))
+    expect(Style.stylesheet(a)).toBe(Style.stylesheet(b))
+  })
 })
