@@ -182,25 +182,83 @@ describe('the replica', () => {
     expect(shared(replica)).toEqual({ todos: [] })
   })
 
-  it('reuses the projection across reads until the state changes', async () => {
+  it('replays once at submit and reuses the projection until the state changes', async () => {
     const replica = await Effect.runPromise(
       CountingSync.openReplica(replicaId('a'), memoryStorage()),
     )
-    await Effect.runPromise(replica.submit(created('t1')))
-
     replayCalls.count = 0
-    Effect.runSync(replica.shared)
-    const afterFirstRead = replayCalls.count
-    expect(afterFirstRead).toBeGreaterThan(0)
 
+    // Admission replays the Message once and seeds the projection.
+    await Effect.runPromise(replica.submit(created('t1')))
+    expect(replayCalls.count).toBe(1)
     Effect.runSync(replica.shared)
-    expect(replayCalls.count).toBe(afterFirstRead)
+    Effect.runSync(replica.shared)
+    expect(replayCalls.count).toBe(1)
 
-    // A write replaces the state object, so the next read must rebuild.
+    // A second submit replays only the new Message, not the whole outbox.
     await Effect.runPromise(replica.submit(created('t2')))
     Effect.runSync(replica.shared)
-    expect(replayCalls.count).toBeGreaterThan(afterFirstRead)
+    expect(replayCalls.count).toBe(2)
 
+    // An exchange replaces the state without a seeded projection, so the next
+    // read rebuilds from the remaining outbox.
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: ['a:1'] }) })
+    Effect.runSync(replica.shared)
+    expect(replayCalls.count).toBe(3)
+    expect(shared(replica)).toEqual({ todos: [{ id: 't2', title: 't2' }] })
+
+    await Effect.runPromise(replica.close)
+  })
+
+  it('fails with ReplayError when rebuilding the projection throws for a pending Message', async () => {
+    let poisoned = false
+    const Poisonable = defineSync({
+      ...definition,
+      replay: (shared, message) => {
+        if (poisoned && message._tag === 'CreatedTodo' && message.id === 't1')
+          throw new Error('t1 no longer replays')
+        return definition.replay(shared, message)
+      },
+    })
+    const replica = await Effect.runPromise(Poisonable.openReplica(replicaId('a'), memoryStorage()))
+    await submit(replica, created('t1'))
+    // An exchange replaces the state without a seeded projection.
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: [] }) })
+    poisoned = true
+
+    const refused = await Effect.runPromise(Effect.result(replica.submit(created('t2'))))
+    expect(refused._tag).toBe('Failure')
+    if (refused._tag === 'Failure') {
+      expect(refused.failure._tag).toBe('ReplayError')
+      expect(refused.failure.message).toBe('t1 no longer replays')
+    }
+    expect(pending(replica).map(operation => operation.opId)).toEqual(['a:1'])
+    await Effect.runPromise(replica.close)
+  })
+
+  it('refuses a Message whose replay throws and leaves the outbox unchanged', async () => {
+    const Throwing = defineSync({
+      ...definition,
+      replay: (shared, message) => {
+        if (message._tag === 'CreatedTodo' && message.title === 'boom') throw new Error('boom')
+        return definition.replay(shared, message)
+      },
+    })
+    const replica = await Effect.runPromise(Throwing.openReplica(replicaId('a'), memoryStorage()))
+    await submit(replica, created('t1'))
+
+    const refused = await Effect.runPromise(Effect.result(replica.submit(created('t2', 'boom'))))
+    expect(refused._tag).toBe('Failure')
+    if (refused._tag === 'Failure') {
+      expect(refused.failure._tag).toBe('ReplayError')
+      expect(refused.failure.message).toBe('boom')
+    }
+    expect(pending(replica).map(operation => operation.opId)).toEqual(['a:1'])
+    expect(shared(replica)).toEqual({ todos: [{ id: 't1', title: 't1' }] })
+
+    // The replica is still usable after a refusal.
+    await submit(replica, created('t3'))
+    expect(pending(replica).map(operation => operation.opId)).toEqual(['a:1', 'a:2'])
     await Effect.runPromise(replica.close)
   })
 

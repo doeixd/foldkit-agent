@@ -15,17 +15,43 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-surface` (private)
 
+- **`Module`, the pure composition root.** `Module.make(App, [contracts])`
+  collects an application's contracts as data; `Module.validate` reports a
+  contract from another application, a duplicate `kind:name`, two owners of
+  overlapping Model paths, a Message durable in two replication contracts, and
+  a path or Message the application does not declare; `Module.manifest`,
+  `Module.toMarkdown`, and `Module.toMermaid` show who owns each Model path (local, sync, or remote) and
+  every contract's observes/messages/requirements. A `Contract` is the shared
+  description: `Surface.contract` derives one from a Surface, and Sync, Remote,
+  and Agent attach one to the values they produce. `Surface.registry` is
+  removed; `Module` is the explicit collection (#60, sections 1 and 8).
+- **The primitives are first-class.** `Projection.pick`/`Projection.compose`
+  (were `Surface.pick`/`Surface.compose`) build writable projections, and
+  `MessageSet.make(App, [constructors])`/`MessageSet.union` (were
+  `Surface.messages`/`Surface.unionMessages`) build typed Message subsets, now
+  typed `MessageSet`. Agent and Sync consume `Projection` and `MessageSet`
+  values, not Surface helpers; a `Surface` is what composes one of each with a
+  name and a renderer (#60, section 4).
+- **`make` constructs, `application` scopes.** One vocabulary across the
+  application-contract packages (#60): `forApplication(App)` specializes a
+  package to an application and `make(config)` constructs a contract, as
+  `Ref.make`/`Queue.make` do in Effect and `Remote.make`/`Entity.make` already
+  did here. `Surface.define(App, name, config)` is now `Surface.make`, and the
+  scope-only `Surface.make({ Model, Message })` is folded into
+  `Surface.application`, which already accepted a config without
+  `initial`/`update`. The mixins packages keep their own `Slots.define`/
+  `SurfaceView.define` vocabulary for now.
 - **Reference-based selection.** `Surface.application` generates a reference tree
-  (`App.fields`), and `Surface.pick`/`Surface.compose` build writable projections
+  (`App.fields`), and `Projection.pick`/`Projection.compose` build writable projections
   from it, so a shared projection is derived from the Model Schema instead of
   declared twice. `Sync.forApplication` and `Agent.forApplication` consume it.
-- **Typed Message subsets.** `Surface.messages(app, [constructors])` and
-  `Surface.unionMessages(...)` produce a `MessageSubset` with a pure codec, a tag
+- **Typed Message subsets.** `MessageSet.make(app, [constructors])` and
+  `MessageSet.union(...)` produce a `MessageSet` with a pure codec, a tag
   set, and an owner token, so two structurally identical applications cannot mix
   selections and a subset cannot leak across applications.
-- **Encoded types are preserved.** `ModelRef`/`FieldRef` and `MessageSubset` carry
+- **Encoded types are preserved.** `ModelRef`/`FieldRef` and `MessageSet` carry
   an `Encoded` parameter, so a transforming field (`Schema.NumberFromString`)
-  keeps its encoded type through `Surface.pick` and the journal snapshot codec
+  keeps its encoded type through `Projection.pick` and the journal snapshot codec
   instead of widening to `unknown`.
 - **Transition and resources.** `Surface.application` accepts optional
   `initial`/`update` and resource-carrying Commands; the runnable form is what
@@ -33,6 +59,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote` (private)
 
+- **A `Contract` for `Module`.** `Remote.at` attaches `contract`: the bound
+  Remote owns its store's Model path, named after it.
 - **A real Remote submodel.** `RemoteModel` is the four producers' shared state
   (`entities`, `connections`, `optimistic`, `live`, `mutations`, `gaps`), and
   `Remote.update` is the single reducer over reads, mutation results, live events,
@@ -197,19 +225,31 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-agent`
 
+- **A Surface as context.** `Agent.forApplication(App).make({ context })` accepts
+  a feature Surface (without params) beside a `Projection` or a writable pick,
+  so the Surface a view renders is also what the agent sees (#60, section 3).
+- **A `Contract` for `Module`.** `Agent.forApplication(App).make` attaches
+  `contract`: what the agent observes (its context projection) and the Message
+  tags it exposes; `name` (default `'agent'`) names it. `Agent.make` alone
+  cannot know the application and attaches none.
+- **`define` is `make`.** `Agent.define`, `Agent.forModel<Model>().define`, and
+  `Agent.forApplication(App).define` are `make`, and `DefineOptions` is
+  `MakeOptions`, matching `Sync.forApplication(App).make` and `Surface.make`
+  (#60). `Definition` keeps its name: it is what `make` returns.
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The
-  `define` `context` option now takes a `foldkit-surface` projection — a read-only
+  `make` `context` option now takes a `foldkit-surface` projection — a read-only
   `Projection` (`Projection.of`/`struct`/`fromReader`) or a writable
-  `Surface.pick`/`Surface.compose` — and the runtime reads it with `.read`.
+  `Projection.pick`/`Projection.compose` — and the runtime reads it with `.read`.
   `Agent.forApplication(App)` infers the Model from a `Surface.application` and
   accepts either projection directly; `Agent.forModel<Model>()` remains when there
   is no application. `Agent.contextSchema` is unchanged.
 - **Subset exposure and a curried principal.** `Agent.exposeSubset(subset,
-  variants)` exposes only the variants of a `Surface.messages` subset, and
-  `Surface.unionMessages` composes disjoint subsets. `Agent.forApplication` infers
-  the Model, so a `Principal` is supplied by the curried
-  `Agent.forApplication<Principal>()(App)` — TypeScript cannot infer Model beside
-  an explicit principal. A `Surface.application` now takes optional
+  variants)` exposes only the variants of a `MessageSet.make` subset, and
+  `MessageSet.union` composes disjoint subsets. `Agent.forApplication` infers
+  the Model, so a `Principal` is supplied by
+  `Agent.forApplication(App).withPrincipal<Principal>()` — TypeScript cannot
+  infer Model beside an explicit principal, and the chained form keeps one entry
+  point instead of the curried `forApplication<Principal>()(App)` (#60). A `Surface.application` now takes optional
   `initial`/`update` and accepts resource-carrying Commands.
 - **Subset ownership is enforced.** `Agent.forApplication(App).exposeSubset`
   refuses a subset whose owner token belongs to a different application, matching
@@ -268,25 +308,46 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-sync`
 
+- **A `Contract` for `Module`.** `Sync.forApplication(App).make` attaches
+  `contract`: the replica owns the shared projection's paths and records the
+  durable tags, so `Module.validate` catches two replication contracts over the
+  same field or Message.
 - **Surface-based contract.** The standalone `pick`/`Projection` (#59 spike) is
   gone, superseded by the shared Surface `ModelRef`/`Projection`.
-  `Sync.forApplication(App, { documentId, shared, durable })` derives the shared
-  projection, the durable subset, the initial snapshot, and replay from a
-  `Surface.application`, a `Surface.pick`/`Surface.compose` projection, and a
-  `Surface.messages` subset; `Sync.make(App, name, { documentId, initial, shared,
-  durable, replay })` takes an explicit projection, constructors, and a custom
-  `replay`. Both compile to the low-level `defineSync` and return a read-only
-  `surface`; `TodoSync.journalContract()` derives the durable operation/snapshot
-  codecs, empty snapshot, and reducer. Additive — `defineSync` remains the
-  protocol primitive. `Sync.project` now also carries the projection's dependency
-  paths.
-- **Consistent config and subset ownership.** `Sync.make`'s config uses
-  `shared`/`durable`, matching `Sync.forApplication`, and `forApplication`
+  `Sync.forApplication(App).make({ documentId, shared, durable })` derives the
+  shared projection, the durable subset, the initial snapshot, and replay from a
+  `Surface.application`, a `Projection.pick`/`Projection.compose` projection, and a
+  `MessageSet.make` subset; `make({ ..., replay })` replaces the derived replay
+  with a custom reducer over the shared slice. It compiles to the low-level
+  `defineSync` and returns a read-only `surface`; `TodoSync.journalContract()`
+  derives the durable operation/snapshot codecs, empty snapshot, and reducer.
+  Additive — `defineSync` remains the protocol primitive. `Sync.project` is
+  removed; `Projection.pick` is the writable projection.
+- **One entry point, shaped like Agent's.** `Sync.forApplication(App)` specializes
+  the constructors to an application and `.make(config)` produces the
+  contract, matching `Agent.forApplication(App).make(config)` (#60). The
+  earlier `Sync.forApplication(App, config)` and `Sync.make(App, name, config)`
+  forms are gone; `Sync.make`'s explicit `initial` and bare constructor array
+  came from the application and a `MessageSet.make` subset anyway. `make`
   refuses a durable subset whose owner token belongs to a different application.
-- **Replay documented at the definition.** `SyncConfig.replay` states that a
-  durable Message's Commands are dropped during replay and optimistic projection
-  (only state changes apply) and that each replay starts from the initial Model,
-  so cost tracks the Model rather than the shared slice.
+  `MakeOptions` names its config.
+- **Derived replay is guarded.** `Sync.forApplication`'s replay refuses a durable
+  Message whose `update` returns a Command or changes a Model field outside the
+  shared projection, naming the Message and the fields, instead of silently
+  dropping the Command or the change. A durable Message is a deterministic,
+  state-only transition of the shared projection; an effectful Message stays
+  local and emits a durable fact when its Command settles. The Command's effect
+  is never run. `examples/sync` drops its hand-written copy of the same guards.
+- **`submit` fails closed.** The replica replays a Message before writing it to
+  the outbox and fails with `ReplayError` (a new `ReplicaError` member carrying
+  the replay's message and cause) when replay throws, for the new Message or
+  for a pending one while the projection is rebuilt, so a Message no replica
+  could apply is never persisted. The submit-time result seeds the optimistic
+  projection, so a read after a submit no longer replays the whole outbox.
+- **Replay documented at the definition.** `MakeOptions.replay` states that a
+  custom replay is a pure reducer over the shared subset, that only durable
+  Messages reach it, that it runs during admission, replay, and optimistic
+  projection, and that it is not guarded.
 - **An exchange loop.** `Replica.start` exchanges once and then after every
   `submit`, until the replica closes or the fiber is interrupted; a transport
   failure is recorded and retried on the next wake, so the application does not

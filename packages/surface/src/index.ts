@@ -80,7 +80,7 @@ type Selectable<Root, Value, Key extends string, Encoded = unknown> = [Value] ex
 
 /**
  * A dynamic focus from `.at`/`.index`. Deliberately not a `FieldRef`: its key is
- * a record key or index, not a Model field, so a static `Surface.pick` cannot
+ * a record key or index, not a Model field, so a static `Projection.pick` cannot
  * infer a field name from it.
  */
 type OptionalRef<Root, Value> = [Value] extends [Option.Option<infer Inner>]
@@ -511,6 +511,89 @@ export const Projection = {
     requirements: options?.requirements ?? [],
     read,
   }),
+
+  /**
+   * Derives a writable projection from generated Model field references:
+   * `Projection.pick(App.model.todos, App.model.selectedTodoId)` infers
+   * `{ todos, selectedTodoId }` and its codec. Every reference must share one
+   * Root; a raw optic or an unrelated application is rejected. Repeated
+   * identical members deduplicate; a conflicting definition throws.
+   */
+  pick: <const Refs extends readonly FieldRef<any, any, string>[]>(
+    ...refs: Refs & (IsUnion<RefRoots<Refs>[number]> extends true ? never : unknown)
+  ): WritableProjection<RefRoots<Refs>[number], PickFields<Refs>> => {
+    const selected = [...refs]
+    // Two applications can have structurally identical Models, so the root type
+    // check cannot separate them; the owner token can.
+    const owner = selected[0]?.owner
+    for (const ref of selected) {
+      if (ref.owner !== owner) {
+        throw new Error('Projection.pick: references from different applications')
+      }
+    }
+    const fields: Record<string, AnySchema> = {}
+    for (const ref of selected) {
+      const existing = fields[ref.key]
+      if (existing !== undefined) {
+        if (existing === ref.Schema) continue
+        throw new Error(`Projection.pick: conflicting definitions for "${ref.key}"`)
+      }
+      fields[ref.key] = ref.Schema
+    }
+    return {
+      schema: objectSchema(fields) as never,
+      dependencies: mergeDependencies(selected.map(ref => ref.dependency)),
+      get: model => {
+        const out: Record<string, unknown> = {}
+        for (const ref of selected) out[ref.key] = ref.get(model as never)
+        return out as never
+      },
+      set: (model, shared) => {
+        let next = model
+        for (const ref of selected)
+          next = ref.set(next as never, (shared as Record<string, unknown>)[ref.key] as never)
+        return next
+      },
+    }
+  },
+
+  /**
+   * Merges disjoint writable projections into one: `Projection.compose(Todos,
+   * Selection)`. Every projection must own the same Model; a field defined twice
+   * with a different codec throws, while an identical definition deduplicates.
+   * `set` installs each part, so composed fields keep their own write behaviour.
+   */
+  compose: <const Ps extends readonly WritableProjection<any, any>[]>(
+    ...projections: Ps & (IsUnion<ProjectionModel<Ps[number]>> extends true ? never : unknown)
+  ): WritableProjection<ProjectionModel<Ps[number]>, MergeFields<Ps>> => {
+    const parts = [...projections]
+    const fields: Record<string, AnySchema> = {}
+    for (const part of parts) {
+      for (const [key, codec] of Object.entries(part.schema.fields)) {
+        const existing = fields[key]
+        if (existing !== undefined) {
+          if (existing === codec) continue
+          throw new Error(`Projection.compose: conflicting definitions for "${key}"`)
+        }
+        fields[key] = codec as AnySchema
+      }
+    }
+    return {
+      schema: objectSchema(fields) as never,
+      dependencies: mergeDependencies(parts.flatMap(part => [...part.dependencies])),
+      get: model => {
+        const out: Record<string, unknown> = {}
+        for (const part of parts) Object.assign(out, part.get(model as never))
+        return out as never
+      },
+      set: (model, shared) => {
+        let next = model
+        // Each part reads only its own fields from the merged value.
+        for (const part of parts) next = part.set(next as never, shared as never)
+        return next
+      },
+    }
+  },
 }
 
 // ===========================================================================
@@ -538,6 +621,8 @@ export interface SurfaceInspection {
 
 export interface Surface<Root, Model, Message, Params> {
   readonly name: string
+  /** Identity token of the application this Surface belongs to. */
+  readonly owner: object
   readonly Params: Schema.Schema<Params> | undefined
   readonly Message: Schema.Schema<Message>
   readonly messages: readonly unknown[]
@@ -651,7 +736,7 @@ declare const messageSubsetRoot: unique symbol
 type SubsetEncoded<Ms extends readonly unknown[]> =
   Ms[number] extends Schema.Codec<any, infer Encoded, any, any> ? Encoded : never
 
-export interface MessageSubset<
+export interface MessageSet<
   Root,
   Message,
   Subset extends Message,
@@ -732,41 +817,32 @@ function application(config: any): any {
   return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
 }
 
-type ConstructorOfSubset<S> = S extends MessageSubset<any, any, any, infer Ms, any> ? Ms : never
-type ValueOfSubset<S> = S extends MessageSubset<any, any, infer V, any, any> ? V : never
-type RootOfSubset<S> = S extends MessageSubset<infer R, any, any, any, any> ? R : never
-type MessageOfSubset<S> = S extends MessageSubset<any, infer M, any, any, any> ? M : never
-type CasesOfSubset<S> = S extends MessageSubset<any, any, any, any, infer C> ? C : never
+type ConstructorOfSubset<S> = S extends MessageSet<any, any, any, infer Ms, any> ? Ms : never
+type ValueOfSubset<S> = S extends MessageSet<any, any, infer V, any, any> ? V : never
+type RootOfSubset<S> = S extends MessageSet<infer R, any, any, any, any> ? R : never
+type MessageOfSubset<S> = S extends MessageSet<any, infer M, any, any, any> ? M : never
+type CasesOfSubset<S> = S extends MessageSet<any, any, any, any, infer C> ? C : never
 
 type Concat<A extends readonly unknown[], B extends readonly unknown[]> = [...A, ...B]
 
 /** Concatenates the constructor tuples of several subsets, preserving each. */
-type MergeConstructors<Subs extends readonly MessageSubset<any, any, any, any, any>[]> =
+type MergeConstructors<Subs extends readonly MessageSet<any, any, any, any, any>[]> =
   Subs extends readonly [
-    infer Head extends MessageSubset<any, any, any, any, any>,
-    ...infer Tail extends readonly MessageSubset<any, any, any, any, any>[],
+    infer Head extends MessageSet<any, any, any, any, any>,
+    ...infer Tail extends readonly MessageSet<any, any, any, any, any>[],
   ]
     ? Concat<ConstructorOfSubset<Head>, MergeConstructors<Tail>>
     : []
 
-export const Surface = {
-  make: <
-    F extends Schema.Struct.Fields,
-    Cases extends Record<string, Schema.Struct.Fields>,
-  >(config: {
-    readonly Model: Schema.Struct<F>
-    readonly Message: MessageUnion<Cases>
-  }): AppScope<Schema.Struct.Type<F>, F, Cases> => makeScope(config),
-
-  application,
-
+/** Typed Message subsets of one application, by constructor reference. */
+export const MessageSet = {
   /**
    * Selects a typed Message subset by constructor reference:
-   * `Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])`. Each
+   * `MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo])`. Each
    * constructor must be this application's own variant; a duplicate or a variant
    * from another union throws.
    */
-  messages: <
+  make: <
     Root,
     F extends Schema.Struct.Fields,
     Cases extends Record<string, Schema.Struct.Fields>,
@@ -774,7 +850,7 @@ export const Surface = {
   >(
     app: AppScope<Root, F, Cases>,
     messages: Ms,
-  ): MessageSubset<
+  ): MessageSet<
     Root,
     Schema.Schema.Type<MessageUnion<Cases>>,
     SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
@@ -786,14 +862,14 @@ export const Surface = {
     for (const constructor of messages) {
       const tag = messageTag(constructor)
       if (tag === undefined) {
-        throw new Error('Surface.messages: expected Message constructors')
+        throw new Error('MessageSet.make: expected Message constructors')
       }
       if ((app.Message as unknown as Record<string, unknown>)[tag] !== constructor) {
         throw new Error(
-          `Surface.messages: "${tag}" is not a variant of this application's Message union`,
+          `MessageSet.make: "${tag}" is not a variant of this application's Message union`,
         )
       }
-      if (tags.has(tag)) throw new Error(`Surface.messages: duplicate "${tag}"`)
+      if (tags.has(tag)) throw new Error(`MessageSet.make: duplicate "${tag}"`)
       tags.add(tag)
     }
     return {
@@ -818,9 +894,9 @@ export const Surface = {
    * same application; a tag declared twice throws. Disjoint feature modules can
    * each declare their own subset and compose them here.
    */
-  unionMessages: <const Subs extends readonly MessageSubset<any, any, any, any, any>[]>(
+  union: <const Subs extends readonly MessageSet<any, any, any, any, any>[]>(
     ...subsets: Subs
-  ): MessageSubset<
+  ): MessageSet<
     RootOfSubset<Subs[number]>,
     MessageOfSubset<Subs[number]>,
     ValueOfSubset<Subs[number]>,
@@ -834,12 +910,12 @@ export const Surface = {
     const constructors: Array<Schema.Schema<unknown>> = []
     for (const part of parts) {
       if (part.owner !== owner) {
-        throw new Error('Surface.unionMessages: subsets from different applications')
+        throw new Error('MessageSet.union: subsets from different applications')
       }
       for (const constructor of part.constructors) {
         const tag = messageTag(constructor)
         if (tag === undefined) continue
-        if (tags.has(tag)) throw new Error(`Surface.unionMessages: duplicate "${tag}"`)
+        if (tags.has(tag)) throw new Error(`MessageSet.union: duplicate "${tag}"`)
         tags.add(tag)
         constructors.push(constructor as Schema.Schema<unknown>)
       }
@@ -858,91 +934,12 @@ export const Surface = {
         tags.has((message as { readonly _tag?: string })._tag ?? ''),
     }
   },
+}
 
-  /**
-   * Derives a writable projection from generated Model field references:
-   * `Surface.pick(App.model.todos, App.model.selectedTodoId)` infers
-   * `{ todos, selectedTodoId }` and its codec. Every reference must share one
-   * Root; a raw optic or an unrelated application is rejected. Repeated
-   * identical members deduplicate; a conflicting definition throws.
-   */
-  pick: <const Refs extends readonly FieldRef<any, any, string>[]>(
-    ...refs: Refs & (IsUnion<RefRoots<Refs>[number]> extends true ? never : unknown)
-  ): WritableProjection<RefRoots<Refs>[number], PickFields<Refs>> => {
-    const selected = [...refs]
-    // Two applications can have structurally identical Models, so the root type
-    // check cannot separate them; the owner token can.
-    const owner = selected[0]?.owner
-    for (const ref of selected) {
-      if (ref.owner !== owner) {
-        throw new Error('Surface.pick: references from different applications')
-      }
-    }
-    const fields: Record<string, AnySchema> = {}
-    for (const ref of selected) {
-      const existing = fields[ref.key]
-      if (existing !== undefined) {
-        if (existing === ref.Schema) continue
-        throw new Error(`Surface.pick: conflicting definitions for "${ref.key}"`)
-      }
-      fields[ref.key] = ref.Schema
-    }
-    return {
-      schema: objectSchema(fields) as never,
-      dependencies: mergeDependencies(selected.map(ref => ref.dependency)),
-      get: model => {
-        const out: Record<string, unknown> = {}
-        for (const ref of selected) out[ref.key] = ref.get(model as never)
-        return out as never
-      },
-      set: (model, shared) => {
-        let next = model
-        for (const ref of selected)
-          next = ref.set(next as never, (shared as Record<string, unknown>)[ref.key] as never)
-        return next
-      },
-    }
-  },
+export const Surface = {
+  application,
 
-  /**
-   * Merges disjoint writable projections into one: `Surface.compose(Todos,
-   * Selection)`. Every projection must own the same Model; a field defined twice
-   * with a different codec throws, while an identical definition deduplicates.
-   * `set` installs each part, so composed fields keep their own write behaviour.
-   */
-  compose: <const Ps extends readonly WritableProjection<any, any>[]>(
-    ...projections: Ps & (IsUnion<ProjectionModel<Ps[number]>> extends true ? never : unknown)
-  ): WritableProjection<ProjectionModel<Ps[number]>, MergeFields<Ps>> => {
-    const parts = [...projections]
-    const fields: Record<string, AnySchema> = {}
-    for (const part of parts) {
-      for (const [key, codec] of Object.entries(part.schema.fields)) {
-        const existing = fields[key]
-        if (existing !== undefined) {
-          if (existing === codec) continue
-          throw new Error(`Surface.compose: conflicting definitions for "${key}"`)
-        }
-        fields[key] = codec as AnySchema
-      }
-    }
-    return {
-      schema: objectSchema(fields) as never,
-      dependencies: mergeDependencies(parts.flatMap(part => [...part.dependencies])),
-      get: model => {
-        const out: Record<string, unknown> = {}
-        for (const part of parts) Object.assign(out, part.get(model as never))
-        return out as never
-      },
-      set: (model, shared) => {
-        let next = model
-        // Each part reads only its own fields from the merged value.
-        for (const part of parts) next = part.set(next as never, shared as never)
-        return next
-      },
-    }
-  },
-
-  define: <
+  make: <
     Root,
     F extends Schema.Struct.Fields,
     Cases extends Record<string, Schema.Struct.Fields>,
@@ -967,6 +964,7 @@ export const Surface = {
       config.model({ model: app.model, params })
     return {
       name,
+      owner: app.owner,
       Params: config.Params,
       Message: Schema.Never as unknown as Schema.Schema<MsgOf<Ms>>,
       messages: config.messages ?? [],
@@ -1026,29 +1024,23 @@ export const Surface = {
       child(model, h as unknown as ViewBuilder<ChildMessage>),
 
   /**
-   * An explicit collection of Surfaces for one App; there is no hidden global
-   * registry. Duplicate names are rejected here so a diagnostic name cannot
-   * silently collide.
+   * A Surface as a `Contract` for `Module`: what it observes, requires, and may
+   * emit. A parameterized Surface needs its `params` to build the projection.
    */
-  registry: <
-    Root,
-    F extends Schema.Struct.Fields,
-    Cases extends Record<string, Schema.Struct.Fields>,
-  >(
-    app: AppScope<Root, F, Cases>,
-    surfaces: readonly Surface<Root, any, any, any>[],
-  ): {
-    readonly app: AppScope<Root, F, Cases>
-    readonly surfaces: readonly Surface<Root, any, any, any>[]
-  } => {
-    const seen = new Set<string>()
-    for (const surface of surfaces) {
-      if (seen.has(surface.name)) {
-        throw new Error(`Duplicate Surface name: ${surface.name}`)
-      }
-      seen.add(surface.name)
+  contract: <Root, Model, Message, Params>(
+    surface: Surface<Root, Model, Message, Params>,
+    params: Params,
+  ): Contract => {
+    const projection = surface.projection(params)
+    return {
+      kind: 'surface',
+      name: surface.name,
+      owner: surface.owner,
+      owns: [],
+      observes: projection.dependencies,
+      messages: surface.messages.map(messageTag).filter((tag): tag is string => tag !== undefined),
+      requirements: projection.requirements,
     }
-    return { app, surfaces }
   },
 
   /**
@@ -1072,3 +1064,281 @@ export const Surface = {
 // ===========================================================================
 // Entity, Selection, Remote moved to `foldkit-remote` (Phase 3).
 // ===========================================================================
+
+// ===========================================================================
+// Module: the pure composition root
+// ===========================================================================
+
+/**
+ * What one contract claims about an application, as data. Sync, Remote, and
+ * Agent attach one to the values they produce; `Surface.contract` derives one
+ * from a Surface. `owns` are the Model paths the contract is the authority for
+ * (a replicated projection, a remote store); `observes` are the paths it reads.
+ */
+export interface Contract {
+  readonly kind: string
+  readonly name: string
+  /** The application's identity token; absent when the value cannot know it. */
+  readonly owner?: object | undefined
+  readonly owns: DependencyTree
+  readonly observes: DependencyTree
+  /** Message tags the contract may cause, expose, or record. */
+  readonly messages: readonly string[]
+  readonly requirements: readonly Requirement[]
+}
+
+/** Contracts of one application, in declaration order. Data, not a runtime. */
+export interface Module<
+  Root,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+> {
+  readonly app: AppScope<Root, F, Cases>
+  readonly contracts: readonly Contract[]
+}
+
+export interface Finding {
+  readonly rule:
+    | 'foreign-contract'
+    | 'duplicate-name'
+    | 'ownership-overlap'
+    | 'message-claimed-twice'
+    | 'unknown-path'
+    | 'unknown-message'
+  /** `kind:name` of each contract involved. */
+  readonly contracts: readonly string[]
+  readonly message: string
+}
+
+/** Who owns a Model path; `undefined` is local state. */
+export interface Ownership {
+  readonly path: readonly string[]
+  readonly owner: { readonly kind: string; readonly name: string } | undefined
+}
+
+export interface ModuleManifest {
+  readonly fields: readonly string[]
+  readonly messages: readonly string[]
+  readonly ownership: readonly Ownership[]
+  readonly contracts: readonly Omit<Contract, 'owner'>[]
+  readonly findings: readonly Finding[]
+}
+
+/** A value `Module.make` accepts: a contract, a value carrying one, or a Surface without params. */
+export type ModuleItem<Root> =
+  Contract | { readonly contract: Contract } | Surface<Root, any, any, void>
+
+const label = (contract: Contract): string => `${contract.kind}:${contract.name}`
+const pathKey = (path: readonly string[]): string => path.join('.')
+const isPrefix = (prefix: readonly string[], path: readonly string[]): boolean =>
+  prefix.length <= path.length && prefix.every((segment, index) => segment === path[index])
+
+// A carried contract wins: a sync contract also has a `projection` (writable, not a function).
+const toContract = <Root>(item: ModuleItem<Root>): Contract =>
+  'contract' in item
+    ? item.contract
+    : 'projection' in item
+      ? Surface.contract(item, undefined)
+      : item
+
+const applicationTags = (app: AppScope<any, any, any>): readonly string[] =>
+  Object.entries(app.Message as unknown as Record<string, unknown>)
+    .filter(([key, value]) => messageTag(value) === key)
+    .map(([key]) => key)
+
+/** Contracts that own at least one path, with a stable label. */
+const owners = (module: Module<any, any, any>) =>
+  module.contracts.filter(contract => contract.owns.length > 0)
+
+/**
+ * Collects an application's contracts as pure data so their relationships can
+ * be validated and inspected without starting a runtime.
+ *
+ * ```ts
+ * const Project = Module.make(App, [BoardSurface, ProjectSync, ProjectRemote, ProjectAgent])
+ * Module.validate(Project) // findings, or []
+ * Module.toMarkdown(Project)
+ * ```
+ */
+export const Module = {
+  make: <Root, F extends Schema.Struct.Fields, Cases extends Record<string, Schema.Struct.Fields>>(
+    app: AppScope<Root, F, Cases>,
+    items: readonly ModuleItem<Root>[] = [],
+  ): Module<Root, F, Cases> => ({ app, contracts: items.map(toContract) }),
+
+  /** A new Module with more contracts; the input is unchanged. */
+  add: <Root, F extends Schema.Struct.Fields, Cases extends Record<string, Schema.Struct.Fields>>(
+    module: Module<Root, F, Cases>,
+    ...items: readonly ModuleItem<Root>[]
+  ): Module<Root, F, Cases> => ({
+    app: module.app,
+    contracts: [...module.contracts, ...items.map(toContract)],
+  }),
+
+  /**
+   * Cross-contract invariants the types cannot express: a contract from another
+   * application, a duplicate `kind:name`, two owners of overlapping Model paths,
+   * a Message recorded by two replication contracts, and a path or Message the
+   * application does not declare.
+   */
+  validate: (module: Module<any, any, any>): readonly Finding[] => {
+    const findings: Finding[] = []
+    const fields = new Set(Object.keys(module.app.Model.fields))
+    const tags = new Set(applicationTags(module.app))
+    const seen = new Map<string, Contract>()
+
+    for (const contract of module.contracts) {
+      const name = label(contract)
+      if (contract.owner !== undefined && contract.owner !== module.app.owner)
+        findings.push({
+          rule: 'foreign-contract',
+          contracts: [name],
+          message: `${name} belongs to a different application`,
+        })
+      const duplicate = seen.get(name)
+      if (duplicate !== undefined && duplicate !== contract)
+        findings.push({
+          rule: 'duplicate-name',
+          contracts: [name],
+          message: `${name} is declared twice`,
+        })
+      seen.set(name, contract)
+      for (const path of [...contract.owns, ...contract.observes]) {
+        const head = path[0]
+        if (head === undefined || !fields.has(head))
+          findings.push({
+            rule: 'unknown-path',
+            contracts: [name],
+            message: `${name} references "${pathKey(path)}", which is not a Model field`,
+          })
+      }
+      for (const tag of contract.messages)
+        if (!tags.has(tag))
+          findings.push({
+            rule: 'unknown-message',
+            contracts: [name],
+            message: `${name} names "${tag}", which is not a Message of this application`,
+          })
+    }
+
+    // The same value listed twice is one owner, as `duplicate-name` treats it.
+    const owning = [...new Set(owners(module))]
+    for (let i = 0; i < owning.length; i += 1)
+      for (let j = i + 1; j < owning.length; j += 1) {
+        const a = owning[i]!
+        const b = owning[j]!
+        for (const pa of a.owns)
+          for (const pb of b.owns)
+            // An empty path is reported as `unknown-path`, not as owning everything.
+            if (pa.length > 0 && pb.length > 0 && (isPrefix(pa, pb) || isPrefix(pb, pa)))
+              findings.push({
+                rule: 'ownership-overlap',
+                contracts: [label(a), label(b)],
+                message: `${label(a)} owns "${pathKey(pa)}" and ${label(b)} owns "${pathKey(pb)}"`,
+              })
+      }
+
+    const recorded = new Map<string, Contract>()
+    for (const contract of module.contracts.filter(contract => contract.kind === 'sync'))
+      for (const tag of contract.messages) {
+        const other = recorded.get(tag)
+        if (other !== undefined && other !== contract)
+          findings.push({
+            rule: 'message-claimed-twice',
+            contracts: [label(other), label(contract)],
+            message: `"${tag}" is durable in both ${label(other)} and ${label(contract)}`,
+          })
+        else recorded.set(tag, contract)
+      }
+
+    return findings
+  },
+
+  /**
+   * The application's fields and Messages, who owns each Model path (local when
+   * no contract does), every contract, and the findings. Reproducible for a
+   * given Module, so it can be committed and diffed.
+   */
+  manifest: (module: Module<any, any, any>): ModuleManifest => {
+    const ownership: Ownership[] = []
+    const owning = owners(module)
+    for (const field of Object.keys(module.app.Model.fields)) {
+      const claims = owning.flatMap(contract =>
+        contract.owns
+          .filter(path => path[0] === field)
+          .map(path => ({ path, owner: { kind: contract.kind, name: contract.name } })),
+      )
+      const whole = claims.find(claim => claim.path.length === 1)
+      if (whole !== undefined) ownership.push(whole)
+      else {
+        ownership.push({ path: [field], owner: undefined })
+        ownership.push(...claims.sort((a, b) => pathKey(a.path).localeCompare(pathKey(b.path))))
+      }
+    }
+    return {
+      fields: Object.keys(module.app.Model.fields),
+      messages: applicationTags(module.app),
+      ownership,
+      contracts: module.contracts.map(({ owner: _owner, ...rest }) => rest),
+      findings: Module.validate(module),
+    }
+  },
+
+  /** The manifest as Markdown: the ownership tree, a table of contracts, and findings. */
+  toMarkdown: (module: Module<any, any, any>): string => {
+    const manifest = Module.manifest(module)
+    const lines: string[] = ['```text', 'Model']
+    const width = Math.max(0, ...manifest.ownership.map(row => pathKey(row.path).length))
+    manifest.ownership.forEach((row, index) => {
+      const last = index === manifest.ownership.length - 1
+      const owner =
+        row.owner === undefined ? 'LOCAL' : `${row.owner.kind.toUpperCase()} ${row.owner.name}`
+      lines.push(`${last ? '└── ' : '├── '}${pathKey(row.path).padEnd(width)}  ${owner}`)
+    })
+    lines.push(
+      '```',
+      '',
+      '| Contract | Owns | Observes | Messages | Requirements |',
+      '| --- | --- | --- | --- | --- |',
+    )
+    for (const contract of manifest.contracts)
+      lines.push(
+        `| ${contract.kind}:${contract.name} | ${contract.owns.map(pathKey).join(', ')} | ${contract.observes.map(pathKey).join(', ')} | ${contract.messages.join(', ')} | ${contract.requirements.map(r => `${r.entity}:${r.id}`).join(', ')} |`,
+      )
+    if (manifest.findings.length > 0) {
+      lines.push('', '## Findings', '')
+      for (const finding of manifest.findings)
+        lines.push(`- **${finding.rule}** ${finding.message}`)
+    }
+    return lines.join('\n')
+  },
+
+  /**
+   * The manifest as a Mermaid flowchart: Model fields in a subgraph, one node
+   * per contract, a solid edge for ownership and a dotted edge for observation.
+   */
+  toMermaid: (module: Module<any, any, any>): string => {
+    const manifest = Module.manifest(module)
+    const lines = ['flowchart LR', '  subgraph Model']
+    manifest.fields.forEach((field, index) => lines.push(`    f${index}["${field}"]`))
+    lines.push('  end')
+    // A path outside the Model (reported by `validate`) draws no edge.
+    const fieldId = (path: readonly string[]): string | undefined => {
+      const index = path.length === 0 ? -1 : manifest.fields.indexOf(path[0]!)
+      return index < 0 ? undefined : `f${index}`
+    }
+    manifest.contracts.forEach((contract, index) => {
+      lines.push(`  c${index}["${contract.kind}:${contract.name}"]`)
+      for (const path of contract.owns) {
+        const field = fieldId(path)
+        if (field !== undefined) lines.push(`  c${index} -->|owns| ${field}`)
+      }
+      for (const path of contract.observes) {
+        const field = fieldId(path)
+        if (field !== undefined && !contract.owns.some(owned => pathKey(owned) === pathKey(path)))
+          lines.push(`  c${index} -.-> ${field}`)
+      }
+    })
+    return lines.join('\n')
+  },
+}

@@ -39,7 +39,7 @@ const update = (model: typeof Model.Type, message: typeof Message.Type) => {
 }
 
 // A runnable application carries `initial` and `update`, so a replicator can
-// derive the shared value and replay. `Surface.make` omits them.
+// derive the shared value and replay; both are optional.
 const App = Surface.application({
   Model,
   Message,
@@ -47,9 +47,9 @@ const App = Surface.application({
   update,
 })
 
-const Todos = Surface.pick(App.fields.todos)
+const Todos = Projection.pick(App.fields.todos)
 
-const TodoList = Surface.define(App, 'TodoList', {
+const TodoList = Surface.make(App, 'TodoList', {
   model: ({ model }) =>
     Projection.struct({
       todos: model.todos,
@@ -76,16 +76,16 @@ App.fields.todos.index(0)        // OptionalRef<Model, Option<Todo>> (dynamic in
 Struct fields recurse, so a nested reference such as `App.fields.todo.title` is a
 `FieldRef`. Array and record access is `.index(i)` / `.at(key)`, which returns an
 `OptionalRef` — a `ModelRef` with an `Option` value. Those are dynamic selections,
-so `Surface.pick` (which needs a static field name) rejects them; they are useful
+so `Projection.pick` (which needs a static field name) rejects them; they are useful
 inside a `Projection`.
 
 `App.model` is the same tree under its older name; prefer `App.fields`.
 
-`Surface.pick` turns references into a writable projection — a `Schema.Struct`,
+`Projection.pick` turns references into a writable projection — a `Schema.Struct`,
 `get`, and `set`:
 
 ```ts
-const Shared = Surface.pick(App.fields.todos, App.fields.selectedTodoId)
+const Shared = Projection.pick(App.fields.todos, App.fields.selectedTodoId)
 // { schema, dependencies, get, set }
 ```
 
@@ -93,7 +93,7 @@ A reference from a different application is rejected by a per-application owner
 token, so two structurally identical Models cannot be mixed. Duplicate members
 deduplicate; a conflicting definition throws.
 
-`Surface.compose` merges disjoint writable projections, keeping each part's own
+`Projection.compose` merges disjoint writable projections, keeping each part's own
 write behavior. `ModelRef.fromOptic` builds a reference from an optic you already
 have.
 
@@ -117,7 +117,7 @@ contributes its dependencies and requirements to the parent.
 
 ## Applications
 
-`Surface.make({ Model, Message })` captures the pure references (`App.model`,
+`Surface.application({ Model, Message })` captures the pure references (`App.model`,
 `App.Model`, `App.Message`, `App.owner`) with no transition. Use it when a
 consumer needs only the reference tree.
 
@@ -131,9 +131,9 @@ A subset selects typed variants of one application's Message union by constructo
 reference:
 
 ```ts
-const TodoChanges = Surface.messages(App, [Message.CreatedTodo, Message.ToggledTodo])
-const SelectionChanges = Surface.messages(App, [Message.SelectedTodo])
-const AllChanges = Surface.unionMessages(TodoChanges, SelectionChanges)
+const TodoChanges = MessageSet.make(App, [Message.CreatedTodo, Message.ToggledTodo])
+const SelectionChanges = MessageSet.make(App, [Message.SelectedTodo])
+const AllChanges = MessageSet.union(TodoChanges, SelectionChanges)
 ```
 
 A subset carries the constructors, a pure codec for exactly those variants, a
@@ -144,11 +144,11 @@ Surface does not label a subset durable, agent-visible, or presence; `Sync` and
 
 ## Surfaces
 
-`Surface.define(app, name, { Params?, model, messages? })` binds a projection and
+`Surface.make(app, name, { Params?, model, messages? })` binds a projection and
 the Messages a feature may use into a named, inspectable contract.
 
 ```ts
-const TodoDetail = Surface.define(App, 'TodoDetail', {
+const TodoDetail = Surface.make(App, 'TodoDetail', {
   model: ({ model }) =>
     Projection.struct({
       todos: model.todos,
@@ -158,7 +158,7 @@ const TodoDetail = Surface.define(App, 'TodoDetail', {
 })
 
 // A parameterized Surface may read `params`; dynamic lookups are OptionalRefs.
-const ById = Surface.define(App, 'ById', {
+const ById = Surface.make(App, 'ById', {
   Params: Schema.Struct({ id: Schema.String }),
   model: ({ model, params }) =>
     Projection.struct({ todo: model.todosById.at(params.id) }),
@@ -170,17 +170,49 @@ Surface.view(TodoDetail, render)                   // bind a renderer
 Surface.rootView(TodoDetail, undefined, render)    // bound to the app root
 ```
 
-`Surface.define` does not evaluate `projection(undefined)` for a parameterized
+`Surface.make` does not evaluate `projection(undefined)` for a parameterized
 Surface, because the projection may read `params`.
+
+## Modules
+
+A `Module` collects an application's contracts as pure data, so their
+relationships can be validated and inspected without starting a runtime. Sync,
+Remote, and Agent contracts carry a `contract` description; a Surface is
+described in place (`Surface.contract(surface, params)` for a parameterized one).
+
+```ts
+import { Module } from 'foldkit-surface'
+
+const Project = Module.make(App, [BoardSurface, ProjectSync, ProjectRemote, ProjectAgent])
+
+Module.validate(Project) // [] or findings
+Module.manifest(Project) // fields, Messages, who owns each Model path, contracts
+Module.toMarkdown(Project)
+Module.toMermaid(Project)
+```
+
+```text
+Model
+├── route           LOCAL
+├── selectedNoteId  LOCAL
+├── notes           SYNC notes
+└── remote          REMOTE remote
+```
+
+`validate` reports what the types cannot: a contract from another application,
+a duplicate `kind:name`, two owners of overlapping Model paths, a Message
+recorded by two replication contracts, and a path or Message the application
+does not declare. `Module.add(module, ...more)` returns a new Module, so feature
+modules can contribute their contracts independently.
 
 ## What it owns
 
-- Reference-based Model selection (`App.fields`, `Surface.pick`,
-  `Surface.compose`).
+- Reference-based Model selection (`App.fields`, `Projection.pick`,
+  `Projection.compose`).
 - Pure `Projection` values with their codec, reader, dependencies, and remote
   requirements.
 - Application scopes (`make` / `application`) and their identity token.
-- Typed Message subsets (`Surface.messages`, `Surface.unionMessages`).
+- Typed Message subsets (`MessageSet.make`, `MessageSet.union`).
 - Named Surfaces and their renderer binding.
 
 ## Limits

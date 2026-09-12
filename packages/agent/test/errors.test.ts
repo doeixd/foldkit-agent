@@ -5,7 +5,7 @@ import { type Message, type Model, Message as MessageUnion, emptyModel } from '.
 
 const TodoAgent = Agent.forModel<Model>()
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   messages: TodoAgent.expose(MessageUnion, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {

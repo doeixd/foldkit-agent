@@ -18,7 +18,7 @@ interface Model {
 
 const TodoAgent = Agent.forModel<Model, Record<string, never>>()
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   context: Projection.of(Schema.Struct({ todos: Schema.Array(Schema.String) }))({ todos: true }),
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },

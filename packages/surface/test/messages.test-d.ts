@@ -1,12 +1,12 @@
 /**
- * `Surface.messages` inference contract. Type-checked but not executed.
+ * `MessageSet.make` inference contract. Type-checked but not executed.
  */
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
-import { Surface } from '../src/index.js'
+import { MessageSet, Surface } from '../src/index.js'
 import { App, Message } from './todoFixture.js'
 
-const Changes = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
+const Changes = MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo])
 type Change = Schema.Schema.Type<typeof Changes.schema>
 
 // `includes` narrows to exactly the subset, so this switch is exhaustive.
@@ -21,13 +21,13 @@ const describe = (message: Change): string => {
 void describe
 
 const OtherMessage = defineMessageUnion({ Ping: {} })
-const Other = Surface.make({ Model: App.Model, Message: OtherMessage })
+const Other = Surface.application({ Model: App.Model, Message: OtherMessage })
 // @ts-expect-error `Ping` is not a variant of App's Message union
-Surface.messages(App, [Other.Message.Ping])
+MessageSet.make(App, [Other.Message.Ping])
 
-const All = Surface.unionMessages(
-  Surface.messages(App, [Message.CreatedTodo]),
-  Surface.messages(App, [Message.RenamedTodo]),
+const All = MessageSet.union(
+  MessageSet.make(App, [Message.CreatedTodo]),
+  MessageSet.make(App, [Message.RenamedTodo]),
 )
 // A union of disjoint subsets still narrows exactly.
 const describeAll = (message: Schema.Schema.Type<typeof All.schema>): string => {
@@ -45,8 +45,8 @@ type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 
 const Transforming = defineMessageUnion({ Set: { value: Schema.NumberFromString } })
-const TransformingApp = Surface.make({ Model: App.Model, Message: Transforming })
-const SetOnly = Surface.messages(TransformingApp, [Transforming.Set])
+const TransformingApp = Surface.application({ Model: App.Model, Message: Transforming })
+const SetOnly = MessageSet.make(TransformingApp, [Transforming.Set])
 const _encoded: Equal<
   (typeof SetOnly.schema)['Encoded'],
   { readonly _tag: 'Set'; readonly value: string }

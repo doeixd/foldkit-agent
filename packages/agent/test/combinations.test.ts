@@ -48,7 +48,7 @@ const failureOf = <A, E>(effect: Effect.Effect<A, E>): { readonly _tag: string }
 
 describe('available + authorize', () => {
   /** One capability guarded by both, so precedence between them is observable. */
-  const definition = TodoAgent.define({
+  const definition = TodoAgent.make({
     messages: TodoAgent.expose(MessageUnion, {
       RequestedDeleteTodo: {
         name: 'delete_todo',
@@ -104,7 +104,7 @@ describe('input mapping + authorize', () => {
    */
   const seen: Array<unknown> = []
 
-  const definition = TodoAgent.define({
+  const definition = TodoAgent.make({
     messages: TodoAgent.expose(MessageUnion, {
       RequestedRenameTodo: {
         name: 'rename_todo',
@@ -152,7 +152,7 @@ describe('input mapping + authorize', () => {
 })
 
 describe('input mapping + available + introspection', () => {
-  const definition = TodoAgent.define({
+  const definition = TodoAgent.make({
     context: Projection.fromReader(Schema.Struct({ todos: Schema.Array(Todo) }), model => ({
       todos: model.todos,
     })),
@@ -213,7 +213,7 @@ describe('input mapping + available + introspection', () => {
 
 describe('two runtimes over one definition', () => {
   /** Adapters bind independently; one binding must not observe another's host. */
-  const definition = TodoAgent.define({
+  const definition = TodoAgent.make({
     messages: TodoAgent.expose(MessageUnion, {
       RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
       RequestedDeleteTodo: {
@@ -260,7 +260,7 @@ describe('two runtimes over one definition', () => {
 
 describe('the whole contract', () => {
   it('describes messages, resources, and context in one value', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       context: Projection.fromReader(
         Schema.Struct({ selectedTodoId: Schema.Option(Schema.String) }),
         model => ({ selectedTodoId: model.selectedTodoId }),

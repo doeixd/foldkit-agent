@@ -1,11 +1,11 @@
-import { Surface } from 'foldkit-surface'
+import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import { documentId, forApplication, type Sync as SyncContract } from 'foldkit-sync'
 import { Message, Model, initialModel, update, type Shared } from './app.js'
 
 const App = Surface.application({ Model, Message, initial: initialModel, update })
 
-const Todos = Surface.pick(App.fields.todos)
-const TodoChanges = Surface.messages(App, [
+const Todos = Projection.pick(App.fields.todos)
+const TodoChanges = MessageSet.make(App, [
   Message.CreatedTodo,
   Message.RenamedTodo,
   Message.DeletedTodo,
@@ -20,7 +20,7 @@ const TodoChanges = Surface.messages(App, [
  * declarations: the inferred type contains `Schema.Schema.Type<MessageUnion<...>>`,
  * which expands a Foldkit-private alias that declaration emit cannot name.
  */
-export const Sync: SyncContract<Message, Shared> = forApplication(App, {
+export const Sync: SyncContract<Message, Shared> = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   durable: TodoChanges,

@@ -21,7 +21,7 @@ interface Model {
 
 const TodoAgent = Agent.forModel<Model>()
 
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: 'Create a todo',
     RequestedDeleteTodo: {

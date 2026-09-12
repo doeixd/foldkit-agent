@@ -6,7 +6,7 @@ import { type Model, Message as MessageUnion, Model as ModelSchema, Todo } from 
 
 const TodoAgent = Agent.forModel<Model>()
 
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   context: Projection.of(ModelSchema)({ todos: true }),
   messages: TodoAgent.expose(MessageUnion, {
     RequestedCreateTodo: 'Create a new todo',
@@ -92,14 +92,14 @@ describe('Agent.toManifest', () => {
   })
 
   it('handles a contract with no capabilities, resources, or context', () => {
-    const empty = Agent.define({ messages: Agent.expose(MessageUnion, {}) })
+    const empty = Agent.make({ messages: Agent.expose(MessageUnion, {}) })
 
     expect(Agent.toManifest(empty)).toEqual({ capabilities: [], resources: [] })
     expect(Agent.toManifest(empty)).not.toHaveProperty('context')
   })
 
   it('omits context when the contract projects none', () => {
-    const contextless = TodoAgent.define({
+    const contextless = TodoAgent.make({
       messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create' }),
     })
 
@@ -145,13 +145,13 @@ describe('Agent.toMarkdown', () => {
     const awkward = Agent.expose(MessageUnion, {
       RequestedCreateTodo: 'Create | delete a todo',
     })
-    const rendered = Agent.toMarkdown(Agent.define({ messages: awkward }))
+    const rendered = Agent.toMarkdown(Agent.make({ messages: awkward }))
 
     expect(rendered).toContain('Create \\| delete a todo')
   })
 
   it('says so plainly when there is nothing to document', () => {
-    const empty = Agent.define({ messages: Agent.expose(MessageUnion, {}) })
+    const empty = Agent.make({ messages: Agent.expose(MessageUnion, {}) })
     const rendered = Agent.toMarkdown(empty)
 
     expect(rendered).toContain('This contract exposes no capabilities.')

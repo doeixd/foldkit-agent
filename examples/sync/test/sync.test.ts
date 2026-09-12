@@ -16,7 +16,7 @@ import {
   type Storage,
 } from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Message, replay, update, type Shared } from '../src/app.js'
+import { Message, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { serverAgentHost } from '../src/serverAgent.js'
 import { closeStorages, openReplica, openStorage, type PromiseReplica } from './helpers.js'
@@ -527,35 +527,6 @@ describe('the wired replica', () => {
   })
 })
 
-describe('replay safety', () => {
-  it('refuses Commands without executing them', () => {
-    let ran = false
-    expect(() =>
-      replay({ todos: [] }, created('a'), (model, message) => ({
-        ...update(model, message),
-        commands: [
-          {
-            name: 'ExternalEffect',
-            effect: Effect.sync(() => {
-              ran = true
-              return message
-            }),
-          },
-        ],
-      })),
-    ).toThrow('must not produce Commands')
-    expect(ran).toBe(false)
-  })
-
-  it('refuses durable updates that modify local Model fields', () => {
-    expect(() =>
-      replay({ todos: [] }, created('a'), (model, message) => ({
-        model: { ...update(model, message).model, selectedTodoId: 'a' },
-      })),
-    ).toThrow('local Model fields')
-  })
-})
-
 describe('a server agent', () => {
   const SyncAgent = Agent.forModel<Shared, Principal>()
   const rename = { name: 'rename_todo', description: 'Rename a shared todo' } as const
@@ -563,7 +534,7 @@ describe('a server agent', () => {
   it('commits a dispatch as an operation a replica converges on', async () => {
     server.append(operation('seed', 1, created('a')), principal)
     const agent = Agent.bind({
-      definition: SyncAgent.define({
+      definition: SyncAgent.make({
         messages: SyncAgent.expose(Message, { RenamedTodo: rename }),
       }),
       host: serverAgentHost({ journal: server, principal }),
@@ -585,7 +556,7 @@ describe('a server agent', () => {
 
   it('refuses a capability the principal may not invoke, appending nothing', async () => {
     const agent = Agent.bind({
-      definition: SyncAgent.define({
+      definition: SyncAgent.make({
         messages: SyncAgent.expose(Message, {
           RenamedTodo: {
             ...rename,
@@ -645,7 +616,7 @@ describe('a server agent', () => {
     try {
       guarded.appendAsServer(created('a'), principal, 'seed')
       const agent = Agent.bind({
-        definition: SyncAgent.define({
+        definition: SyncAgent.make({
           messages: SyncAgent.expose(Message, { RenamedTodo: rename }),
         }),
         host: serverAgentHost({ journal: guarded, principal }),

@@ -20,9 +20,9 @@ export const Message = defineMessageUnion({
   Reset: {},
   ChangedLabel: { text: Schema.String },
 })
-export const App = Surface.make({ Model, Message })
+export const App = Surface.application({ Model, Message })
 
-export const Panel = Surface.define(App, 'Panel', {
+export const Panel = Surface.make(App, 'Panel', {
   model: ({ model }) => Projection.struct({ count: model.counter.count }),
   messages: [Message.Incremented, Message.Reset],
 })

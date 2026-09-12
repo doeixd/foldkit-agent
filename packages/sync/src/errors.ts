@@ -111,8 +111,18 @@ export class UnsupportedReplicaVersionError extends Schema.TaggedError<Unsupport
   },
 ) {}
 
+/**
+ * `replay` threw for a submitted Message, so it could never be applied here or
+ * on any other replica; nothing was written.
+ */
+export class ReplayError extends Schema.TaggedError<ReplayError>()('ReplayError', {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown),
+}) {}
+
 export type ReplicaError =
   | StorageError
+  | ReplayError
   | WrongReplicaStorageError
   | InvalidReplicaHistoryError
   | InvalidExchangeError

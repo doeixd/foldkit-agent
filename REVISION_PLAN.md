@@ -118,9 +118,9 @@ pnpm bench           # sync bench + durable storage script (not a gate)
 | `Agent.context({ schema, select })` | `packages/agent` | Surface `Projection` |
 | `Agent.pick(Model, [keys])` | `packages/agent` | `App.model.key…` ModelRefs |
 | `Agent.resource({ schema, read })` | `packages/agent` | `Agent.resource({ projection })` |
-| `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Sync.project` |
+| `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Projection.pick` |
 | `pick(Model, [keys])` | `packages/sync` (added recently) | Superseded by Surface `pick`/`ModelRef` |
-| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.make` compiles to it |
+| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.forApplication(App).make` compiles to it |
 | `examples/sync/src/runtime.ts` mount wrapper | example | Generalized under a `Sync.mount`/`Sync.browser` adapter (needs a decision, §10.6) |
 
 ---
@@ -370,17 +370,17 @@ the value bar in §8.14.
 ### 4.4 One shared application scope
 
 ```ts
-export const App = Surface.make({ Model, Message })
+export const App = Surface.application({ Model, Message })
 ```
 
-`Surface.make` is descriptive only (it does not create a Runtime). It provides
+`Surface.application` is descriptive only (it does not create a Runtime). It provides
 `App.Model`, `App.Message`, and `App.model` (the typed root `ModelRef`). Everything
 is scoped to it:
 
 ```ts
-const ProjectPage = Surface.define(App, "ProjectPage", { ... })
-const TodoAgent   = Agent.define(App, "TodoAgent", { ... })
-const TodoSync    = Sync.make(App, "TodoSync", { ... })
+const ProjectPage = Surface.make(App, "ProjectPage", { ... })
+const TodoAgent   = Agent.make(App, "TodoAgent", { ... })
+const TodoSync    = Sync.forApplication(App).make({ ... })
 const Data        = Remote.make({ entities: [...], queries: [...], mutations: [...] })
 ```
 
@@ -543,7 +543,7 @@ descriptor. A parameterized projection may read `params`, so evaluating it eager
 with `undefined` is invalid; they are derived on demand via `projection(params)`.
 
 ```ts
-const ProjectCard = Surface.define(App, "ProjectCard", {
+const ProjectCard = Surface.make(App, "ProjectCard", {
   Params: Schema.Struct({ projectId: ProjectId }),
   model: ({ model, params }) =>
     Projection.struct({
@@ -566,7 +566,7 @@ const ProjectCard = Surface.define(App, "ProjectCard", {
 - `Surface.embed(childRenderer)` composes a child: `ParentModel extends ChildModel`
   enforces "child Model requirement ⊆ parent projected Model" and `Subset`
   enforces "child Message set ⊆ parent Message set".
-- `Surface.registry(App, [surfaces])` is explicit (no hidden global registry).
+- `Module.make(App, [contracts])` is explicit (no hidden global registry).
 
 `HtmlBuilder` is invariant, so a superset builder cannot be *structurally*
 narrowed; `view`/`embed`/`rootView` cast soundly, and the subset checks are what
@@ -607,7 +607,7 @@ gaining the other's authority.
   renderer and uses a sound cast internally; a Foldkit core seam is the durable
   alternative (§15 Phase 0 results).
 - A child whose projected Model is a strict subset of what the child `model`
-  callback reads: the `Surface.define` callback receives the **root** Model and
+  callback reads: the `Surface.make` callback receives the **root** Model and
   returns a Projection, so the callback itself may read anything; the *view* is
   narrowed. Do not confuse the two.
 
@@ -822,7 +822,7 @@ const Data = Remote.make({
 // Data.Model, Data.Message, Data.update, Data.initial, Data.rpc
 
 const Model = Schema.Struct({ route: Route, session: Session, remote: Data.Model })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 const AppRemote = pipe(Data, Remote.at(App.model.remote))
 ```
 
@@ -1472,7 +1472,7 @@ authorization, principal, completion, audit, cancellation). Surface only supplie
 the Model projection and Message subset.
 
 ```ts
-const AppAgent = Agent.define(App, "TodoAgent", {
+const AppAgent = Agent.make(App, "TodoAgent", {
   model: ({ model }) =>
     Projection.struct({ todos: model.todos, selectedTodoId: model.selectedTodoId }),
   capabilities: [
@@ -1521,23 +1521,24 @@ Sync keeps the offline replica, replay, reconciliation, and presence. It stops
 hand-rolling a projection.
 
 ```ts
-const TodoSync = Sync.make(App, "Todos", {
+const TodoSync = Sync.forApplication(App).make({
   documentId: documentId("todos"),
-  model: Sync.project({ todos: App.model.todos }),  // writable projection from ModelRefs
-  messages: [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo],
-  replay: updateShared,
+  shared: Projection.pick(App.fields.todos),  // writable projection from ModelRefs
+  durable: MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo]),
+  // replay is derived from `update`; pass `replay` to override it
 })
 // TodoSync.surface : observes/writes Model.todos, accepts those Messages
 ```
 
 ### 10.1 Invariants
 
-- `Sync.project({...})` is a **writable** projection derived from `ModelRef`s
+- `Projection.pick(...)` is a **writable** projection derived from `ModelRef`s
   (`ModelRef` carries `get`/`set` internally). Surface projections stay read-only
   publicly; only Sync regains write authority.
 - `replay` is inferred against the declared Message subset, not the whole union.
 - The low-level `defineSync({ message, shared, empty, durable, replay })` remains the
-  protocol primitive and escape hatch; `Sync.make` compiles down to it.
+  protocol primitive and escape hatch; `Sync.forApplication(App).make` compiles
+  down to it.
 - `foldkit-durable` stays independent; Sync produces the replay contract via
   `TodoSync.journalContract()` → `{ operation:{encode,decode},
   snapshot:{encode,decode}, empty, reduce }`.
@@ -1590,23 +1591,22 @@ const Message = defineMessageUnion({
   SelectedTodo: { id: TodoId },
 })
 
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 
-const TodoList = Surface.define(App, "TodoList", {
+const TodoList = Surface.make(App, "TodoList", {
   model: ({ model }) => Projection.struct({ todos: model.todos, selection: model.selectedTodoId }),
   messages: [Message.CreatedTodo, Message.RenamedTodo],
 })
 
-const TodoAgent = Agent.define(App, "TodoAgent", {
+const TodoAgent = Agent.make(App, "TodoAgent", {
   model: ({ model }) => Projection.struct({ todos: model.todos }),
   capabilities: [Agent.capability(Message.CreatedTodo, { description: "Create a todo" })],
 })
 
-const TodoSync = Sync.make(App, "TodoSync", {
+const TodoSync = Sync.forApplication(App).make({
   documentId: documentId("todos"),
-  model: Sync.project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo, Message.RenamedTodo],
-  replay: updateShared,
+  shared: Projection.pick(App.fields.todos),
+  durable: MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo]),
 })
 
 const journal = yield* makeJournal({
@@ -1658,7 +1658,7 @@ const journal = yield* makeJournal({
 | Dependency merge | `struct`/`array`/`option`/`select` union and de-duplicate; result is order-independent | Masking, DevTools, and invalidation read one canonical set. |
 | `ModelRef.select` on an optional focus | Maps inside `Option`, preserving absence (`Projection<Root, Option<P>>`) | No silent collapse of `Option<Option<A>>`. |
 | `Projection.array`/`option` | Wrap the whole value (`ReadonlyArray<Root>→ReadonlyArray<Value>`, `Option<Root>→Option<Value>`) | Avoids accidental double-wrap; nesting stays explicit. |
-| `Surface.registry` | Explicit descriptor; throws on a duplicate `name` | No hidden global registry; fail fast. |
+| `Module` | Explicit collection of contracts; `validate` reports a duplicate `kind:name`, overlapping owners, and a foreign contract | No hidden global registry; the architecture is data. |
 | Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; a Struct field with one of these names throws when the tree is built | A field must not silently shadow a method. |
 | Surface rendering | Renderers are Model-consuming; `rootView` is the Root boundary; `embed` composes with Model and Message subset checks | A parent has its projected Model, not Root, so children must read from it structurally. |
 | Surface descriptor | No eager `Model`/`dependencies`; derive via `projection(params)` | A parameterized projection reads `params`, so eager evaluation with `undefined` is invalid. |
@@ -1865,7 +1865,7 @@ Build a scratch module plus `*.test-d.ts` proving:
    optic and dependency path; `.at(key)` is optional; `.index(i)` works.
 2. `Projection.of(Schema)({...})` checks nested projections and rejects bad keys;
    `Projection.struct(...)` infers the combined value and unions dependencies.
-3. `Surface.define`/`Surface.view` narrow the projected Model and the
+3. `Surface.make`/`Surface.view` narrow the projected Model and the
    `HtmlBuilder` Message set; a child view composes into a parent whose Message set
    is a superset; an undeclared Message does not compile.
 4. `Remote.make({entities}).Model` embeds as a Submodel without widening to `any`;
@@ -2061,11 +2061,13 @@ why here.
 
 ### Phase 15 — Tooling
 
-`Surface.registry`, DevTools Surface inspection, dependency/capability display,
-optional development MCP exposure. No behavior changes.
+`Module` (manifest, validation, Markdown), DevTools Surface inspection,
+dependency/capability display, optional development MCP exposure. No behavior
+changes.
 
-**Acceptance:** DevTools shows observes/emits for a registered Surface; duplicate
-names are rejected; production exposure remains separately opt-in.
+**Acceptance:** `Module.manifest` shows ownership and observes/emits for every
+contract; duplicate names and overlapping owners are reported; production
+exposure remains separately opt-in.
 
 ---
 
@@ -2192,23 +2194,33 @@ now uses both, replacing its hand-written replica and journal contracts
 (`717a28e`); the Foldkit runtime-binding gap and the proposed upstream hook are
 documented in `docs/sync-runtime-binding.md` (`fdd9789`, with the concrete
 admission-hook proposal in `c3d6c91`); the reference-based
-selection from `packages/agent/DESIGN.md` started as `Surface.pick` over keyed,
+selection from `packages/agent/DESIGN.md` started as `Projection.pick` over keyed,
 owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
-landed next (`8daf52b`); typed Message subsets landed as `Surface.messages`
+landed next (`8daf52b`); typed Message subsets landed as `MessageSet.make`
 (`fbf5368`); the derivation landed as `Sync.forApplication` (`f779fc9`);
-`Surface.compose` landed as `0d29bc1`; `examples/sync` now builds on the whole
+`Projection.compose` landed as `0d29bc1`; `examples/sync` now builds on the whole
 reference-based layer (`a915c0b`); `Agent.forApplication` landed as `a32c2e4`, so
 agent and sync consume the same application/projection references. The reference
 API was then sharpened after review (`5144264`, `bea8706`): `Surface.application`
-takes optional `initial`/`update` and resource-carrying Commands; `Surface.pick`
-rejects dynamic `.at`/`.index` refs; `Surface.unionMessages` and
+takes optional `initial`/`update` and resource-carrying Commands; `Projection.pick`
+rejects dynamic `.at`/`.index` refs; `MessageSet.union` and
 `Agent.exposeSubset` compose and expose subsets; `Agent.forApplication` infers the
-Model with a curried `Principal`; `ModelRef` codecs are typed pure. Encoded
+Model, with `withPrincipal` fixing the `Principal`; `ModelRef` codecs are typed pure. Encoded
 types now flow through `ModelRef`/`FieldRef`/`FieldRef`-derived projections and
-`MessageSubset` (`0606e5e`), so `Surface.pick`/`Surface.compose` and the journal
-snapshot codec keep each field's encoded type. The remaining integration work is
-the Foldkit binding (step 3 onward in `packages/agent/DESIGN.md`). Work through
-the review findings and open questions below.
+`MessageSet` (`0606e5e`), so `Projection.pick`/`Projection.compose` and the journal
+snapshot codec keep each field's encoded type. Issue #60 then unified the
+vocabulary and made the architecture inspectable: `forApplication(App)`
+specializes and `make(config)` constructs across Surface, Agent, and Sync (no
+`define`); `Projection.pick`/`compose` and `MessageSet.make`/`union` are the
+first-class primitives; the derived replay refuses Commands and local writes and
+`submit` fails closed with `ReplayError`; `Module.make(App, [contracts])`
+collects the contracts Sync, Remote, and Agent now carry and validates ownership,
+naming, and Message claims. Deferred from #60: the shared host seam (section 5,
+waits on the admission hook), a tagged requirement algebra (section 7, no second
+interpreter yet), and `Sync.for(Surface)` (a Surface's projection is read-only).
+The remaining integration work is the Foldkit binding (step 3 onward in
+`packages/agent/DESIGN.md`). Work through the review findings and open questions
+below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 

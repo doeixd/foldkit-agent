@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import { describe, expect, it } from 'vitest'
-import { Surface } from '../src/index.js'
+import { Projection, Surface } from '../src/index.js'
 
 const Model = Schema.Struct({
   todos: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
@@ -31,7 +31,7 @@ describe('Surface.application', () => {
 
   it('selects through App.fields the same way as App.model', () => {
     const App = Surface.application({ Model, Message, initial, update })
-    const Pick = Surface.pick(App.fields.todos, App.fields.selectedTodoId)
+    const Pick = Projection.pick(App.fields.todos, App.fields.selectedTodoId)
 
     expect(Pick.dependencies).toEqual([['todos'], ['selectedTodoId']])
     expect(Pick.get(initial)).toEqual({ todos: [], selectedTodoId: null })

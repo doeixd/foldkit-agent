@@ -8,7 +8,7 @@ Model         -> context projection   what an agent may see
 Message union -> Agent.expose         what an agent may do
 ```
 
-Context is a `foldkit-surface` projection (`Surface.pick` / `Surface.compose`),
+Context is a `foldkit-surface` projection (`Projection.pick` / `Projection.compose`),
 so the same value an application replicates is what an agent may see. Everything
 else is an adapter. `update` remains the single source of truth.
 
@@ -73,10 +73,10 @@ const App = Surface.application({
 
 const TodoAgent = Agent.forApplication(App)
 
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   // What an agent may see: a Surface projection, so sync and the agent can share
   // the same value. `lastError` is deliberately not selected.
-  context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
+  context: Projection.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {
     // A variant that needs nothing but a description can be written as one.
@@ -116,15 +116,15 @@ principal must be given a `principal` provider of the matching type.
 | Function | Purpose |
 | --- | --- |
 | `Surface.application({ Model, Message, initial, update })` | Captures the application once; `App.fields` are typed field references. `initial`/`update` are optional (a runnable application is needed only for sync). |
-| `Surface.pick(App.fields.todos, ...)` | The information boundary: what an agent may see. |
-| `Surface.compose(...)` | Compose disjoint picks into one context. |
-| `Surface.messages(App, [constructors])` / `Surface.unionMessages(...)` | A typed Message subset, and the union of several disjoint subsets. |
+| `Projection.pick(App.fields.todos, ...)` | The information boundary: what an agent may see. |
+| `Projection.compose(...)` | Compose disjoint picks into one context. |
+| `MessageSet.make(App, [constructors])` / `MessageSet.union(...)` | A typed Message subset, and the union of several disjoint subsets. |
 | `Agent.expose(Message, variants)` | The capability boundary: what an agent may do. |
-| `Agent.exposeSubset(subset, variants)` | The same, restricted to a `Surface.messages` subset. |
+| `Agent.exposeSubset(subset, variants)` | The same, restricted to a `MessageSet.make` subset. |
 | `Agent.variant(config)` | A mapped variant whose callbacks are inferred from its `input`. |
 | `Agent.resource(name, options)` | A named read-only projection of Model state. |
-| `Agent.define({ context, messages, resources })` | The protocol-neutral contract; `context` is any Surface projection. |
-| `Agent.forApplication(App)` / `Agent.forApplication<Principal>()(App)` | The above, with `Model` inferred from a `Surface.application`; the curried form supplies a `Principal`. |
+| `Agent.make({ context, messages, resources })` | The protocol-neutral contract; `context` is a `Projection`, a `Projection.pick`, or a feature Surface. |
+| `Agent.forApplication(App)` / `Agent.forApplication(App).withPrincipal<Principal>()` | The above, with `Model` inferred from a `Surface.application`; `withPrincipal` fixes the `Principal` type. |
 | `Agent.forModel<Model>()` | The same, when only a Model (no application) is available. |
 | `Agent.bind({ definition, host })` | Binds the contract to a live Runtime. |
 | `Agent.schema/messages/resources/contextSchema` | Introspection, as plain data. |

@@ -99,7 +99,7 @@ application wraps `RemoteMessage`s in its own Message union rather than adding
 ### Read in a Surface
 
 ```ts
-const ProjectPage = Surface.define(App, 'ProjectPage', {
+const ProjectPage = Surface.make(App, 'ProjectPage', {
   Params: Schema.Struct({ projectId: Schema.String }),
   model: ({ params }) =>
     Projection.struct({

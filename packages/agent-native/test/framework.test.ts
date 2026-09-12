@@ -19,7 +19,7 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 
 const Message = defineMessageUnion({ SetLimit: { value: Schema.Number } })
 const LimitAgent = Agent.forModel<{ limit: number }, { canEdit: boolean }>()
-const definition = LimitAgent.define({
+const definition = LimitAgent.make({
   messages: LimitAgent.expose(Message, {
     SetLimit: {
       name: 'foldkit_spike_set_limit',

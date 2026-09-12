@@ -1,5 +1,5 @@
 import { Cause, Effect, Option, Schema } from 'effect'
-import type { Definition } from './define.js'
+import type { Definition } from './make.js'
 import {
   AuthorizationError,
   CancelledError,

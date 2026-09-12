@@ -11,10 +11,4 @@ describe('Surface inspection', () => {
     expect(inspection.requirements).toEqual([])
     expect(inspection.emits).toEqual([Message.CreatedTodo, Message.RenamedTodo])
   })
-
-  it('inspects a registered Surface', () => {
-    const registry = Surface.registry(App, [TodoList])
-    expect(registry.surfaces).toEqual([TodoList])
-    expect(Surface.inspect(registry.surfaces[0]!, undefined).name).toBe('TodoList')
-  })
 })

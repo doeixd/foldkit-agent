@@ -68,7 +68,7 @@ const App = Surface.application({
 
 const AppRemote = Remote.at(Data, App.model.remote)
 
-const ProjectPage = Surface.define(App, 'ProjectPage', {
+const ProjectPage = Surface.make(App, 'ProjectPage', {
   Params: Schema.Struct({ projectId: Schema.String }),
   model: ({ params }) =>
     Projection.struct({ project: Remote.select(AppRemote, ProjectSummary)(params.projectId) }),

@@ -5,7 +5,6 @@ import type * as Update from 'foldkit/update'
 const Todo = Schema.Struct({ id: Schema.String, title: Schema.String })
 export const Shared = Schema.Struct({ todos: Schema.Array(Todo) })
 export type Shared = typeof Shared.Type
-export const decodeShared = Schema.decodeUnknownSync(Shared, { onExcessProperty: 'error' })
 export const encodeShared = Schema.encodeSync(Shared)
 export const Model = Schema.Struct({
   ...Shared.fields,
@@ -43,16 +42,3 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
 export const durableTags = new Set<Message['_tag']>(['CreatedTodo', 'RenamedTodo', 'DeletedTodo'])
 export const decodeMessage = Schema.decodeUnknownSync(Message, { onExcessProperty: 'error' })
 export const encodeMessage = Schema.encodeSync(Message)
-
-/** Replays the application's update, refusing Commands and changes outside Shared. */
-export const replay = (shared: Shared, message: Message, transition = update): Shared => {
-  if (!durableTags.has(message._tag)) throw new Error('Message is local-only')
-  const result = transition({ ...initialModel, ...shared }, message)
-  if (result.commands?.length) throw new Error('Durable transitions must not produce Commands')
-  const { todos, ...local } = result.model
-  const { todos: _, ...initialLocal } = initialModel
-  if (JSON.stringify(local) !== JSON.stringify(initialLocal)) {
-    throw new Error('Durable transition changed local Model fields')
-  }
-  return decodeShared({ todos })
-}

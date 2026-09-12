@@ -20,20 +20,20 @@ const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema
 const Data = Remote.make({ entities: [User] })
 const Model = Schema.Struct({ remote: Data.Model, route: Schema.String })
 const Message = defineMessageUnion({ Ping: {} })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 const AppRemote = Remote.at(Data, App.model.remote)
 
 const UserSummary = Selection.make(User, { id: true, name: true })
 const NameOnly = Selection.make(User, { name: true })
 
-const UserPage = Surface.define(App, 'UserPage', {
+const UserPage = Surface.make(App, 'UserPage', {
   Params: Schema.Struct({ userId: Schema.String }),
   model: ({ params }) =>
     Projection.struct({ user: Remote.select(AppRemote, UserSummary)(params.userId) }),
   messages: [Message.Ping],
 })
 
-const NameCard = Surface.define(App, 'NameCard', {
+const NameCard = Surface.make(App, 'NameCard', {
   Params: Schema.Struct({ userId: Schema.String }),
   model: ({ params }) =>
     Projection.struct({ name: Remote.select(AppRemote, NameOnly)(params.userId) }),

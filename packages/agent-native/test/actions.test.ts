@@ -42,7 +42,7 @@ let dispatched: Array<Message>
 let principal: { readonly canDelete: boolean }
 let emit: (message: Message) => void
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {
@@ -115,7 +115,7 @@ beforeEach(() => {
 
 describe('compiling a contract into actions', () => {
   it('rejects non-object inputs that the framework would omit from its tool list', () => {
-    const definition = Agent.define({
+    const definition = Agent.make({
       messages: Agent.expose(Message, {
         Shouted: {
           description: 'Shout',
@@ -332,7 +332,7 @@ describe('a transforming capability', () => {
 
 describe('the registry', () => {
   it('registers __proto__ as an own capability and dispatches it', async () => {
-    const definition = Agent.define({
+    const definition = Agent.make({
       messages: Agent.expose(Message, {
         RequestedCreateTodo: { name: '__proto__', description: 'Create a todo' },
       }),

@@ -1,4 +1,4 @@
-import { type DefineOptions, type Definition, define } from './define.js'
+import { type MakeOptions, type Definition, make } from './make.js'
 import {
   type AnyCapabilitiesByName,
   type AnyCapabilitiesByTag,
@@ -15,7 +15,7 @@ import { type Resource, type ResourceOptions, resource } from './resource.js'
 import { type AgentRuntime, type BindOptions, bind } from './runtime.js'
 import type { AnyMessage } from './types.js'
 import type { MessageUnion } from 'foldkit/message'
-import type { MessageSubset } from 'foldkit-surface'
+import type { MessageSet } from 'foldkit-surface'
 
 /**
  * The `foldkit-agent` constructors with `Model` and `Principal` already fixed.
@@ -42,7 +42,7 @@ export interface BoundAgent<Model, Principal> {
     const V extends Record<string, unknown>,
     Ext extends Record<string, unknown> = {},
   >(
-    subset: MessageSubset<Root, Message, Subset, Ms, AllCases>,
+    subset: MessageSet<Root, Message, Subset, Ms, AllCases>,
     variants: V & ValidateVariants<SubsetCases<AllCases, Ms>, Ext, Model, Principal>,
   ) => ExposedMessages<
     Model,
@@ -56,8 +56,8 @@ export interface BoundAgent<Model, Principal> {
     options: ResourceOptions<Model, Value>,
   ) => Resource<Model, Value>
 
-  readonly define: <Context_, ByName = AnyCapabilitiesByName, ByTag = AnyCapabilitiesByTag>(
-    options: DefineOptions<Model, Context_, Principal, ByName, ByTag>,
+  readonly make: <Context_, ByName = AnyCapabilitiesByName, ByTag = AnyCapabilitiesByTag>(
+    options: MakeOptions<Model, Context_, Principal, ByName, ByTag>,
   ) => Definition<Model, Context_, Principal, ByName, ByTag>
 
   readonly bind: <
@@ -82,7 +82,7 @@ export interface BoundAgent<Model, Principal> {
  * ```ts
  * const TodoAgent = Agent.forModel<Model>()
  *
- * const AppAgent = TodoAgent.define({
+ * const AppAgent = TodoAgent.make({
  *   messages: TodoAgent.expose(Message, {
  *     RequestedDeleteTodo: {
  *       description: 'Delete a todo',
@@ -96,6 +96,6 @@ export const forModel = <Model, Principal = unknown>(): BoundAgent<Model, Princi
   expose: expose as BoundAgent<Model, Principal>['expose'],
   exposeSubset: exposeSubset as BoundAgent<Model, Principal>['exposeSubset'],
   resource,
-  define,
+  make,
   bind,
 })

@@ -27,10 +27,10 @@ export interface Definition<
  *
  * @example
  * ```ts
- * const AppAgent = Agent.define({ context, messages })
+ * const AppAgent = Agent.make({ context, messages })
  * ```
  */
-export interface DefineOptions<
+export interface MakeOptions<
   Model,
   Context_,
   Principal,
@@ -42,14 +42,14 @@ export interface DefineOptions<
   readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
 }
 
-export const define = <
+export const make = <
   Model = unknown,
   Context_ = unknown,
   Principal = unknown,
   ByName = AnyCapabilitiesByName,
   ByTag = AnyCapabilitiesByTag,
 >(
-  options: DefineOptions<Model, Context_, Principal, ByName, ByTag>,
+  options: MakeOptions<Model, Context_, Principal, ByName, ByTag>,
 ): Definition<Model, Context_, Principal, ByName, ByTag> => {
   // Copied so a later mutation of the caller's array cannot change the contract.
   const resources = [...(options.resources ?? [])]

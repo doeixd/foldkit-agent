@@ -29,7 +29,7 @@ const emptyModel: Model = { todos: [], selectedTodoId: Option.none() }
 
 const TodoAgent = Agent.forModel<Model>()
 
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {
@@ -346,7 +346,7 @@ describe('AgentWebMcp end to end', () => {
    */
   it('carries an authorization denial through to the tool caller', async () => {
     let allowed = false
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       messages: TodoAgent.expose(Message, {
         RequestedDeleteTodo: {
           name: 'delete_todo',
@@ -378,7 +378,7 @@ describe('AgentWebMcp end to end', () => {
   })
 
   it('registers the external schema and dispatches the mapped Message', async () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       messages: TodoAgent.expose(Message, {
         RequestedCreateTodo: {
           name: 'create_todo',
@@ -599,7 +599,7 @@ describe('disposal races', () => {
 })
 
 describe('AgentWebMcp.register with a completion contract', () => {
-  const CompletingAgent = TodoAgent.define({
+  const CompletingAgent = TodoAgent.make({
     messages: TodoAgent.expose(Message, {
       RequestedCreateTodo: {
         name: 'create_todo',

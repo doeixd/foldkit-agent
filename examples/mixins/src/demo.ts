@@ -40,10 +40,10 @@ type ProjectedModel = {
 type CardMessage = typeof Message.ArchiveProject.Type | typeof Message.SelectProject.Type
 type AppMessage = typeof Message.Type
 
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 
 /** Projects two fields and exposes two of the three Messages. */
-const ProjectCard = Surface.define(App, 'ProjectCard', {
+const ProjectCard = Surface.make(App, 'ProjectCard', {
   model: ({ model }) => Projection.struct({ project: model.project, selection: model.selection }),
   messages: [Message.ArchiveProject, Message.SelectProject],
 })

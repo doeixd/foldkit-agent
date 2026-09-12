@@ -37,7 +37,7 @@ declare const onModelChange: (listener: () => void) => () => void
 const TodoAgent = Agent.forModel<Model>()
 
 // Quick start.
-const QuickStartAgent = TodoAgent.define({
+const QuickStartAgent = TodoAgent.make({
   context: Projection.of(Model)({ selectedTodoId: true, todos: true }),
 
   messages: TodoAgent.expose(Message, {
@@ -57,7 +57,7 @@ export const quickStartRuntime = TodoAgent.bind({
 })
 
 // The v1 API, end to end.
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   context: Projection.of(Model)({ selectedTodoId: true }),
 
   messages: TodoAgent.expose(Message, {

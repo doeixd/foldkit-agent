@@ -1,5 +1,5 @@
 import { Option } from 'effect'
-import { Projection, Surface } from 'foldkit-surface'
+import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import { describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
 import { Message as MessageUnion, Model, emptyModel, type Message } from './todoApp.js'
@@ -7,16 +7,16 @@ import { Message as MessageUnion, Model, emptyModel, type Message } from './todo
 const update = (model: Model, _message: Message) => ({ model })
 
 const App = Surface.application({ Model, Message: MessageUnion, initial: emptyModel, update })
-const Context = Surface.compose(
-  Surface.pick(App.fields.todos),
-  Surface.pick(App.fields.selectedTodoId),
+const Context = Projection.compose(
+  Projection.pick(App.fields.todos),
+  Projection.pick(App.fields.selectedTodoId),
 )
 
 const TodoAgent = Agent.forApplication(App)
 
 describe('Agent.forApplication', () => {
   it('accepts a Surface projection as context', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       context: Context,
       messages: TodoAgent.expose(MessageUnion, {
         RequestedDeleteTodo: 'Delete the selected todo',
@@ -32,8 +32,31 @@ describe('Agent.forApplication', () => {
     ])
   })
 
+  it('accepts a feature Surface as context, so the view and the agent share it', () => {
+    const Board = Surface.make(App, 'Board', {
+      model: ({ model }) => Projection.struct({ todos: model.todos }),
+      messages: [MessageUnion.RequestedDeleteTodo],
+    })
+    const definition = TodoAgent.make({
+      name: 'board',
+      context: Board,
+      messages: TodoAgent.expose(MessageUnion, { RequestedDeleteTodo: 'Delete' }),
+    })
+
+    expect(definition.context?.read(emptyModel)).toEqual({ todos: [] })
+    expect(definition.contract).toEqual({
+      kind: 'agent',
+      name: 'board',
+      owner: App.owner,
+      owns: [],
+      observes: [['todos']],
+      messages: ['RequestedDeleteTodo'],
+      requirements: [],
+    })
+  })
+
   it('still accepts a read-only Projection for context', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       context: Projection.of(Model)({ todos: true }),
       messages: TodoAgent.expose(MessageUnion, {}),
     })
@@ -42,7 +65,7 @@ describe('Agent.forApplication', () => {
   })
 
   it('exposes only the variants of a Surface subset', () => {
-    const Changes = Surface.messages(App, [
+    const Changes = MessageSet.make(App, [
       MessageUnion.RequestedCreateTodo,
       MessageUnion.RequestedRenameTodo,
     ])
@@ -61,7 +84,7 @@ describe('Agent.forApplication', () => {
       initial: emptyModel,
       update,
     })
-    const OtherChanges = Surface.messages(OtherApp, [MessageUnion.RequestedCreateTodo])
+    const OtherChanges = MessageSet.make(OtherApp, [MessageUnion.RequestedCreateTodo])
 
     expect(() =>
       TodoAgent.exposeSubset(OtherChanges, { RequestedCreateTodo: 'Create a todo' }),

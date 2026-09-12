@@ -22,7 +22,7 @@ const User = Entity.make(
 const Data = Remote.make({ entities: [User] })
 const Model = Schema.Struct({ remote: Data.Model, route: Schema.String })
 const Message = defineMessageUnion({ Ping: {} })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 const AppRemote = Remote.at(Data, App.model.remote)
 const UserSummary = Selection.make(User, { id: true, name: true })
 const selectUser = Remote.select(AppRemote, UserSummary)
@@ -67,7 +67,7 @@ describe('Remote and Surface', () => {
   })
 
   it('a mixed local + remote Surface extracts the combined requirement tree', () => {
-    const UserPage = Surface.define(App, 'UserPage', {
+    const UserPage = Surface.make(App, 'UserPage', {
       Params: Schema.Struct({ userId: Schema.String }),
       model: ({ model, params }) =>
         Projection.struct({

@@ -7,7 +7,7 @@
  * contract into their respective surfaces.
  */
 import { Agent } from 'foldkit-agent'
-import { Surface } from 'foldkit-surface'
+import { Projection, Surface } from 'foldkit-surface'
 import { Schema } from 'effect'
 import { App, Message } from './stack.js'
 
@@ -16,11 +16,11 @@ export interface AgentPrincipal {
   readonly canWrite: boolean
 }
 
-const BoardAgent = Agent.forApplication<AgentPrincipal>()(App)
+const BoardAgent = Agent.forApplication(App).withPrincipal<AgentPrincipal>()
 
-export const AppAgent = BoardAgent.define({
+export const AppAgent = BoardAgent.make({
   // What an agent may see: the replicated notes and the current selection.
-  context: Surface.pick(App.fields.notes, App.fields.selectedNoteId),
+  context: Projection.pick(App.fields.notes, App.fields.selectedNoteId),
 
   messages: BoardAgent.expose(Message, {
     RequestedCreateNote: 'Create a note',

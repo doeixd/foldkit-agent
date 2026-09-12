@@ -1,5 +1,5 @@
 import { Agent } from 'foldkit-agent'
-import { Surface } from 'foldkit-surface'
+import { Projection, Surface } from 'foldkit-surface'
 import { Option, Schema } from 'effect'
 import { Message, Model, Todo, initialModel, update } from './app.js'
 
@@ -15,7 +15,7 @@ const App = Surface.application({
   update: (model, message) => ({ model: update(model, message) }),
 })
 
-const TodoAgent = Agent.forApplication<Principal>()(App)
+const TodoAgent = Agent.forApplication(App).withPrincipal<Principal>()
 
 /**
  * The agent contract: what an agent may see, and what an agent may do.
@@ -23,9 +23,9 @@ const TodoAgent = Agent.forApplication<Principal>()(App)
  * Nothing here reimplements application behaviour. Every capability is an
  * existing Message that `update` already knows how to handle.
  */
-export const AppAgent = TodoAgent.define({
+export const AppAgent = TodoAgent.make({
   // What an agent may see. `lastError` is deliberately not projected.
-  context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
+  context: Projection.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {
     // Most capabilities need nothing but a description.

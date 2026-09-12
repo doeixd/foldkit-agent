@@ -1,4 +1,4 @@
-export { define, type DefineOptions, type Definition } from './define.js'
+export { make, type MakeOptions, type Definition } from './make.js'
 export {
   AuthorizationError,
   CancelledError,

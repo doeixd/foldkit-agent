@@ -8,7 +8,7 @@ const Model = Schema.Struct({
   todos: Schema.Array(Todo),
   selectedTodoId: Schema.NullOr(Schema.String),
 })
-const App = Surface.make({ Model, Message: defineMessageUnion({ Ping: {} }) })
+const App = Surface.application({ Model, Message: defineMessageUnion({ Ping: {} }) })
 
 const example = { todos: [{ id: 'a', title: 'A' }], selectedTodoId: null }
 
@@ -37,7 +37,7 @@ describe('Surface edge cases', () => {
 
   it('a missing record key reads as absence; setting Some inserts it', () => {
     const model = { projects: {} as Record<string, { id: string; name: string }> }
-    const ref = Surface.make({
+    const ref = Surface.application({
       Model: Schema.Struct({
         projects: Schema.Record(
           Schema.String,
