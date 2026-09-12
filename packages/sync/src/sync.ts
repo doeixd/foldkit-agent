@@ -1,4 +1,4 @@
-import { Effect, Exit, Metric, Queue, Ref, Schema, SynchronizedRef } from 'effect'
+import { Effect, Exit, Metric, PubSub, Queue, Ref, Schema, Stream, SynchronizedRef } from 'effect'
 import {
   CheckpointRegressionError,
   CommittedOrderError,
@@ -122,8 +122,13 @@ export interface Replica<Message, Shared> {
   readonly shared: Effect.Effect<Shared>
   readonly pending: Effect.Effect<ReadonlyArray<Operation>>
   readonly cursor: Effect.Effect<Sequence>
-  /** Waiting/recovery information without exposing Messages or the Model. */
+  /**
+   * Waiting/recovery information without exposing Messages or the Model. It is a
+   * snapshot; `statusChanges` re-emits it after every submit and exchange.
+   */
   readonly status: Effect.Effect<ReplicaStatus>
+  /** The status, re-emitted after every submit and exchange. */
+  readonly statusChanges: Stream.Stream<ReplicaStatus>
   readonly submit: (message: Message) => Effect.Effect<void, ReplicaError>
   /** Reconciles against the server. The `Transport` service must be provided. */
   readonly synchronize: Effect.Effect<void, ReplicaError | TransportError, Transport>
@@ -383,6 +388,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       const rejectedOps = yield* Ref.make<ReadonlyArray<OpId>>([])
       // One pending wake-up is enough: the loop exchanges the whole outbox.
       const wake = yield* Queue.sliding<void>(1)
+      const statusSignals = yield* PubSub.sliding<void>(1)
       // The projection is pure over an immutable state, so a cached value is
       // reused until a write replaces the state object. A UI reads `shared` far
       // more often than it writes, and replaying a large outbox per read is
@@ -406,9 +412,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
 
       const submit = Effect.fn('Sync.submit')(function* (message: Message) {
         yield* Effect.annotateCurrentSpan({ documentId, replicaId })
-        // The closed check belongs inside the lock: a `close` between an outer
-        // check and acquiring the lock would otherwise still persist.
-        return yield* SynchronizedRef.modifyEffect(stateRef, current =>
+        const result = yield* SynchronizedRef.modifyEffect(stateRef, current =>
           Effect.gen(function* () {
             if (yield* Ref.get(closed))
               return yield* new ReplicaClosedError({ message: 'Replica is closed' })
@@ -442,6 +446,9 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             return [undefined, next] as const
           }),
         )
+        // Outside the lock, so a `statusChanges` subscriber reads the new state.
+        yield* PubSub.publish(statusSignals, undefined)
+        return result
       })
 
       const synchronize = Effect.fn('Sync.synchronize')(function* () {
@@ -562,6 +569,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
           yield* Ref.update(rejectedOps, previous =>
             [...response.rejected, ...previous].slice(0, 32),
           )
+        yield* PubSub.publish(statusSignals, undefined)
       })()
 
       const start: Effect.Effect<void, never, Transport> = Effect.gen(function* () {
@@ -573,19 +581,22 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         }
       })
 
+      const status = Effect.fn('Sync.status')(function* () {
+        const state = yield* SynchronizedRef.get(stateRef)
+        return {
+          pending: state.pending.length,
+          cursor: state.cursor,
+          lastError: yield* Ref.get(lastError),
+          rejected: yield* Ref.get(rejectedOps),
+        }
+      })()
+
       return {
         shared,
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
         cursor: Effect.map(SynchronizedRef.get(stateRef), state => state.cursor),
-        status: Effect.fn('Sync.status')(function* () {
-          const state = yield* SynchronizedRef.get(stateRef)
-          return {
-            pending: state.pending.length,
-            cursor: state.cursor,
-            lastError: yield* Ref.get(lastError),
-            rejected: yield* Ref.get(rejectedOps),
-          }
-        })(),
+        status,
+        statusChanges: Stream.fromPubSub(statusSignals).pipe(Stream.mapEffect(() => status)),
         submit,
         synchronize,
         start,

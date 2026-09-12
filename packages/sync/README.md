@@ -116,7 +116,8 @@ const shared = Effect.runSync(replica.shared)
   and retried on the next wake, so the application does not hand-roll it.
 - A redacted status (`replica.status`): the pending count, the cursor, the last
   exchange failure, and the operations the server refused — enough for a UI to
-  explain and recover without exposing Messages or the Model.
+  explain and recover without exposing Messages or the Model. `statusChanges` is
+  the same status re-emitted after every submit and exchange.
 - Strict decoding: an operation is always validated with the application's
   Message schema, and a Message the contract does not call durable is refused.
 - Branded positions: `Sequence` (a committed document position) and

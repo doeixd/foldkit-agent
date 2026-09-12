@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { Deferred, Effect, Fiber, Schema } from 'effect'
+import { Deferred, Effect, Fiber, Schema, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 import {
   defineSync,
@@ -679,6 +679,27 @@ describe('Replica.start', () => {
 
     expect(applied).toBe(1)
     expect(shared(replica)).toEqual({ todos: [{ id: 'a', title: 'a' }] })
+    await close(replica)
+  })
+
+  it('statusChanges re-emits the status after a submit', async () => {
+    const replica = await open('a')
+    const statuses = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* replica.statusChanges.pipe(
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.forkScoped,
+          )
+          yield* Effect.yieldNow
+          yield* replica.submit(created('a'))
+          return [...(yield* Fiber.join(fiber))]
+        }),
+      ),
+    )
+
+    expect(statuses[0]).toMatchObject({ pending: 1, cursor: 0 })
     await close(replica)
   })
 })

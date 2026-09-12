@@ -278,6 +278,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Presence as a Stream.** `Presence.changes` emits the live peers whenever the
   set changes, composing with Effect like the journal's change stream;
   `subscribe` remains for a callback edge.
+- **Observable status.** `Replica.statusChanges` re-emits `ReplicaStatus` after
+  every submit and exchange, so a UI can subscribe instead of polling `status`.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.
