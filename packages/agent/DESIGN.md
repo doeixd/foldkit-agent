@@ -1784,11 +1784,36 @@ replace shared state while preserving local state. Writable projections can be
 consumed as read-only views; a computed read-only view must never acquire an
 invented inverse just to fit sync's interface.
 
-For a field selection, derive the codec, read, and write from one immutable field
-list. Preserve both codec sides, field optionality, and exact literal keys. Read
-and write only the declared fields; an excess field in an untrusted input cannot
-overwrite local state through an object spread. Snapshot declarations at
-definition time so mutating a caller-owned key array cannot change exposure.
+Field selection is reference-first: `Surface.pick(App.fields.todos)`, or
+`Surface.pick(App.fields.todos, App.fields.selectedTodoId)`. `App.fields` is
+derived once from the application's Model schema; authors do not declare a
+parallel field registry. Each reference carries its owning application, field
+path, and codec, so the projection infers its source Model, output shape, and
+encoded representation without generic arguments or string paths.
+
+References must identify fields, not just schema objects. Two properties may
+reuse the same schema, so raw `Model.fields` schema values cannot reliably
+identify a property's location. Generated application field references retain
+that location explicitly; never recover it by reverse-looking-up schema identity.
+Nested selection should extend typed references, preserving optional parents and
+field structure; dot-separated string paths are not the default. Dynamic
+array/key selection requires an explicit policy rather than a static pick.
+
+The existing `Agent.pick(Model, keys)` and sync `pick(Model, keys)` remain
+compatibility APIs. If surface offers a key-based form, it must be a separate,
+explicit opt-in such as `pickKeys(App, keys)`, constrained to valid keys. All new
+common-path examples use references. Message selections likewise use actual
+variant references, never copied tag strings.
+
+Derive the codec, read, and write from one immutable reference selection.
+Preserve both codec sides, field optionality, and exact output keys. Read and
+write only declared fields; an excess field in an untrusted input cannot overwrite
+local state through an object spread. Snapshot selections at definition time so
+mutating a caller-owned array cannot change exposure. Reject incompatible source
+Models statically; verify owner identity at definition time where structurally
+identical types cannot express the difference. Matching field names or payload
+shapes do not authorize mixing application references. Reference construction
+and validation happen once, not on each read.
 
 Custom writable projections must obey the usual round-trip expectations:
 reading after installation returns the supplied projected value, installing a
@@ -2017,7 +2042,7 @@ These foundation and integration entry points are proposed here:
 | Proposed API | Owner and purpose |
 | --- | --- |
 | `Surface.application({ Model, Message, initial, update })` | Capture existing pure application references once, inferring their types. Accepting an existing Foldkit definition should avoid duplicate configuration. |
-| `Surface.pick(Model, keys)` | Derive a writable projection's codec, get, and set from one field selection. |
+| `Surface.pick(App.fields.todos, ...)` | Select generated field references and infer the source Model, output codec, get, and set without string paths. |
 | `Surface.view` / `Surface.state` | Describe a custom read-only projection or a lawful writable projection; their callbacks infer the owning Model through an application-bound form. |
 | `Surface.compose` / `Surface.messages` | Compose compatible projections and select typed Message references without assigning agent or sync policy. |
 | `Agent.forApplication(App)` / `Sync.forApplication(App, options)` | Interpret the same application/projection references for agent access or replication, with Model and Message types inferred. |
@@ -2042,8 +2067,8 @@ import { documentId } from 'foldkit-sync'
 import { Sync } from 'foldkit-sync/foldkit' // proposed
 
 const App = Surface.application({ Model, Message, initial: initialModel, update })
-const Todos = Surface.pick(Model, ['todos'])
-const Selection = Surface.pick(Model, ['selectedTodoId'])
+const Todos = Surface.pick(App.fields.todos)
+const Selection = Surface.pick(App.fields.selectedTodoId)
 const BrowserContext = Surface.compose(Todos, Selection)
 const TodoChanges = Surface.messages(App, [
   Message.CreatedTodo,
@@ -2068,8 +2093,8 @@ const TodoSync = Sync.forApplication(App, { // proposed
 })
 ```
 
-Every unclassified Message remains local. The three
-contracts share schema and Message references; opting `DeletedTodo` into
+Every unclassified Message remains local. The three contracts share schema and
+Message references; opting `DeletedTodo` into
 durability does not expose it to the browser agent. `BrowserContext` contains
 selection, while `Todos` does not, and neither contains `lastError`.
 
@@ -2079,6 +2104,12 @@ existing API as `Agent.context({ schema: Todos.schema, select: Todos.get })`.
 Likewise, the low-level sync shared codec is `Todos.schema`, its initial value
 is `Todos.get(initialModel)`, and installation is `Todos.set`. These are adapters
 of one projection, not separately maintained field lists.
+
+`Todos` infers `{ todos: Model['todos'] }` and its encoded codec. Selecting both
+field references directly is equivalent to composing the two picks:
+`Surface.pick(App.fields.todos, App.fields.selectedTodoId)`. Editor completion
+offers actual fields, a missing property is a compile error at the reference,
+and definitions retain the selected path even when several fields share a codec.
 
 Feature modules may export `Todos`, `Selection`, and `TodoChanges` as pure values.
 Agent and sync fragments attach their own policies to those values and compose
@@ -2100,6 +2131,10 @@ Reuse the schemas and state-only `update` from the
 `selectedTodoId`, and `lastError`; its Messages include `CreatedTodo`,
 `RenamedTodo`, `DeletedTodo`, and `SelectedTodo`. `view` below is the application's
 ordinary Foldkit view.
+
+This state-only example starts from a pure initial value. Applications with flags,
+routing, or initialization Commands retain their existing Foldkit initialization;
+the explicit replay baseline does not replace `init` or execute it during replay.
 
 ```ts
 import { Effect } from 'effect'
@@ -2151,7 +2186,8 @@ tool call. The exact error mapping is part of the proposed integration work.
 
 Keep the same `App`, `BrowserAgent`, and `TodoSync` from the common declaration.
 The high-level sync contract compiles to the existing replica primitives and
-retains the shared projection for mounting.
+retains the shared projection for mounting. Its proposed `protocol` property
+provides the compiled low-level `Sync` value, including `openReplica`.
 
 ```ts
 import { indexedDb } from 'foldkit-sync'
@@ -2382,6 +2418,9 @@ The proposed helpers must preserve the following errors without caller casts:
 
 ```ts
 // Intended rejection cases for the future compile-tested examples:
+Surface.pick(App.fields.missingField)
+// The error is at the nonexistent field reference.
+
 agent.messages.dispatch(Message.RenamedTodo, { todoId: 'a', title: 'Milk' })
 // Wrong payload: the existing Message requires id.
 
@@ -2400,14 +2439,17 @@ exist, add `@ts-expect-error` cases at the actual offending expressions and
 compile the positive examples against the real peer types. Also prove that a
 surface carrying typed admission failures remains usable without widening its
 Model or Message to `any`, and that a transforming codec is decoded exactly at
-its consuming boundary.
+its consuming boundary. Add negative cases for read-only projections passed as
+sync shared state, incompatible projection writes, foreign field/Message references,
+and conflicting durable/presence classifications across feature fragments.
 
 ## Incremental implementation and acceptance
 
 1. Establish surface's pure projection/application primitives from `Agent.pick`
    and sync's initial `pick`. Preserve public compatibility while sharing one
    implementation. Prove codec inference, lawful installation, immutable
-   declarations, and structural composition with runtime and negative type tests.
+   declarations, reference-based selection, and structural composition with runtime
+   and negative type tests. Key-string forms stay compatibility or opt-in APIs.
 2. Make agent and high-level sync consume those primitives. Demonstrate a shared
    projection reused as context and replicated state, disjoint feature
    composition, and derived replay without another reducer for supported apps.

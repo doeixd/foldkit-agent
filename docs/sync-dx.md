@@ -2,7 +2,31 @@
 
 Status: proposal for [#59](https://github.com/doeixd/foldkit-plus/issues/59).
 The low-level `defineSync` protocol stays as-is; this describes the Foldkit-facing
-layer above it. Nothing here is implemented yet.
+layer above it. The initial `pick` primitive exists in `foldkit-sync`; the
+high-level constructors and adapters below remain proposals.
+
+## Shared foundation with agent projections
+
+The [surface design](../packages/agent/DESIGN.md#shared-projection-foundation)
+places application references, state projections, typed Message subsets, and
+structural composition in `foldkit-surface`. Agent and sync should consume these
+same primitives rather than grow independent projection systems. Sync's initial
+`pick` is a starting implementation to consolidate with `Agent.pick`, preserving
+compatible entry points during migration.
+
+The default field selection is reference-based:
+`Surface.pick(App.fields.todos)`, with `Sync.forApplication(App, options)` and
+`Agent.forApplication(App)` consuming the same application reference. See the
+[usage sketches](../packages/agent/DESIGN.md#usage-sketches-across-packages) for a
+single projection used as agent context and replicated state, then bound to
+browser and server instances.
+
+Agent only needs a projection's codec and read; sync additionally requires a
+lawful install into the Model. A read-only computed agent summary must not be
+given an invented inverse to satisfy sync. Reusing a projection does not imply
+shared state is public or durable Messages are agent-invocable: each package
+still declares its policy explicitly. Surface's pure core remains independent
+of DOM, storage, transport, and these specialized policies.
 
 ## Why two layers
 
@@ -49,13 +73,16 @@ Non-Foldkit consumers keep using `defineSync` directly.
 A declaration that compiles to `defineSync`:
 
 ```ts
-const TodosSync = Sync.forApplication({
+const App = Surface.application({
   Model,
   Message,
   initial: initialModel,
   update,
+})
 
-  shared: Sync.pick(Model, ['todos']),
+const TodosSync = Sync.forApplication(App, {
+  documentId: documentId('todos'),
+  shared: Surface.pick(App.fields.todos),
 
   durable: [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo],
   presence: [Message.SelectedTodo],
@@ -79,12 +106,14 @@ The issue also sketches an Effect-style `.pipe(Sync.shared(...), Sync.durable(..
 form. That is worth supporting later if fragments need it; the object form is
 easier to infer and read for a first release, so it is the recommendation.
 
-## `Sync.pick`: the shared projection
+## Reference-based state projection
 
-`Sync.pick(Model, keys)` infers a projection from the Model struct:
+`Surface.pick(App.fields.todos)` infers a projection from generated field
+references on the application's Model. `App.fields` is derived once, so authors
+write neither path strings nor a parallel field registry:
 
 ```ts
-interface Projection<Model, Shared> {
+interface Projection<Model, Shared, SharedEncoded> {
   readonly schema: Schema.Codec<Shared, SharedEncoded>
   readonly get: (model: Model) => Shared
   readonly set: (model: Model, shared: Shared) => Model
@@ -93,17 +122,31 @@ interface Projection<Model, Shared> {
 
 - `schema` is `Schema.Struct` over the picked fields, so its encoded side is the
   shared codec the replica already needs.
-- `get`/`set` are derived from the field list, so `Sync.pick(Model, ['todos'])`
+- `get`/`set` are derived from the references, so `Surface.pick(App.fields.todos)`
   produces `{ todos: Model['todos'] }` with no annotation.
-- A picked key that is not in the Model is a compile error.
-- For a computed projection, `Sync.state({ schema, get, set })` is the escape
+- A missing field is a compile error at `App.fields.missingField`.
+- For a computed projection, `Surface.state({ schema, get, set })` is the escape
   hatch; `get`/`set`/`schema`/`Model` mutually constrain.
 
 The initial shared value is `get(initial)`, so no separate `empty` is written.
 
+Select several fields as `Surface.pick(App.fields.todos, App.fields.members)`
+when both exist. A field reference carries owner, path, and codec; raw schema
+identity alone is insufficient because several fields can reuse one schema.
+Nested selection should use typed references with explicit optional-parent
+semantics, not dot-separated strings. Picks must snapshot their references and
+write only selected fields. Static source-type checks and definition-time owner
+checks prevent unrelated applications from being mixed merely because their
+field shapes happen to match.
+
+The initial `foldkit-sync` export `pick(Model, keys)` and existing `Agent.pick`
+remain compatibility APIs while their internals converge on surface. A string-key
+surface API, if offered, is explicit opt-in and still constrained to valid keys;
+it is not the default shown in new application examples.
+
 ## Derived replay
 
-This is the whole point: the user never writes `replay`.
+For the supported state-only subset, the user does not write `replay`.
 
 ```text
 shared snapshot
@@ -127,6 +170,13 @@ offending field, not a silent divergence. If Foldkit ever exposes a transition
 driver that can reject a transition before it applies, this is where it plugs in;
 until then, deterministic replay plus these guards is the contract.
 
+These guards cannot prove independence from local state or arbitrary JavaScript
+purity. An update can read local selection to choose a shared entity without
+writing any local field. Such a Message must carry the target explicitly, or the
+application must restructure its transition before using derived replay. Custom
+projections also need lawful get/set behavior. Unsupported cases keep the
+low-level `defineSync` escape hatch rather than a fabricated replay guarantee.
+
 ## Classification and composition
 
 - `durable: [Message.X, ...]` and `presence: [Message.Y, ...]` take variant
@@ -143,7 +193,7 @@ until then, deterministic replay plus these guards is the contract.
 
   ```ts
   const Todos = Sync.fragment(App).pipe(
-    Sync.shared(Sync.pick(Model, ['todos'])),
+    Sync.shared(Surface.pick(App.fields.todos)),
     Sync.durable(Message.CreatedTodo, Message.RenamedTodo),
   )
   const Presence = Sync.fragment(App).pipe(Sync.presence(Message.SelectedTodo))
@@ -173,9 +223,10 @@ The runtime mount currently lives in `examples/sync/src/runtime.ts`; it becomes
 
 ## Effect and agent composition
 
-`Sync.forApplication` and `Agent.for`/`Agent.define` should consume the same
-Model/Message references so domain behaviour is specified once. A durable agent
-capability can reuse the synchronized Message classification:
+`Sync.forApplication` and `Agent.forApplication` consume the same surface
+application and projection references so domain behaviour is specified once.
+A durable agent capability can reuse synchronized Message references while
+declaring its agent exposure explicitly:
 
 ```ts
 Agent.expose(Message.RenamedTodo).pipe(Agent.remote(Sync.durable(Message.RenamedTodo)))
@@ -185,18 +236,22 @@ Exact syntax is open; duplicated schemas, reducers, or action lists are not.
 
 ## Invariants
 
-Compile-time: variants belong to the union; payloads are exact in hooks; picked
-Model keys exist; projection `get`/`set` agree with `schema`; composition rejects
-contradictions; adapter needs are in Effect environment types.
+Compile-time: variants belong to the union; payloads are exact in hooks; field
+references exist and their source types agree; projection `get`/`set` agree with
+`schema`; composition rejects contradictions; adapter needs are in Effect
+environment types.
 
-Development-time: a durable transition mutates local-only state; a durable replay
-depends on ambient nondeterminism; a presence transition mutates durable state; a
-durable transition produces a prohibited Command.
+Development-time: a durable transition mutates local-only state; a presence
+transition mutates durable state; a durable transition produces a prohibited
+Command. Property tests should exercise determinism and projection laws, but
+runtime guards cannot prove absence of ambient nondeterminism or local reads.
 
 ## Milestones
 
-1. **`Sync.pick`** — projection with inference and negative type tests. No
-   Foldkit dependency; useful on its own.
+1. **Shared projection primitives** — consolidate the initial sync `pick` and
+   agent's read projection under surface, preserving entry points. Prove codec
+   inference, immutable declarations, get/set behavior, and composition with
+   runtime and negative type tests; no DOM or storage dependency in this core.
 2. **`Sync.forApplication`** — derive `empty`, the durable predicate, and
    `replay` from `Model`/`Message`/`initial`/`update`; still returns a
    `SyncDefinition` fed to `defineSync`. Reference-based classification.
@@ -210,8 +265,8 @@ durable transition produces a prohibited Command.
 
 Acceptance for the whole issue: the example expresses its sync configuration with
 no explicit generics, no `as`, no duplicated Message schema or reducer, no string
-tags, composable fragments, exact payload inference, and browser/server adapters
-over one contract, with negative type tests.
+field paths or Message tags by default, composable fragments, exact payload
+inference, and browser/server adapters over one contract, with negative type tests.
 
 ## Options considered
 
@@ -296,9 +351,9 @@ the mount is generalized.
 
 ## Remaining questions
 
-- Confirm the subpath name (`foldkit-sync/foldkit`) and that `pick` staying in the
-  root while the DX subpath re-exports it is acceptable.
+- Finalize the `foldkit-sync/foldkit` subpath and migration of the existing root
+  `pick(Model, keys)` export to surface internals. Reference-based selection is
+  the default in the new API; string keys remain a compatibility/opt-in form.
 - How a durable transition that returns an `OutMessage` (a submodel) is treated:
   rejected like a Command, or allowed.
 - How `presence` reuses the authenticated peer identity the server already has.
-
