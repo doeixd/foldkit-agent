@@ -8,6 +8,7 @@ import { Schema } from 'effect'
 import {
   Surface,
   type AppScope,
+  type Contract,
   type MessageSet,
   type Projection,
   type RunnableApplication,
@@ -75,6 +76,8 @@ export interface DefinedSync<
   readonly surface: Surface<AppModel, Schema.Struct.Type<Fields>, MsgOf<Ms>, void>
   readonly projection: WritableProjection<AppModel, Fields>
   readonly messages: Ms
+  /** For `Module`: this contract owns the shared projection's paths and records the durable tags. */
+  readonly contract: Contract
 }
 
 /** The sync constructors specialized to one application. */
@@ -212,6 +215,15 @@ export const forApplication = <
       messages: durable.constructors,
     })
 
-    return { ...sync, surface, projection: shared, messages: durable.constructors }
+    const contract: Contract = {
+      kind: 'sync',
+      name: surface.name,
+      owner: app.owner,
+      owns: shared.dependencies,
+      observes: shared.dependencies,
+      messages: [...durable.tags],
+      requirements: [],
+    }
+    return { ...sync, surface, projection: shared, messages: durable.constructors, contract }
   },
 })

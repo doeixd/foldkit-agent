@@ -194,7 +194,10 @@ export const BoardSurface = Surface.make(App, 'Board', {
 // ---------------------------------------------------------------------------
 
 export const Notes = Projection.pick(App.fields.notes)
-const NoteChanges = MessageSet.make(App, [Message.RequestedCreateNote, Message.RequestedRenameNote])
+export const NoteChanges = MessageSet.make(App, [
+  Message.RequestedCreateNote,
+  Message.RequestedRenameNote,
+])
 export const KitchenSync: SyncContract<
   Message,
   { readonly notes: ReadonlyArray<typeof Note.Type> }

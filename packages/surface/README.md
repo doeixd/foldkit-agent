@@ -173,6 +173,37 @@ Surface.rootView(TodoDetail, undefined, render)    // bound to the app root
 `Surface.make` does not evaluate `projection(undefined)` for a parameterized
 Surface, because the projection may read `params`.
 
+## Modules
+
+A `Module` collects an application's contracts as pure data, so their
+relationships can be validated and inspected without starting a runtime. Sync,
+Remote, and Agent contracts carry a `contract` description; a Surface is
+described in place (`Surface.contract(surface, params)` for a parameterized one).
+
+```ts
+import { Module } from 'foldkit-surface'
+
+const Project = Module.make(App, [BoardSurface, ProjectSync, ProjectRemote, ProjectAgent])
+
+Module.validate(Project) // [] or findings
+Module.manifest(Project) // fields, Messages, who owns each Model path, contracts
+Module.toMarkdown(Project)
+```
+
+```text
+Model
+├── route           LOCAL
+├── selectedNoteId  LOCAL
+├── notes           SYNC notes
+└── remote          REMOTE remote
+```
+
+`validate` reports what the types cannot: a contract from another application,
+a duplicate `kind:name`, two owners of overlapping Model paths, a Message
+recorded by two replication contracts, and a path or Message the application
+does not declare. `Module.add(module, ...more)` returns a new Module, so feature
+modules can contribute their contracts independently.
+
 ## What it owns
 
 - Reference-based Model selection (`App.fields`, `Projection.pick`,

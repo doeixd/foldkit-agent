@@ -1,5 +1,5 @@
 import type { Schema } from 'effect'
-import type { Application, Projection, WritableProjection } from 'foldkit-surface'
+import type { Application, Contract, Projection, WritableProjection } from 'foldkit-surface'
 import { type Definition, make } from './make.js'
 import {
   type AnyCapabilitiesByName,
@@ -52,10 +52,14 @@ export interface ApplicationAgent<Model, Principal> extends Omit<
     ByName = AnyCapabilitiesByName,
     ByTag = AnyCapabilitiesByTag,
   >(options: {
+    /** Names the contract for `Module`; defaults to `'agent'`. */
+    readonly name?: string | undefined
     readonly context?: R
     readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
     readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
-  }) => Definition<Model, ProjectionValue<R>, Principal, ByName, ByTag>
+  }) => Definition<Model, ProjectionValue<R>, Principal, ByName, ByTag> & {
+    readonly contract: Contract
+  }
   /**
    * Fixes the `Principal` that `authorize` and the host's `principal` see. A
    * `Principal` cannot be a positional type argument beside an inferred Model,
@@ -80,17 +84,37 @@ const buildAgent = <Model, Principal>(
   }) as ApplicationAgent<Model, Principal>['exposeSubset']
 
   const agentMake = <R extends ReadableProjection<Model, any> | undefined, ByName, ByTag>(options: {
+    readonly name?: string | undefined
     readonly context?: R
     readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
     readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
-  }): Definition<Model, ProjectionValue<R>, Principal, ByName, ByTag> =>
-    make<Model, ProjectionValue<R>, Principal, ByName, ByTag>({
-      ...(options.context === undefined
-        ? {}
-        : { context: toProjection(options.context as ReadableProjection<Model, any>) }),
+  }): Definition<Model, ProjectionValue<R>, Principal, ByName, ByTag> & {
+    readonly contract: Contract
+  } => {
+    const context =
+      options.context === undefined
+        ? undefined
+        : toProjection<Model, ReadableProjection<Model, any>>(
+            options.context as ReadableProjection<Model, any>,
+          )
+    const definition = make<Model, ProjectionValue<R>, Principal, ByName, ByTag>({
+      ...(context === undefined ? {} : { context }),
       messages: options.messages,
       resources: options.resources,
     })
+    return {
+      ...definition,
+      contract: {
+        kind: 'agent',
+        name: options.name ?? 'agent',
+        owner: app.owner,
+        owns: [],
+        observes: context?.dependencies ?? [],
+        messages: options.messages.variants.map(variant => variant.tag),
+        requirements: context?.requirements ?? [],
+      },
+    }
+  }
 
   return {
     expose: expose as ApplicationAgent<Model, Principal>['expose'],

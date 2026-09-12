@@ -566,7 +566,7 @@ const ProjectCard = Surface.make(App, "ProjectCard", {
 - `Surface.embed(childRenderer)` composes a child: `ParentModel extends ChildModel`
   enforces "child Model requirement ⊆ parent projected Model" and `Subset`
   enforces "child Message set ⊆ parent Message set".
-- `Surface.registry(App, [surfaces])` is explicit (no hidden global registry).
+- `Module.make(App, [contracts])` is explicit (no hidden global registry).
 
 `HtmlBuilder` is invariant, so a superset builder cannot be *structurally*
 narrowed; `view`/`embed`/`rootView` cast soundly, and the subset checks are what
@@ -1658,7 +1658,7 @@ const journal = yield* makeJournal({
 | Dependency merge | `struct`/`array`/`option`/`select` union and de-duplicate; result is order-independent | Masking, DevTools, and invalidation read one canonical set. |
 | `ModelRef.select` on an optional focus | Maps inside `Option`, preserving absence (`Projection<Root, Option<P>>`) | No silent collapse of `Option<Option<A>>`. |
 | `Projection.array`/`option` | Wrap the whole value (`ReadonlyArray<Root>→ReadonlyArray<Value>`, `Option<Root>→Option<Value>`) | Avoids accidental double-wrap; nesting stays explicit. |
-| `Surface.registry` | Explicit descriptor; throws on a duplicate `name` | No hidden global registry; fail fast. |
+| `Module` | Explicit collection of contracts; `validate` reports a duplicate `kind:name`, overlapping owners, and a foreign contract | No hidden global registry; the architecture is data. |
 | Reserved ModelRef names | `at`/`index`/`select`/`Schema`/`optic`/`dependency`/`get`/`set` are reserved; a Struct field with one of these names throws when the tree is built | A field must not silently shadow a method. |
 | Surface rendering | Renderers are Model-consuming; `rootView` is the Root boundary; `embed` composes with Model and Message subset checks | A parent has its projected Model, not Root, so children must read from it structurally. |
 | Surface descriptor | No eager `Model`/`dependencies`; derive via `projection(params)` | A parameterized projection reads `params`, so eager evaluation with `undefined` is invalid. |
@@ -2061,11 +2061,13 @@ why here.
 
 ### Phase 15 — Tooling
 
-`Surface.registry`, DevTools Surface inspection, dependency/capability display,
-optional development MCP exposure. No behavior changes.
+`Module` (manifest, validation, Markdown), DevTools Surface inspection,
+dependency/capability display, optional development MCP exposure. No behavior
+changes.
 
-**Acceptance:** DevTools shows observes/emits for a registered Surface; duplicate
-names are rejected; production exposure remains separately opt-in.
+**Acceptance:** `Module.manifest` shows ownership and observes/emits for every
+contract; duplicate names and overlapping owners are reported; production
+exposure remains separately opt-in.
 
 ---
 

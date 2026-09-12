@@ -128,15 +128,6 @@ describe('Surface runtime', () => {
     expect(selected.read({ ...example, projects: {} })).toEqual(Option.none())
   })
 
-  it('rejects duplicate Surface names in a registry', () => {
-    const model = () => Projection.struct({ name: App.model.session.user.name })
-    const a = Surface.make(App, 'Card', { model, messages: [Message.Ping] })
-    const b = Surface.make(App, 'Card', { model, messages: [Message.Ping] })
-
-    expect(() => Surface.registry(App, [a, b])).toThrow('Duplicate Surface name: Card')
-    expect(Surface.registry(App, [a]).surfaces).toEqual([a])
-  })
-
   it('treats an empty selection as a strict empty object', () => {
     // `Projection.Model` is the narrow `Schema.Schema` view; decode at the test
     // boundary needs the full codec.

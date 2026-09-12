@@ -621,6 +621,8 @@ export interface SurfaceInspection {
 
 export interface Surface<Root, Model, Message, Params> {
   readonly name: string
+  /** Identity token of the application this Surface belongs to. */
+  readonly owner: object
   readonly Params: Schema.Schema<Params> | undefined
   readonly Message: Schema.Schema<Message>
   readonly messages: readonly unknown[]
@@ -962,6 +964,7 @@ export const Surface = {
       config.model({ model: app.model, params })
     return {
       name,
+      owner: app.owner,
       Params: config.Params,
       Message: Schema.Never as unknown as Schema.Schema<MsgOf<Ms>>,
       messages: config.messages ?? [],
@@ -1025,25 +1028,24 @@ export const Surface = {
    * registry. Duplicate names are rejected here so a diagnostic name cannot
    * silently collide.
    */
-  registry: <
-    Root,
-    F extends Schema.Struct.Fields,
-    Cases extends Record<string, Schema.Struct.Fields>,
-  >(
-    app: AppScope<Root, F, Cases>,
-    surfaces: readonly Surface<Root, any, any, any>[],
-  ): {
-    readonly app: AppScope<Root, F, Cases>
-    readonly surfaces: readonly Surface<Root, any, any, any>[]
-  } => {
-    const seen = new Set<string>()
-    for (const surface of surfaces) {
-      if (seen.has(surface.name)) {
-        throw new Error(`Duplicate Surface name: ${surface.name}`)
-      }
-      seen.add(surface.name)
+  /**
+   * A Surface as a `Contract` for `Module`: what it observes, requires, and may
+   * emit. A parameterized Surface needs its `params` to build the projection.
+   */
+  contract: <Root, Model, Message, Params>(
+    surface: Surface<Root, Model, Message, Params>,
+    params: Params,
+  ): Contract => {
+    const projection = surface.projection(params)
+    return {
+      kind: 'surface',
+      name: surface.name,
+      owner: surface.owner,
+      owns: [],
+      observes: projection.dependencies,
+      messages: surface.messages.map(messageTag).filter((tag): tag is string => tag !== undefined),
+      requirements: projection.requirements,
     }
-    return { app, surfaces }
   },
 
   /**
@@ -1067,3 +1069,250 @@ export const Surface = {
 // ===========================================================================
 // Entity, Selection, Remote moved to `foldkit-remote` (Phase 3).
 // ===========================================================================
+
+// ===========================================================================
+// Module: the pure composition root
+// ===========================================================================
+
+/**
+ * What one contract claims about an application, as data. Sync, Remote, and
+ * Agent attach one to the values they produce; `Surface.contract` derives one
+ * from a Surface. `owns` are the Model paths the contract is the authority for
+ * (a replicated projection, a remote store); `observes` are the paths it reads.
+ */
+export interface Contract {
+  readonly kind: string
+  readonly name: string
+  /** The application's identity token; absent when the value cannot know it. */
+  readonly owner?: object | undefined
+  readonly owns: DependencyTree
+  readonly observes: DependencyTree
+  /** Message tags the contract may cause, expose, or record. */
+  readonly messages: readonly string[]
+  readonly requirements: readonly Requirement[]
+}
+
+/** Contracts of one application, in declaration order. Data, not a runtime. */
+export interface Module<
+  Root,
+  F extends Schema.Struct.Fields,
+  Cases extends Record<string, Schema.Struct.Fields>,
+> {
+  readonly app: AppScope<Root, F, Cases>
+  readonly contracts: readonly Contract[]
+}
+
+export interface Finding {
+  readonly rule:
+    | 'foreign-contract'
+    | 'duplicate-name'
+    | 'ownership-overlap'
+    | 'message-claimed-twice'
+    | 'unknown-path'
+    | 'unknown-message'
+  /** `kind:name` of each contract involved. */
+  readonly contracts: readonly string[]
+  readonly message: string
+}
+
+/** Who owns a Model path; `undefined` is local state. */
+export interface Ownership {
+  readonly path: readonly string[]
+  readonly owner: { readonly kind: string; readonly name: string } | undefined
+}
+
+export interface ModuleManifest {
+  readonly fields: readonly string[]
+  readonly messages: readonly string[]
+  readonly ownership: readonly Ownership[]
+  readonly contracts: readonly Omit<Contract, 'owner'>[]
+  readonly findings: readonly Finding[]
+}
+
+/** A value `Module.make` accepts: a contract, a value carrying one, or a Surface without params. */
+export type ModuleItem<Root> =
+  Contract | { readonly contract: Contract } | Surface<Root, any, any, void>
+
+const label = (contract: Contract): string => `${contract.kind}:${contract.name}`
+const pathKey = (path: readonly string[]): string => path.join('.')
+const isPrefix = (prefix: readonly string[], path: readonly string[]): boolean =>
+  prefix.length <= path.length && prefix.every((segment, index) => segment === path[index])
+
+// A carried contract wins: a sync contract also has a `projection` (writable, not a function).
+const toContract = <Root>(item: ModuleItem<Root>): Contract =>
+  'contract' in item
+    ? item.contract
+    : 'projection' in item
+      ? Surface.contract(item, undefined)
+      : item
+
+const applicationTags = (app: AppScope<any, any, any>): readonly string[] =>
+  Object.entries(app.Message as unknown as Record<string, unknown>)
+    .filter(([key, value]) => messageTag(value) === key)
+    .map(([key]) => key)
+
+/** Contracts that own at least one path, with a stable label. */
+const owners = (module: Module<any, any, any>) =>
+  module.contracts.filter(contract => contract.owns.length > 0)
+
+/**
+ * Collects an application's contracts as pure data so their relationships can
+ * be validated and inspected without starting a runtime.
+ *
+ * ```ts
+ * const Project = Module.make(App, [BoardSurface, ProjectSync, ProjectRemote, ProjectAgent])
+ * Module.validate(Project) // findings, or []
+ * Module.toMarkdown(Project)
+ * ```
+ */
+export const Module = {
+  make: <Root, F extends Schema.Struct.Fields, Cases extends Record<string, Schema.Struct.Fields>>(
+    app: AppScope<Root, F, Cases>,
+    items: readonly ModuleItem<Root>[] = [],
+  ): Module<Root, F, Cases> => ({ app, contracts: items.map(toContract) }),
+
+  /** A new Module with more contracts; the input is unchanged. */
+  add: <Root, F extends Schema.Struct.Fields, Cases extends Record<string, Schema.Struct.Fields>>(
+    module: Module<Root, F, Cases>,
+    ...items: readonly ModuleItem<Root>[]
+  ): Module<Root, F, Cases> => ({
+    app: module.app,
+    contracts: [...module.contracts, ...items.map(toContract)],
+  }),
+
+  /**
+   * Cross-contract invariants the types cannot express: a contract from another
+   * application, a duplicate `kind:name`, two owners of overlapping Model paths,
+   * a Message recorded by two replication contracts, and a path or Message the
+   * application does not declare.
+   */
+  validate: (module: Module<any, any, any>): readonly Finding[] => {
+    const findings: Finding[] = []
+    const fields = new Set(Object.keys(module.app.Model.fields))
+    const tags = new Set(applicationTags(module.app))
+    const seen = new Map<string, Contract>()
+
+    for (const contract of module.contracts) {
+      const name = label(contract)
+      if (contract.owner !== undefined && contract.owner !== module.app.owner)
+        findings.push({
+          rule: 'foreign-contract',
+          contracts: [name],
+          message: `${name} belongs to a different application`,
+        })
+      const duplicate = seen.get(name)
+      if (duplicate !== undefined && duplicate !== contract)
+        findings.push({
+          rule: 'duplicate-name',
+          contracts: [name],
+          message: `${name} is declared twice`,
+        })
+      seen.set(name, contract)
+      for (const path of [...contract.owns, ...contract.observes]) {
+        const head = path[0]
+        if (head !== undefined && !fields.has(head))
+          findings.push({
+            rule: 'unknown-path',
+            contracts: [name],
+            message: `${name} references "${pathKey(path)}", which is not a Model field`,
+          })
+      }
+      for (const tag of contract.messages)
+        if (!tags.has(tag))
+          findings.push({
+            rule: 'unknown-message',
+            contracts: [name],
+            message: `${name} names "${tag}", which is not a Message of this application`,
+          })
+    }
+
+    const owning = owners(module)
+    for (let i = 0; i < owning.length; i += 1)
+      for (let j = i + 1; j < owning.length; j += 1) {
+        const a = owning[i]!
+        const b = owning[j]!
+        for (const pa of a.owns)
+          for (const pb of b.owns)
+            if (isPrefix(pa, pb) || isPrefix(pb, pa))
+              findings.push({
+                rule: 'ownership-overlap',
+                contracts: [label(a), label(b)],
+                message: `${label(a)} owns "${pathKey(pa)}" and ${label(b)} owns "${pathKey(pb)}"`,
+              })
+      }
+
+    const recorded = new Map<string, Contract>()
+    for (const contract of module.contracts.filter(contract => contract.kind === 'sync'))
+      for (const tag of contract.messages) {
+        const other = recorded.get(tag)
+        if (other !== undefined && other !== contract)
+          findings.push({
+            rule: 'message-claimed-twice',
+            contracts: [label(other), label(contract)],
+            message: `"${tag}" is durable in both ${label(other)} and ${label(contract)}`,
+          })
+        else recorded.set(tag, contract)
+      }
+
+    return findings
+  },
+
+  /**
+   * The application's fields and Messages, who owns each Model path (local when
+   * no contract does), every contract, and the findings. Reproducible for a
+   * given Module, so it can be committed and diffed.
+   */
+  manifest: (module: Module<any, any, any>): ModuleManifest => {
+    const ownership: Ownership[] = []
+    const owning = owners(module)
+    for (const field of Object.keys(module.app.Model.fields)) {
+      const claims = owning.flatMap(contract =>
+        contract.owns
+          .filter(path => path[0] === field)
+          .map(path => ({ path, owner: { kind: contract.kind, name: contract.name } })),
+      )
+      const whole = claims.find(claim => claim.path.length === 1)
+      if (whole !== undefined) ownership.push(whole)
+      else {
+        ownership.push({ path: [field], owner: undefined })
+        ownership.push(...claims.sort((a, b) => pathKey(a.path).localeCompare(pathKey(b.path))))
+      }
+    }
+    return {
+      fields: Object.keys(module.app.Model.fields),
+      messages: applicationTags(module.app),
+      ownership,
+      contracts: module.contracts.map(({ owner: _owner, ...rest }) => rest),
+      findings: Module.validate(module),
+    }
+  },
+
+  /** The manifest as Markdown: the ownership tree, a table of contracts, and findings. */
+  toMarkdown: (module: Module<any, any, any>): string => {
+    const manifest = Module.manifest(module)
+    const lines: string[] = ['```text', 'Model']
+    const width = Math.max(0, ...manifest.ownership.map(row => pathKey(row.path).length))
+    manifest.ownership.forEach((row, index) => {
+      const last = index === manifest.ownership.length - 1
+      const owner =
+        row.owner === undefined ? 'LOCAL' : `${row.owner.kind.toUpperCase()} ${row.owner.name}`
+      lines.push(`${last ? '└── ' : '├── '}${pathKey(row.path).padEnd(width)}  ${owner}`)
+    })
+    lines.push(
+      '```',
+      '',
+      '| Contract | Owns | Observes | Messages | Requirements |',
+      '| --- | --- | --- | --- | --- |',
+    )
+    for (const contract of manifest.contracts)
+      lines.push(
+        `| ${contract.kind}:${contract.name} | ${contract.owns.map(pathKey).join(', ')} | ${contract.observes.map(pathKey).join(', ')} | ${contract.messages.join(', ')} | ${contract.requirements.map(r => `${r.entity}:${r.id}`).join(', ')} |`,
+      )
+    if (manifest.findings.length > 0) {
+      lines.push('', '## Findings', '')
+      for (const finding of manifest.findings)
+        lines.push(`- **${finding.rule}** ${finding.message}`)
+    }
+    return lines.join('\n')
+  },
+}

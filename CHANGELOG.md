@@ -15,6 +15,16 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-surface` (private)
 
+- **`Module`, the pure composition root.** `Module.make(App, [contracts])`
+  collects an application's contracts as data; `Module.validate` reports a
+  contract from another application, a duplicate `kind:name`, two owners of
+  overlapping Model paths, a Message durable in two replication contracts, and
+  a path or Message the application does not declare; `Module.manifest` and
+  `Module.toMarkdown` show who owns each Model path (local, sync, or remote) and
+  every contract's observes/messages/requirements. A `Contract` is the shared
+  description: `Surface.contract` derives one from a Surface, and Sync, Remote,
+  and Agent attach one to the values they produce. `Surface.registry` is
+  removed; `Module` is the explicit collection (#60, sections 1 and 8).
 - **The primitives are first-class.** `Projection.pick`/`Projection.compose`
   (were `Surface.pick`/`Surface.compose`) build writable projections, and
   `MessageSet.make(App, [constructors])`/`MessageSet.union` (were
@@ -49,6 +59,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote` (private)
 
+- **A `Contract` for `Module`.** `Remote.at` attaches `contract`: the bound
+  Remote owns its store's Model path, named after it.
 - **A real Remote submodel.** `RemoteModel` is the four producers' shared state
   (`entities`, `connections`, `optimistic`, `live`, `mutations`, `gaps`), and
   `Remote.update` is the single reducer over reads, mutation results, live events,
@@ -213,6 +225,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-agent`
 
+- **A `Contract` for `Module`.** `Agent.forApplication(App).make` attaches
+  `contract`: what the agent observes (its context projection) and the Message
+  tags it exposes; `name` (default `'agent'`) names it. `Agent.make` alone
+  cannot know the application and attaches none.
 - **`define` is `make`.** `Agent.define`, `Agent.forModel<Model>().define`, and
   `Agent.forApplication(App).define` are `make`, and `DefineOptions` is
   `MakeOptions`, matching `Sync.forApplication(App).make` and `Surface.make`
@@ -289,6 +305,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-sync`
 
+- **A `Contract` for `Module`.** `Sync.forApplication(App).make` attaches
+  `contract`: the replica owns the shared projection's paths and records the
+  durable tags, so `Module.validate` catches two replication contracts over the
+  same field or Message.
 - **Surface-based contract.** The standalone `pick`/`Projection` (#59 spike) is
   gone, superseded by the shared Surface `ModelRef`/`Projection`.
   `Sync.forApplication(App).make({ documentId, shared, durable })` derives the

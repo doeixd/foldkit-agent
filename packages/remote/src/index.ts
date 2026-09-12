@@ -7,7 +7,7 @@
  */
 import { Context, Effect, Layer, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
-import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
+import type { Contract, ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
 import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
 import {
   addLayer,
@@ -660,6 +660,8 @@ declare const boundRemoteNames: unique symbol
 export interface BoundRemote<AppModel, Store extends RemoteModel, Names extends string = string> {
   readonly definition: RemoteDescriptor
   readonly store: ModelRef<AppModel, Store>
+  /** For `Module`: owns the store's Model path. */
+  readonly contract: Contract
   /** Phantom: the entity names this Remote definition registers. */
   readonly [boundRemoteNames]?: Names
 }
@@ -982,6 +984,16 @@ export const Remote = {
   ): BoundRemote<AppModel, Store, EntityName<Entities[number]>> => ({
     definition,
     store,
+    contract: {
+      kind: 'remote',
+      name: store.dependency.join('.') || 'remote',
+      // A generated field reference knows its application; a raw optic does not.
+      owner: (store as { readonly owner?: object }).owner,
+      owns: [store.dependency],
+      observes: [store.dependency],
+      messages: [],
+      requirements: [],
+    },
   }),
 
   /**

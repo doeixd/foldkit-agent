@@ -7,7 +7,7 @@ import { Optic, Schema } from 'effect'
 import type { Option } from 'effect'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 import { defineMessageUnion } from 'foldkit/message'
-import { ModelRef, Projection, Surface } from '../src/index.js'
+import { ModelRef, Module, Projection, Surface } from '../src/index.js'
 
 // --- fixtures --------------------------------------------------------------
 
@@ -177,13 +177,13 @@ const _appView: (model: ModelValue, h: HtmlBuilder<AppMessage>) => Html = Surfac
   cardView,
 )
 
-// --- registry: explicit collection, duplicate and cross-App rejection ------
+// --- Module: explicit collection and cross-App rejection --------------------
 
 const CardA = Surface.make(App, 'CardA', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
   messages: [Message.ChangedProjectName],
 })
-const _registry = Surface.registry(App, [ProjectCard, CardA])
+const _module = Module.make(App, [ProjectCard, CardA])
 
 const OtherModel = Schema.Struct({ route: Schema.String })
 const OtherMessage = defineMessageUnion({ Ping: {} })
@@ -193,7 +193,7 @@ const OtherCard = Surface.make(OtherApp, 'OtherCard', {
   messages: [OtherMessage.Ping],
 })
 // @ts-expect-error `OtherCard` belongs to a different App Root
-Surface.registry(App, [OtherCard])
+Module.make(App, [OtherCard])
 
 Surface.make(App, 'BadCard', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
