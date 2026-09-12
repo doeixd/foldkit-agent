@@ -118,6 +118,17 @@ describe('Module', () => {
     ])
   })
 
+  it('renders contracts and their Model edges as Mermaid', () => {
+    const mermaid = Module.toMermaid(Project)
+    expect(mermaid).toContain('flowchart LR')
+    expect(mermaid).toContain('    f2["notes"]')
+    expect(mermaid).toContain('  c0["surface:Board"]')
+    expect(mermaid).toContain('  c0 -.-> f2')
+    expect(mermaid).toContain('  c1 -->|owns| f2')
+    // An owned path is not also drawn as observed.
+    expect(mermaid).not.toContain('  c1 -.-> f2')
+  })
+
   it('renders the ownership tree and contracts as Markdown', () => {
     const markdown = Module.toMarkdown(Module.add(Project, { ...notesSync, name: 'dup' }))
     expect(markdown).toContain('├── route           LOCAL')

@@ -32,6 +32,29 @@ describe('Agent.forApplication', () => {
     ])
   })
 
+  it('accepts a feature Surface as context, so the view and the agent share it', () => {
+    const Board = Surface.make(App, 'Board', {
+      model: ({ model }) => Projection.struct({ todos: model.todos }),
+      messages: [MessageUnion.RequestedDeleteTodo],
+    })
+    const definition = TodoAgent.make({
+      name: 'board',
+      context: Board,
+      messages: TodoAgent.expose(MessageUnion, { RequestedDeleteTodo: 'Delete' }),
+    })
+
+    expect(definition.context?.read(emptyModel)).toEqual({ todos: [] })
+    expect(definition.contract).toEqual({
+      kind: 'agent',
+      name: 'board',
+      owner: App.owner,
+      owns: [],
+      observes: [['todos']],
+      messages: ['RequestedDeleteTodo'],
+      requirements: [],
+    })
+  })
+
   it('still accepts a read-only Projection for context', () => {
     const definition = TodoAgent.make({
       context: Projection.of(Model)({ todos: true }),

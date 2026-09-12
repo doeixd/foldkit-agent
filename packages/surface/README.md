@@ -188,6 +188,7 @@ const Project = Module.make(App, [BoardSurface, ProjectSync, ProjectRemote, Proj
 Module.validate(Project) // [] or findings
 Module.manifest(Project) // fields, Messages, who owns each Model path, contracts
 Module.toMarkdown(Project)
+Module.toMermaid(Project)
 ```
 
 ```text

@@ -19,8 +19,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   collects an application's contracts as data; `Module.validate` reports a
   contract from another application, a duplicate `kind:name`, two owners of
   overlapping Model paths, a Message durable in two replication contracts, and
-  a path or Message the application does not declare; `Module.manifest` and
-  `Module.toMarkdown` show who owns each Model path (local, sync, or remote) and
+  a path or Message the application does not declare; `Module.manifest`,
+  `Module.toMarkdown`, and `Module.toMermaid` show who owns each Model path (local, sync, or remote) and
   every contract's observes/messages/requirements. A `Contract` is the shared
   description: `Surface.contract` derives one from a Surface, and Sync, Remote,
   and Agent attach one to the values they produce. `Surface.registry` is
@@ -225,6 +225,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-agent`
 
+- **A Surface as context.** `Agent.forApplication(App).make({ context })` accepts
+  a feature Surface (without params) beside a `Projection` or a writable pick,
+  so the Surface a view renders is also what the agent sees (#60, section 3).
 - **A `Contract` for `Module`.** `Agent.forApplication(App).make` attaches
   `contract`: what the agent observes (its context projection) and the Message
   tags it exposes; `name` (default `'agent'`) names it. `Agent.make` alone

@@ -1315,4 +1315,24 @@ export const Module = {
     }
     return lines.join('\n')
   },
+
+  /**
+   * The manifest as a Mermaid flowchart: Model fields in a subgraph, one node
+   * per contract, a solid edge for ownership and a dotted edge for observation.
+   */
+  toMermaid: (module: Module<any, any, any>): string => {
+    const manifest = Module.manifest(module)
+    const lines = ['flowchart LR', '  subgraph Model']
+    manifest.fields.forEach((field, index) => lines.push(`    f${index}["${field}"]`))
+    lines.push('  end')
+    const fieldId = (path: readonly string[]): string => `f${manifest.fields.indexOf(path[0]!)}`
+    manifest.contracts.forEach((contract, index) => {
+      lines.push(`  c${index}["${contract.kind}:${contract.name}"]`)
+      for (const path of contract.owns) lines.push(`  c${index} -->|owns| ${fieldId(path)}`)
+      for (const path of contract.observes)
+        if (!contract.owns.some(owned => pathKey(owned) === pathKey(path)))
+          lines.push(`  c${index} -.-> ${fieldId(path)}`)
+    })
+    return lines.join('\n')
+  },
 }

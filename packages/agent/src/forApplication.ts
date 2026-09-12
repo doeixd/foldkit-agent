@@ -1,5 +1,11 @@
 import type { Schema } from 'effect'
-import type { Application, Contract, Projection, WritableProjection } from 'foldkit-surface'
+import type {
+  Application,
+  Contract,
+  Projection,
+  Surface,
+  WritableProjection,
+} from 'foldkit-surface'
 import { type Definition, make } from './make.js'
 import {
   type AnyCapabilitiesByName,
@@ -12,30 +18,38 @@ import { type BoundAgent } from './forModel.js'
 import { type Resource, resource } from './resource.js'
 import { bind } from './runtime.js'
 
-/** A projection an agent can read: a read-only `Projection` or a writable pick. */
+/**
+ * A projection an agent can read: a read-only `Projection`, a writable pick, or
+ * a feature Surface without params, so the Surface a view renders is also what
+ * the agent sees.
+ */
 export type ReadableProjection<Model, Value> =
-  Projection<Model, Value> | WritableProjection<Model, any>
+  Projection<Model, Value> | WritableProjection<Model, any> | Surface<Model, Value, any, void>
 
 /** The value a readable projection produces. */
 export type ProjectionValue<R> =
-  R extends Projection<any, infer V>
+  R extends Surface<any, infer V, any, void>
     ? V
-    : R extends WritableProjection<any, infer F>
-      ? Schema.Struct.Type<F>
-      : unknown
+    : R extends Projection<any, infer V>
+      ? V
+      : R extends WritableProjection<any, infer F>
+        ? Schema.Struct.Type<F>
+        : unknown
 
 /** Adapts the read side of a writable projection to a read-only `Projection`. */
 const toProjection = <Model, R extends ReadableProjection<Model, any>>(
   readable: R,
 ): Projection<Model, ProjectionValue<R>> =>
-  ('read' in readable
-    ? readable
-    : {
-        Model: readable.schema,
-        dependencies: readable.dependencies,
-        requirements: [],
-        read: readable.get,
-      }) as Projection<Model, ProjectionValue<R>>
+  ('projection' in readable
+    ? readable.projection(undefined)
+    : 'read' in readable
+      ? readable
+      : {
+          Model: readable.schema,
+          dependencies: readable.dependencies,
+          requirements: [],
+          read: readable.get,
+        }) as Projection<Model, ProjectionValue<R>>
 
 /**
  * `Agent.forApplication(App)` fixes the Model from a `Surface.application` and
