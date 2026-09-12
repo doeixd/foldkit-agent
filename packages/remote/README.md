@@ -154,7 +154,12 @@ const subscriptions = (model: Model) => [
 only those; a fully-known Surface emits nothing. A read failure and a live stream
 break both arrive as `RemoteMessage`s (`ReadFailed`), so one handler covers
 success and failure. `Remote.live` resumes from `RemoteModel.live`, so the
-application tracks no cursor.
+application tracks no cursor; it stamps each `LiveReceived` with the clock in
+its `{ now }` option (default `Date.now`).
+
+`toMessage` wraps the `RemoteMessage` in the application's Message union. An
+application whose union includes `RemoteMessage` itself omits it: `observe`,
+`live`, and `retain` then emit the `RemoteMessage` as is.
 
 ### Policies
 
@@ -184,10 +189,14 @@ Surface's projection is `ProjectPage.projection(params)`):
 
 ```ts
 Remote.plan(AppRemote, model, projection, options?) // -> Requirement[]
+Remote.storeOf(AppRemote, model) // -> EntityStore, what reads and plans see
 ```
 
 `options` is a `PlanOptions`: `freshness` (`{ now, freshness }`) refreshes an
-entry older than the window, `force` plans every field.
+entry older than the window, `force` plans every field. `Remote.storeOf` is
+the visible store: the base store under the pending optimistic layers,
+computed once per model state, so every read and plan of one render shares
+it.
 
 `Requirement` is plain data — entity, id, fields, and per-relation windows — so a
 plan can be inspected, serialized, diffed, or shown in DevTools.
@@ -253,13 +262,21 @@ Remote.mutateInto(AppRemote, model, RenameProject, { id, name }, requestId)
 // Effect<{ output: { id: string }; model: Model }, RemoteMutationError, RemoteClient>
 ```
 
+Both take a `MutateOptions` last: `{ optimistic }` lists what the request
+changes before the server answers (below); `mutateInto` applies it as the
+`MutationStarted` and settles it with the result.
+
 `Remote.mutate` is the lower-level form. It decodes the typed `Output` **and**
-returns the result's normalized `entities`, so a caller that manages its own
-Messages can reduce them through `Remote.update`:
+returns the result's normalized `entities` and confirmed `connections`, so a
+caller that manages its own Messages can reduce them through `Remote.update`:
 
 ```ts
 Remote.mutate(RenameProject, { id, name }, requestId)
-// Effect<{ output: Output; entities: readonly NormalizedPatch[] }, RemoteMutationError, RemoteClient>
+// Effect<
+//   { output: Output; entities: readonly NormalizedPatch[]; connections: readonly ConnectionChange[] },
+//   RemoteMutationError,
+//   RemoteClient
+// >
 ```
 
 A `MutationSucceeded` message reconciles the patches at most once per
@@ -293,8 +310,9 @@ Data.update(model.remote, {
 ```
 
 Patches are ordered layers over the base store, not inverse patches: the visible
-store (`visibleStore`) is recomputed, and settling removes the layer, so
-overlapping layers rebase for free. Connection changes (`ConnectionChange.prepend`,
+store (`Remote.storeOf`) is recomputed, and settling removes the layer, so
+overlapping layers rebase for free. `ConnectionChange.prepend(connection, ref)`
+takes the `QueryRef` or its identity. Connection changes (`ConnectionChange.prepend`,
 `append`, `remove`) are overlays outside the server-known region; `visibleItems`
 places inserts newest-first and hides a removed edge until a later insert brings
 it back. `MutationSucceeded` writes
@@ -316,7 +334,8 @@ Remote.update(remote, { _tag: 'ConnectionMerged', connection: 'ProjectsByOwner(.
 ```
 
 `items`, `hasNext`, `hasPrevious`, and `isGapped` read the server-known region;
-`Remote.visibleItems(model, connection)` is what a view shows: overlays placed
+`Remote.visibleItems(model, connection)` (a `QueryRef` or its identity) is what
+a view shows: overlays placed
 around it, minus edges a live removal or an optimistic remove hid and edges
 whose target is a tombstone, so a deleted entity never dangles in a list. A
 merged page is newer than the settled overlays it covers: it drops a live
@@ -438,7 +457,9 @@ the same as once.
   application supplies the client and server protocol layers. `ReadBatch` and
   `LiveRequirement` name `REMOTE_PROTOCOL_VERSION`; a server refuses another
   version with `RemoteProtocolError`, so a wire change is a version bump, never
-  silent drift.
+  silent drift. A request names at most `MAX_FIELDS_PER_REQUEST` (256) fields
+  of one entity and nests relations at most `MAX_RELATION_DEPTH` (8) deep; the
+  wire refuses more at decode rather than truncating.
 - The wire `LiveChange` union carries entity patches, deletes, and connection
   insert/remove/invalidate changes; the client adapter reconstructs a `LiveEvent`
   from it. `RemoteServer.live` serves them as a stream.
@@ -447,3 +468,5 @@ the same as once.
   application lists; a Surface it does not list loses its data on the next
   `RetentionChanged`.
 - `RemoteData` is a closed union.
+- A selection picks at least one field: `Selection.make(User, {})` throws,
+  since it would require nothing and read `Ready` for any id.

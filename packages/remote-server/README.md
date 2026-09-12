@@ -66,6 +66,13 @@ const layer = RemoteRpc.toLayer(handlers)
 // FoldkitRemoteRead, FoldkitRemoteMutate, FoldkitRemoteQuery, FoldkitRemoteLive
 ```
 
+`handlers(server, principal, options?)` takes a `HandlerOptions<P, R>`:
+`maxIdsPerEntity` (default 1000) bounds a read batch and a live subscription
+per entity, `maxDepth` (default 8) bounds nested resolution, and `live` is the
+hub whose signals reach the subscriptions this handler registers. In-process,
+the handlers are a `RemoteClient` through `Remote.clientLayer(handlers)`, with
+whatever the sources require supplied by `Layer.provide`.
+
 ## Sources
 
 ### `RemoteServer.entity`
@@ -151,9 +158,10 @@ yield* hub.deleted(Project.ref(projectId))
 
 `changed` intersects the fields with what each subscriber selects, re-reads
 that intersection through the entity's own source under the subscriber's
-principal (one read per principal value; subscribers selecting none of the
-fields do no work), and streams an `EntityPatched` carrying only the fields that
-subscriber may see. `deleted` streams an `EntityDeleted` to the entity's
+principal (one read per principal value and window signature; subscribers
+selecting none of the fields do no work), and streams an `EntityPatched`
+carrying only the fields that subscriber may see. A record the source does not
+return for the changed id reaches nobody. `deleted` streams an `EntityDeleted` to the entity's
 subscribers. Cursors continue from the cursor each subscriber resumed at, so
 the client's duplicate and gap handling is unchanged. A hub and hand-written
 `RemoteServer.live` sources number their events independently; use one or the

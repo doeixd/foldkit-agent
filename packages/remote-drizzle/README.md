@@ -71,6 +71,13 @@ import { databaseLayer } from 'foldkit-remote-drizzle'
 const DatabaseLive = databaseLayer(db)
 ```
 
+In one process (tests, SSR, a worker), the handlers are the client:
+
+```ts
+const client = Remote.clientLayer(handlers).pipe(Layer.provide(DatabaseLive))
+// Remote.prefetch(...).pipe(Effect.provide(client))
+```
+
 ## Bind an entity to a table
 
 ```ts
@@ -132,8 +139,9 @@ const UserSource = source(User, {
 
 The read prunes to the requested columns (always including the primary key),
 batches every id into one `IN (...)`, and returns `{ id, values }` records.
-Authorization stays in `RemoteServer`: the adapter only reads the fields it was
-handed. Use `reader(binding, run)` to inject your own executor for another driver
+The source declares the binding's fields, so a request for any other field
+never reaches it. Authorization stays in `RemoteServer`: the adapter only
+reads the fields it was handed. Use `reader(binding, run)` to inject your own executor for another driver
 or a test.
 
 ## Query connections
@@ -193,8 +201,10 @@ then `Entity.ref(User) | null`, so the client decodes a present null rather than
 failing. A non-nullable key omits the flag. The read selects `projects.owner_id`
 and emits `values.owner = "User:u1"` — the key the ref codec decodes. A null
 foreign key emits `null`, so the client holds a present null rather than
-refetching forever. Select the target's fields separately and let the normalized
-store share it.
+refetching forever. To read the target's fields in the same request, nest a
+selection (`owner: Selection.make(User, { name: true })`): the server follows
+the ref into the `User` source at the next level, and the normalized store
+shares the target between every selection of it.
 
 A to-many relation is an array of refs. The foreign key lives on the target:
 
@@ -376,8 +386,9 @@ joins, grouping and limits, but not Postgres NULL ordering.
   to-many relation loads its children in one `IN (...)`; a many-to-many joins the
   through table to the target. A `Selection.connection` window loads one bounded
   page per parent in one ranked statement (`first`/`last`, plus `after`/`before`
-  for a single parent). An embedded target object is not supported, and `reader`,
-  the injected-executor path, does not load or compute.
+  for a single parent). A row never embeds a target object; a nested selection
+  is resolved by `foldkit-remote-server` level by level through each target's
+  own source. `reader`, the injected-executor path, does not load or compute.
 - Computed fields are counts only (total, not per-page). Other aggregates are not
   built.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.

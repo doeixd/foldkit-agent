@@ -336,8 +336,11 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - The transcript now runs the whole Remote path end to end: a nested `owner`
   selection over Drizzle, a live subscription fed by the server's hub from the
   rename mutation, an optimistic insert into the projects connection confirmed
-  in place by the mutation result, and a dehydrate/hydrate round trip that
-  leaves nothing to fetch (#65, Phase E).
+  in place by the mutation result, a dehydrate/hydrate round trip that
+  leaves nothing to fetch, and two `Remote.retain` passes showing what the
+  Board's roots keep with and without the projects connection (#65, Phase E).
+  The server is reached through `Remote.clientLayer(handlers)` over the
+  database layer rather than a hand-written adapter.
 
 ### `foldkit-remote-example` (example)
 
@@ -347,7 +350,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `RemoteData` moves `Initial → Ready`, a SurfaceView styles and decorates it, a
   `Remote.mutateInto` rename is visible through the same projection, and a
   malformed stored value surfaces as `Failed`. `pnpm demo` runs it; a test asserts
-  every line.
+  every line. The trace also runs the `Remote.observe` entry under
+  `RemotePolicy.staleWhileRevalidate` (`RefreshStarted` reads `Refreshing`,
+  then `Ready`) and a `Remote.retain` pass that collects what the page does
+  not reach.
 
 ### `foldkit-agent`
 

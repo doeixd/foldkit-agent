@@ -160,6 +160,12 @@ changes are overlays outside the server-known region; a result's confirmed
 `connections` take the place of the request's own, so a temporary edge becomes
 the real one in place.
 
+On the server, `RemoteServer.liveHub` turns "these fields of this entity
+changed" into the right patch for each subscriber: it re-reads the changed
+fields a subscriber selects through the entity's own source, under that
+subscriber's principal, so authorization and computed fields take the normal
+path and a subscriber selecting none of the fields costs nothing.
+
 Live data is an Effect streaming RPC. Each stream has a monotonic cursor:
 duplicates are ignored, and an event **ahead** of the cursor is a gap — it is not
 applied, and the stream is recorded so the host can resync rather than silently
@@ -187,9 +193,9 @@ once.
 ## Persistence and recovery
 
 A snapshot is the entity store and nothing else; runtime state stays with the
-session. `dehydrate`/`hydrate` are the deterministic text forms (SSR embeds
-one in the page), `RemotePersistence.save`/`restore` keep one in Effect's
-`KeyValueStore`, and the `Hydrated` Message merges one into the Model by policy
+session. `RemotePersistence.dehydrate`/`hydrate` are the deterministic text
+forms (SSR embeds one in the page), `RemotePersistence.save`/`restore` keep
+one in Effect's `KeyValueStore`, and the `Hydrated` Message merges one into the Model by policy
 (`replace` or `preserve-existing`). A snapshot names its version and `scope`
 and may be bounded by `maxBytes`. The cache is server-derived and
 **disposable**: a snapshot that is another version, another scope, oversized,
@@ -211,19 +217,24 @@ there is nothing to lose.
   not a query engine. `foldkit-remote-drizzle` compiles the selection and query
   it already understands into SQL, and no further.
 
-## Current limits
+## Worked examples and limits
 
-- `examples/remote` is a worked `make → at → select → plan → prefetch → render →
-  mutate` trace, asserted line by line. The test suites remain the exhaustive
-  executable specification: `pnpm exec vitest run packages/remote/test
-  packages/remote-server/test`.
-- Live **connection** events are represented on the wire: `LiveChange` carries
-  entity patches and deletes plus connection insert/remove/invalidate changes,
-  and `RemoteServer.live` streams them.
-- `Query` descriptors are consumed by `Remote.query`/`Remote.queryMessage` and by
-  `foldkit-remote-drizzle`.
-- There is no request-level in-flight dedupe: the planner returns missing fields
-  and the Subscription re-runs when the plan changes.
+- `examples/remote` is a worked `make → at → select → plan → prefetch →
+  refresh → render → mutate → retain` trace against an in-process client, and
+  `examples/kitchen-sink` runs the same path over `foldkit-remote-server` and
+  `foldkit-remote-drizzle` (a nested selection, the live hub, an optimistic
+  insert confirmed in place, hydration, retention). Both are asserted line by
+  line. The test suites remain the exhaustive executable specification:
+  `pnpm exec vitest run packages/remote/test packages/remote-server/test
+  packages/remote-drizzle/test`.
+- The transport is Effect RPC and nothing else; a wire change is a protocol
+  version bump (`REMOTE_PROTOCOL_VERSION`), and a request is bounded in fields
+  per entity, relation depth, and ids per entity.
+- Coalescing is per `RemoteClient` layer, and retention collects only what the
+  application lists in `Remote.retain`.
+- The live hub subscribes the requirements' own entities, not nested relation
+  targets; a change to a target reaches a subscriber through its own
+  requirement or a refetch.
 
 ## See the APIs
 

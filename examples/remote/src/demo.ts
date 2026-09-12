@@ -2,10 +2,10 @@
  * A worked Remote + Surface + Mixins trace. `ProjectPage` is a Surface that
  * selects a project out of the Remote store; a SurfaceView renders the
  * `RemoteData` through Style and Behavior. The demo runs the real path — plan,
- * prefetch, select, render, mutate, and a decode failure — against an
- * in-process `RemoteClient`.
+ * prefetch, select, a stale-while-revalidate refresh, render, mutate,
+ * retention, and a decode failure — against an in-process `RemoteClient`.
  */
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Effect, Layer, Option, Schema, Stream } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
@@ -18,6 +18,7 @@ import {
   Remote,
   RemoteClient,
   RemoteData,
+  RemotePolicy,
   Selection,
   entityKey,
   items,
@@ -200,11 +201,39 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   )
   lines.push(`before fetch: ${describeData(projection.read(initial))}`)
 
+  // The store stamps each write with the clock it is given, so the refresh
+  // below can decide staleness without waiting.
   const store = await Effect.runPromise(
-    Remote.prefetch(AppRemote, initial, projection).pipe(Effect.provide(FakeClient)),
+    Remote.prefetch(AppRemote, initial, projection, { now: () => 1_000 }).pipe(
+      Effect.provide(FakeClient),
+    ),
   )
   const loaded = withStore(initial, store)
   lines.push(`after fetch: ${describeData(projection.read(loaded))}`)
+
+  // A refreshing policy keeps the value visible while it refetches: the
+  // Subscription emits RefreshStarted (the projection reads Refreshing) and
+  // then the read result (Ready again). `toMessage` is omitted, so the entry
+  // emits `RemoteMessage`s that `Data.update` reduces directly.
+  const refreshing = Remote.observe(AppRemote, ProjectPage, { projectId: 'p1' }, undefined, {
+    policy: RemotePolicy.staleWhileRevalidate({ maxAge: 30_000 }),
+    now: () => 60_000,
+  })
+  const refreshMessages = await Effect.runPromise(
+    Stream.runCollect(refreshing.dependenciesToStream(refreshing.modelToDependencies(loaded))).pipe(
+      Effect.provide(FakeClient),
+    ),
+  )
+  const midRefresh = { ...loaded, remote: Data.update(loaded.remote, refreshMessages[0]!) }
+  const refreshed = refreshMessages
+    .slice(1)
+    .reduce(
+      (model, message) => ({ ...model, remote: Data.update(model.remote, message) }),
+      midRefresh,
+    )
+  lines.push(
+    `stale-while-revalidate: ${refreshMessages.map(message => message._tag).join(', ')}; ${describeData(projection.read(midRefresh))} -> ${describeData(projection.read(refreshed))}`,
+  )
 
   // A query runs through RemoteClient and merges into a connection by ref identity.
   const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId: 'u1' }))
@@ -261,6 +290,23 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   )
   lines.push(`mutation RenameProject: output ${JSON.stringify(renamed.output)}`)
   lines.push(`after mutation: ${describeData(projection.read(renamed.model))}`)
+
+  // Retention: the roots are what the active Surfaces reach. A project the page
+  // does not select, and a connection nobody lists, are collected; the page's
+  // project stays.
+  const crowded = withStore(
+    { ...renamed.model, remote: queried },
+    writeEntity(renamed.model.remote.entities, entityKey('Project', 'p2'), { name: 'Borealis' }),
+  )
+  const retain = Remote.retain([ProjectPage.projection({ projectId: 'p1' })])
+  const retention = await Effect.runPromise(
+    Stream.runHead(retain.dependenciesToStream(retain.modelToDependencies(crowded))),
+  )
+  const collected = Data.update(crowded.remote, Option.getOrThrow(retention))
+  const kept = Remote.inspect(collected)
+  lines.push(
+    `retained: ${kept.entities.map(entry => entry.key).join(', ')}; ${Remote.inspect(crowded.remote).entities.length - kept.entities.length} entity and ${Remote.inspect(crowded.remote).connections.length - kept.connections.length} connection collected`,
+  )
 
   const corrupted = withStore(
     loaded,
