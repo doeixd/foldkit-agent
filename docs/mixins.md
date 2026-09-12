@@ -49,7 +49,7 @@ The usual failure modes:
         Style                  Behavior
      appearance              interaction
    (pure data)          (attrs + optional Mount)
-          │                      │
+          │                       │
           └───────────┬──────────┘
                       ▼
                     Mixin

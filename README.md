@@ -76,11 +76,11 @@ state machine:
                          Foldkit application
                  Model · Message · update · Commands
                                 │
-                   observe/project│
+                 observe/project│
                                 ▼
                          foldkit-surface
                  Projection · field refs · subsets
-          ┌───────────┬──────────┴───────────┐
+          ┌───────────┬─────────┴────────────┐
           ▼           ▼                      ▼
    foldkit-agent   foldkit-remote   foldkit-durable
    (webmcp, mcp,   (normalized       (ordered log)

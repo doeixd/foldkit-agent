@@ -13,7 +13,7 @@ runtime.
           ┌───────────┴───────────┐
         Style                  Behavior
      appearance              interaction
-          │                      │
+          │                       │
           └───────────┬──────────┘
                       ▼
                     Mixin

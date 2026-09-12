@@ -122,7 +122,7 @@ Command → `Remote.mutate` — and returns to the Model as a `RemoteMessage`:
 
 ```text
 UI → ClickedRename → update → Command → Remote.mutate ──RPC──▶ server
-                                                              │
+                                                                  │
         Remote.update ◀── MutationSucceeded { output, entities } ◀┘
 ```
 
