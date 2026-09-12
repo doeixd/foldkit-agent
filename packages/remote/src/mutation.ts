@@ -5,6 +5,7 @@
  * `requestId`**, so a transport retry cannot apply the same change twice. An
  * unknown or already-applied result is a no-op.
  */
+import type { Schema } from 'effect'
 import { entityKey, writeEntity, type EntityStore } from './store.js'
 
 export interface NormalizedPatch {
@@ -81,4 +82,22 @@ export const reconcileMutation = (
   const pending = new Set(state.pending)
   pending.delete(requestId)
   return { store: next, state: { ...state, applied, pending } }
+}
+
+/** A mutation an application declares: its name and input/output codecs. */
+export interface MutationDescriptor<Name extends string, Input, Output> {
+  readonly name: Name
+  readonly Input: Schema.Codec<Input>
+  readonly Output: Schema.Codec<Output>
+}
+
+export const Mutation = {
+  make: <const Name extends string, Input, Output>(
+    name: Name,
+    config: { readonly Input: Schema.Codec<Input>; readonly Output: Schema.Codec<Output> },
+  ): MutationDescriptor<Name, Input, Output> => ({
+    name,
+    Input: config.Input,
+    Output: config.Output,
+  }),
 }

@@ -4,27 +4,23 @@
  * are ignored, and a gap is surfaced so the caller can resume or invalidate.
  * Subscriptions are selection-aware and driven by active Surfaces.
  */
+import type { EdgeRef } from './connection.js'
 import { type Connection, type Edge, hasNext, hasPrevious } from './connection.js'
-import { addOverlay, type ConnectionOverlay, type OptimisticState } from './optimistic.js'
+import { addOverlay, type OptimisticState } from './optimistic.js'
 import type { LiveInsertion, LivePolicy } from './query.js'
 import { entityKey, tombstone, writeEntity, type EntityStore } from './store.js'
 
 export type LiveCursor = number
 
-export interface EntityRef {
-  readonly entity: string
-  readonly id: string
-}
-
 export type LiveEvent =
   | {
       readonly _tag: 'EntityPatched'
-      readonly ref: EntityRef
+      readonly ref: EdgeRef
       readonly values: Readonly<Record<string, unknown>>
       readonly changed: ReadonlyArray<string>
       readonly cursor: LiveCursor
     }
-  | { readonly _tag: 'EntityDeleted'; readonly ref: EntityRef; readonly cursor: LiveCursor }
+  | { readonly _tag: 'EntityDeleted'; readonly ref: EdgeRef; readonly cursor: LiveCursor }
   | {
       readonly _tag: 'ConnectionInsert'
       readonly connection: string
