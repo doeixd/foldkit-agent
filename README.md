@@ -17,7 +17,7 @@ same Messages.
 | Package | What it is |
 | --- | --- |
 | [`foldkit-surface`](./packages/surface) | The observation boundary: pure Model projections, reference-based field selection, and typed Message subsets. |
-| [`foldkit-remote`](./packages/remote) | Normalized server state as a Foldkit Submodel: entities, selections, queries, connections, mutations, and live patches. |
+| [`foldkit-remote`](./packages/remote) | Normalized server state as a Foldkit Submodel: entities, selections, queries, connections, mutations, and live changes. |
 | [`foldkit-remote-server`](./packages/remote-server) | Entity, query, mutation, and live sources, selection authorization, and `RemoteRpc` handler compilation. |
 | [`foldkit-remote-drizzle`](./packages/remote-drizzle) | Compiles Remote selections and queries to Drizzle's typed query graph. |
 | [`foldkit-agent`](./packages/agent) | The protocol-neutral agent contract: project a Model and Message union into a deliberate agent interface. [Design rationale](./packages/agent/DESIGN.md). |
