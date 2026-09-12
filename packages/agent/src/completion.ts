@@ -1,7 +1,7 @@
 import { Duration, Effect } from 'effect'
 import { CompletionTimeoutError } from './errors.js'
 import { messageTags } from './tag.js'
-import type { AnyMessage, Completion, Invocation } from './types.js'
+import type { AnyMessage, Completion, DispatchResult, Invocation } from './types.js'
 
 /** How a dispatched Message finished, once a completion contract is declared. */
 export interface CompletionOutcome<Message extends AnyMessage = AnyMessage> {
@@ -9,6 +9,26 @@ export interface CompletionOutcome<Message extends AnyMessage = AnyMessage> {
   /** The Message that completed the operation. */
   readonly message: Message
 }
+
+/** A protocol-neutral reading of a successful dispatch, for an adapter to render. */
+export interface DispatchSummary {
+  /** False only when the capability declared a completion whose status is `failed`. */
+  readonly ok: boolean
+  /** `Dispatched <tag>` without a completion contract, else `<Completed|Failed>: <tag>`. */
+  readonly text: string
+}
+
+/**
+ * Summarizes a dispatch. Every adapter renders the same outcome, so the wording
+ * lives here rather than in each of them.
+ */
+export const summarize = (result: DispatchResult): DispatchSummary => ({
+  ok: result.completion?.status !== 'failed',
+  text:
+    result.completion === undefined
+      ? `Dispatched ${result.tag}`
+      : `${result.completion.status === 'completed' ? 'Completed' : 'Failed'}: ${result.completion.message._tag}`,
+})
 
 /** A completion contract compiled into the tags and predicate the runtime matches on. */
 export interface CompiledCompletion {

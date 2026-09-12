@@ -1,4 +1,4 @@
-import type { Agent } from 'foldkit-agent'
+import { Agent } from 'foldkit-agent'
 import type { ActionTool } from '@agent-native/core/server'
 import { Effect, Schema } from 'effect'
 import type { StandardSchemaV1 } from 'effect/StandardSchema'
@@ -159,14 +159,12 @@ export const actions = (options: ActionsOptions): Record<string, ActionEntry> =>
         }
 
         const result = outcome.success
+        const summary = Agent.summarize(result)
         return {
-          ok: result.completion?.status !== 'failed',
+          ok: summary.ok,
           tag: result.tag,
           ...(result.completion === undefined ? {} : { completion: result.completion.status }),
-          message:
-            result.completion === undefined
-              ? `Dispatched ${result.tag}`
-              : `${result.completion.status === 'completed' ? 'Completed' : 'Failed'}: ${result.completion.message._tag}`,
+          message: summary.text,
         }
       },
     }

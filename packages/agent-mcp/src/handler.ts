@@ -1,4 +1,4 @@
-import type { Agent } from 'foldkit-agent'
+import { Agent } from 'foldkit-agent'
 import { Effect } from 'effect'
 import {
   type Id,
@@ -157,16 +157,13 @@ export const handler = <Model, Context_, Principal, ByName, ByTag>(
 
       const result = outcome.success
       const completion = result.completion
-      const text =
-        completion === undefined
-          ? `Dispatched ${result.tag}`
-          : `${completion.status === 'completed' ? 'Completed' : 'Failed'}: ${completion.message._tag}`
+      const summary = Agent.summarize(result)
 
       return success(
         id,
-        completion !== undefined && completion.status === 'failed'
-          ? toolError(text)
-          : textResult(text, {
+        !summary.ok
+          ? toolError(summary.text)
+          : textResult(summary.text, {
               capability: result.name,
               tag: result.tag,
               ...(completion === undefined ? {} : { completion: completion.status }),

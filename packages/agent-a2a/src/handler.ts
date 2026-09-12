@@ -1,3 +1,4 @@
+import { Agent } from 'foldkit-agent'
 import { Effect, Schema } from 'effect'
 import {
   type AgentRuntime,
@@ -186,8 +187,9 @@ export const handler = (options: HandlerOptions): Handler => {
       }
 
       const result = outcome.success
+      const summary = Agent.summarize(result)
       // A declared failure Message is work that ran and did not succeed.
-      const state: TaskState = result.completion?.status === 'failed' ? 'failed' : 'completed'
+      const state: TaskState = summary.ok ? 'completed' : 'failed'
 
       return success(
         id,
@@ -198,13 +200,7 @@ export const handler = (options: HandlerOptions): Handler => {
           status: {
             state,
             timestamp: clock().toISOString(),
-            message: agentMessage(
-              result.completion === undefined
-                ? `Dispatched ${result.tag}`
-                : `${result.completion.status === 'failed' ? 'Failed' : 'Completed'}: ${result.completion.message._tag}`,
-              taskId,
-              contextId,
-            ),
+            message: agentMessage(summary.text, taskId, contextId),
           },
           history,
         }),

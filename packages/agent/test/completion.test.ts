@@ -1,7 +1,7 @@
 import { Duration, Effect } from 'effect'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Agent } from '../src/index.js'
-import type { Completion } from '../src/types.js'
+import type { Completion, DispatchResult } from '../src/types.js'
 import { type Message, type Model, Message as MessageUnion, emptyModel } from './todoApp.js'
 
 /**
@@ -426,5 +426,34 @@ describe('cancelling while waiting for completion', () => {
       'AgentCompletionTimeoutError',
     )
     expect(host.listeners.size).toBe(0)
+  })
+})
+
+describe('summarize', () => {
+  const result = (completion?: DispatchResult['completion']): DispatchResult => ({
+    name: 'requested_create_todo',
+    tag: 'RequestedCreateTodo',
+    message: { _tag: 'RequestedCreateTodo' } as never,
+    invocation: {} as never,
+    ...(completion === undefined ? {} : { completion }),
+  })
+
+  it('reports validated dispatch when there is no completion contract', () => {
+    expect(Agent.summarize(result())).toEqual({
+      ok: true,
+      text: 'Dispatched RequestedCreateTodo',
+    })
+  })
+
+  it('reports a completed completion', () => {
+    expect(
+      Agent.summarize(result({ status: 'completed', message: { _tag: 'CreatedTodo' } as never })),
+    ).toEqual({ ok: true, text: 'Completed: CreatedTodo' })
+  })
+
+  it('reports a failed completion', () => {
+    expect(
+      Agent.summarize(result({ status: 'failed', message: { _tag: 'CreateFailed' } as never })),
+    ).toEqual({ ok: false, text: 'Failed: CreateFailed' })
   })
 })

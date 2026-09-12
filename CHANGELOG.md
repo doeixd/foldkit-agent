@@ -215,6 +215,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   refuses a subset whose owner token belongs to a different application, matching
   `Sync.forApplication`, so two structurally identical applications cannot mix
   selections.
+- **One outcome summary for adapters.** `Agent.summarize(dispatchResult)` returns
+  `{ ok, text }` — `Dispatched <tag>` without a completion contract, otherwise
+  `<Completed|Failed>: <tag>`. WebMCP, MCP, A2A, and Agent Native render it
+  instead of repeating the wording four times.
 
 ### `foldkit-durable`
 

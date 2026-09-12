@@ -108,15 +108,9 @@ export const register = <Model, Context_, Principal, ByName, ByTag>(
         if (result._tag === 'Failure') return textResult(result.failure.message, true)
 
         // A declared completion contract has already resolved by the time
-        // dispatch returns, so a failed completion is a failed tool call --
-        // reported the same way the MCP adapter reports it.
-        const { completion } = result.success
-        if (completion === undefined) return textResult(`Dispatched ${result.success.tag}`)
-
-        return textResult(
-          `${completion.status === 'completed' ? 'Completed' : 'Failed'}: ${completion.message._tag}`,
-          completion.status === 'failed',
-        )
+        // dispatch returns, so a failed completion is a failed tool call.
+        const summary = Agent.summarize(result.success)
+        return textResult(summary.text, !summary.ok)
       } catch {
         // `Effect.result` captures expected failures but not defects, and a
         // rejected tool promise is not something a calling agent can act on.
