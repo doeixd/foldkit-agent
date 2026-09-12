@@ -100,7 +100,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   nested read no longer grows with the number of parents (#65, Phase E item 16).
   Its `source` declares the binding's fields (`EntitySource.fields`), so the
   server never asks it for another; `first: 0` is honored as a page of
-  boundaries only rather than falling back to the default size.
+  boundaries only rather than falling back to the default size;
+  `returning(binding, fields)` pairs a mutation's `returning` columns with
+  the normalization of the rows they yield.
 - **Property tests and two fixes they found.** Seeded property checks over
   connection merge, live event ordering, and optimistic convergence. `merge`
   now puts a terminal-start segment first and a terminal-end segment last, so

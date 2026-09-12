@@ -161,6 +161,22 @@ export const normalize = (
   }))
 
 /**
+ * The `returning` columns for `fields` and the normalization of the rows they
+ * yield, paired so a mutation cannot select one set of columns and normalize
+ * another.
+ */
+export const returning = (
+  binding: AnyEntityBinding,
+  fields: readonly string[],
+): {
+  readonly columns: Record<string, AnyColumn>
+  readonly patches: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<NormalizedPatch>
+} => ({
+  columns: selectColumns(binding, fields),
+  patches: rows => normalize(binding, rows, fields),
+})
+
+/**
  * A pruned reader backed by an injected executor. Use it when the database is
  * not an Effect service, or to test the projection without one.
  *

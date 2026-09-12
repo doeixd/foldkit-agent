@@ -287,20 +287,21 @@ the injected-executor path, does not compute fields.
 ## Mutation results
 
 Reads are where the adapter compiles query shape. A mutation uses Drizzle
-directly and returns patches; `selectColumns` picks the columns and `normalize`
-maps the returned rows, rewriting a `one` relation to its ref key.
+directly and returns patches; `returning(Project, fields)` pairs the columns
+to select with the normalization of the rows they yield, rewriting a `one`
+relation to its ref key (`selectColumns` and `normalize` are the halves).
 
 ```ts
-import { normalize, selectColumns } from 'foldkit-remote-drizzle'
+import { returning } from 'foldkit-remote-drizzle'
 
-const fields = ['id', 'name', 'owner']
+const project = returning(Project, ['id', 'name', 'owner'])
 const rows = yield* db
   .update(projects)
   .set({ name })
   .where(eq(projects.id, id))
-  .returning(selectColumns(Project, fields))
+  .returning(project.columns)
 
-return { output: { id }, entities: normalize(Project, rows, fields) }
+return { output: { id }, entities: project.patches(rows) }
 ```
 
 ## Compose a server

@@ -17,15 +17,7 @@ import { Effect, Layer, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import * as Update from 'foldkit/update'
 import { Mutation, Query, Remote, RemoteClient, Selection, type RemoteModel } from 'foldkit-remote'
-import {
-  databaseLayer,
-  entity,
-  normalize,
-  one,
-  query,
-  selectColumns,
-  source,
-} from 'foldkit-remote-drizzle'
+import { databaseLayer, entity, returning, one, query, source } from 'foldkit-remote-drizzle'
 import { RemoteServer } from 'foldkit-remote-server'
 import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import {
@@ -120,19 +112,19 @@ export const liveHub = Effect.runSync(RemoteServer.liveHub(entitySources))
 
 const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
   Effect.gen(function* () {
-    const fields = ['id', 'name', 'status'] as const
+    const project = returning(Project, ['id', 'name', 'status'])
     const rows = yield* Effect.promise(() =>
       Promise.resolve(
         db
           .update(projects)
           .set({ name: input.name })
           .where(eq(projects.id, input.id))
-          .returning(selectColumns(Project, fields)),
+          .returning(project.columns),
       ),
     )
     // Live subscribers that select `name` learn of the rename from here.
     yield* liveHub.changed(Project.ref(input.id), ['name'])
-    return { output: { id: input.id }, entities: normalize(Project, rows, fields) }
+    return { output: { id: input.id }, entities: project.patches(rows) }
   }),
 )
 
@@ -142,18 +134,18 @@ const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
  */
 const CreateProjectSource = RemoteServer.mutation(CreateProject, ({ input }) =>
   Effect.gen(function* () {
-    const fields = ['id', 'name', 'status'] as const
+    const project = returning(Project, ['id', 'name', 'status'])
     const rows = yield* Effect.promise(() =>
       Promise.resolve(
         db
           .insert(projects)
           .values({ id: input.id, name: input.name, ownerId: input.ownerId, status: 'active' })
-          .returning(selectColumns(Project, fields)),
+          .returning(project.columns),
       ),
     )
     return {
       output: { id: input.id },
-      entities: normalize(Project, rows, fields),
+      entities: project.patches(rows),
       connections: [
         RemoteServer.prepend(
           ProjectsByOwner.ref({ ownerId: input.ownerId }),

@@ -10,6 +10,7 @@ import {
   many,
   manyToMany,
   normalize,
+  returning,
   one,
   source,
   type DrizzleDatabaseService,
@@ -500,6 +501,15 @@ describe('RemoteDrizzle execution', () => {
 
     expect(patches).toEqual([
       { entity: 'Project', id: 'p1', values: { id: 'p1', name: 'P', owner: 'User:u1' } },
+    ])
+  })
+
+  it('returning pairs the selected columns with their normalization', () => {
+    const project = returning(ProjectBinding, ['name', 'owner'])
+
+    expect(Object.keys(project.columns)).toEqual(['id', 'name', 'owner'])
+    expect(project.patches([{ id: 'p1', name: 'P', owner: null }])).toEqual([
+      { entity: 'Project', id: 'p1', values: { id: 'p1', name: 'P', owner: null } },
     ])
   })
 
