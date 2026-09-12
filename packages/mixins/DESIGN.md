@@ -367,8 +367,9 @@ text; collection stays caller-owned.
 12. Advanced Style compiler. Started: pseudo/media, deterministic class + CSS.
 13. DevTools/agent metadata. Started: `SurfaceView.describe`/`toMarkdown`.
 
-The CSS compiler's remaining constructs (keyframes, layers, container queries,
-nested selectors) wait until a real view needs them.
+The compiler's remaining constructs (`@font-face` sugar, animation
+orchestration, a rule registry with extraction) wait until a real view needs
+them.
 
 ## Non-goals
 
