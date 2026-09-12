@@ -1,6 +1,6 @@
 import { pgTable, text, uuid } from 'drizzle-orm/pg-core'
 import { Schema } from 'effect'
-import { Selection } from 'foldkit-remote'
+import { Remote, Selection } from 'foldkit-remote'
 import { entity, many, one } from '../src/index.js'
 
 const users = pgTable('users', {
@@ -40,6 +40,9 @@ Selection.make(ProjectBinding, {
   comments: true,
   commentCount: true,
 })
+
+// The bindings are the Remote entities, so the domain is declared once.
+Remote.make({ entities: [UserBinding, ProjectBinding] })
 
 // @ts-expect-error `nope` is not a field of the table
 Selection.make(ProjectBinding, { nope: true })

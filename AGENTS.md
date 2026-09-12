@@ -167,6 +167,12 @@ installed `.d.ts` before reaching for a remembered API.
   intersection resolves to the last signature and widened every payload to
   `any`. A conditional inside a reverse mapped type is circular and quietly
   picks one branch, which let `input` without `toMessage` compile.
+- **A function-typed property makes a generic invariant.** `EntityDescriptor.ref:
+  (id: Type<F['id']>) => …` made `F` invariant, so a concrete `EntityBinding` was
+  not assignable to `EntityDescriptor<any, any>` and `Remote.make({ entities:
+  [binding] })` failed while `Selection.make(binding, …)` (which infers `F`)
+  passed. Declaring `ref(id): …` as a method restores bivariance. Write the
+  assignability case, not just the call that happens to infer.
 - **Prove a type rejects, not just that it accepts.** Every constraint needs a
   `@ts-expect-error` negative case in `types.test-d.ts`. Both bugs above passed
   a suite full of positive cases.

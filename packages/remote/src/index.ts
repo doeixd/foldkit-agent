@@ -94,7 +94,10 @@ export interface EntityDescriptor<Name extends string, F extends Schema.Struct.F
   readonly name: Name
   readonly schema: Schema.Struct<F>
   readonly fields: F
-  readonly ref: (id: Schema.Schema.Type<F['id']>) => EntityRef<Name, F>
+  // A method, not a property: method signatures are bivariant, so a concrete
+  // descriptor stays assignable to `EntityDescriptor<any, any>` (which appears
+  // in every heterogeneous collection, e.g. `Remote.make`'s entities).
+  ref(id: Schema.Schema.Type<F['id']>): EntityRef<Name, F>
 }
 
 const encodeRef = (ref: { readonly entity: string; readonly id: string }): string =>
