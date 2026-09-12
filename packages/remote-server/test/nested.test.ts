@@ -48,9 +48,11 @@ const rows: Record<string, Record<string, unknown>> = {
   'Comment:c2': { body: 'two', author: 'User:u2' },
 }
 
+/** A source over `rows`; `leaky` returns whole rows, however few fields were asked. */
 const tableSource = <Name extends string>(
   entity: { readonly name: Name },
   authorize?: (principal: string, fields: readonly string[]) => readonly string[],
+  leaky = false,
 ) =>
   RemoteServer.entity<string>(entity as never, {
     ...(authorize === undefined ? {} : { authorize }),
@@ -61,7 +63,14 @@ const tableSource = <Name extends string>(
           const row = rows[`${entity.name}:${id}`]
           return row === undefined
             ? []
-            : [{ id, values: Object.fromEntries(fields.map(field => [field, row[field]])) }]
+            : [
+                {
+                  id,
+                  values: leaky
+                    ? row
+                    : Object.fromEntries(fields.map(field => [field, row[field]])),
+                },
+              ]
         })
       }),
   })
@@ -162,7 +171,7 @@ describe('RemoteServer nested resolution', () => {
   it('does not follow a relation whose field the principal may not read', async () => {
     const locked = RemoteServer.make({
       entities: [
-        tableSource(Project, (_principal, fields) => fields.filter(field => field !== 'owner')),
+        tableSource(Project, (_principal, fields) => fields.filter(field => field !== 'owner'), true),
         tableSource(User),
       ],
     })
@@ -199,6 +208,7 @@ describe('RemoteServer nested resolution', () => {
       },
     ])
     expect(result.entities.map(entity => entity.entity)).toEqual(['Project'])
+    expect(reads.map(entry => entry.entity)).toEqual(['Project'])
   })
 
   it('a cyclic selection terminates at the selection’s own depth', async () => {
