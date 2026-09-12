@@ -290,6 +290,11 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   state-only transition of the shared projection; an effectful Message stays
   local and emits a durable fact when its Command settles. The Command's effect
   is never run. `examples/sync` drops its hand-written copy of the same guards.
+- **`submit` fails closed.** The replica replays a Message before writing it to
+  the outbox and fails with `ReplayError` (a new `ReplicaError` member carrying
+  the replay's message and cause) when replay throws, so a Message no replica
+  could apply is never persisted. The submit-time result seeds the optimistic
+  projection, so a read after a submit no longer replays the whole outbox.
 - **Replay documented at the definition.** `SyncConfig.replay` states that a
   durable Message's Commands are dropped during replay and optimistic projection
   (only state changes apply) and that each replay starts from the initial Model,

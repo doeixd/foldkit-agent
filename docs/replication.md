@@ -137,8 +137,9 @@ It owns:
   produces the writable projection, the durable Message subset, the initial
   snapshot, and the durable journal contract. `Surface.pick` builds the
   projection; only the declared Messages reach durable state.
-- **A persisted outbox and optimistic projection.** `submit` writes locally;
-  `replica.shared` shows the change immediately.
+- **A persisted outbox and optimistic projection.** `submit` replays the Message
+  first and writes it locally only if replay accepts it; `replica.shared` shows
+  the change immediately without replaying the outbox again.
 - **Reconciliation.** `synchronize` applies the committed order, drops
   acknowledged and rejected entries, and adopts checkpoints. Edits made during a
   pull are rebased onto remote changes rather than lost.
@@ -190,6 +191,10 @@ What an application does next:
   second replica or tab writing the same storage fails with a `StorageError`
   ("Replica was changed by another writer"); give each tab its own storage and
   `replicaId`.
+- **A Message replay refuses.** `submit` fails with a `ReplayError` carrying the
+  replay's message (for a derived contract, the Message and the Command or local
+  fields it produced) and writes nothing, so the outbox never holds a Message no
+  replica could apply.
 - **Malformed persisted data.** `InvalidReplicaHistoryError`, `InvalidOutboxError`,
   or a clock `StorageError` means the bytes do not match the schema. The stored
   value is left intact, so the UI can offer a reset instead of silently losing

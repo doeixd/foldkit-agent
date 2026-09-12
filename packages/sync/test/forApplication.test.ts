@@ -44,6 +44,9 @@ type Replica = Awaited<ReturnType<typeof open>>
 type AppMessage = Schema.Schema.Type<typeof Message>
 const submit = (replica: Replica, message: AppMessage) => Effect.runPromise(replica.submit(message))
 const shared = (replica: Replica) => Effect.runSync(replica.shared)
+const pending = (replica: Replica) => Effect.runSync(replica.pending)
+const refuse = (replica: Replica, message: AppMessage) =>
+  Effect.runPromise(Effect.result(replica.submit(message)))
 
 describe('Sync.forApplication', () => {
   it('derives the projection, surface, and shape from one application', () => {
@@ -125,21 +128,33 @@ describe('Sync.forApplication', () => {
     expect(shared(replica)).toEqual({ todos: [{ id: 'a', title: 'A' }] })
   })
 
-  it('refuses a durable transition that returns a Command', async () => {
+  it('refuses a durable transition that returns a Command before it reaches the outbox', async () => {
     const replica = await faultyApp('command')
-    await submit(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
-    expect(() => shared(replica)).toThrow(
-      'durable "CreatedTodo" returned 1 Command(s); a durable transition is state-only',
-    )
+    const refused = await refuse(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
+    expect(refused._tag).toBe('Failure')
+    if (refused._tag === 'Failure') {
+      expect(refused.failure._tag).toBe('ReplayError')
+      expect(refused.failure.message).toBe(
+        'Sync.forApplication: durable "CreatedTodo" returned 1 Command(s); a durable transition is state-only',
+      )
+    }
     expect(ran).toBe(false)
+    expect(pending(replica)).toEqual([])
+    expect(shared(replica)).toEqual({ todos: [] })
   })
 
   it('refuses a durable transition that changes a field outside the shared projection', async () => {
     const replica = await faultyApp('local')
-    await submit(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
-    expect(() => shared(replica)).toThrow(
-      'durable "CreatedTodo" changed Model fields outside the shared projection: selectedTodoId',
-    )
+    const refused = await refuse(replica, Message.CreatedTodo({ id: 'a', title: 'A' }))
+    expect(refused._tag).toBe('Failure')
+    if (refused._tag === 'Failure') {
+      expect(refused.failure._tag).toBe('ReplayError')
+      expect(refused.failure.message).toBe(
+        'Sync.forApplication: durable "CreatedTodo" changed Model fields outside the shared projection: selectedTodoId',
+      )
+    }
+    expect(pending(replica)).toEqual([])
+    expect(shared(replica)).toEqual({ todos: [] })
   })
 
   it('refuses a durable subset from another application', () => {

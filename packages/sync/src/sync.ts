@@ -7,6 +7,7 @@ import {
   InvalidExchangeError,
   InvalidOutboxError,
   InvalidReplicaHistoryError,
+  ReplayError,
   ReplicaClosedError,
   UnsupportedReplicaVersionError,
   WrongReplicaStorageError,
@@ -460,6 +461,21 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
                 ),
               catch: () => new InvalidOutboxError({ message: 'Invalid outbox' }),
             })
+            // Replay before writing: a Message replay refuses can never be
+            // applied, here or on another replica, so it must not reach the
+            // outbox. The result is the next optimistic projection, so the
+            // cache is seeded instead of replaying the outbox on the next read.
+            const cached = yield* Ref.get(projection)
+            const projected =
+              cached !== undefined && cached.state === current ? cached.shared : optimistic(current)
+            const replayed = yield* Effect.try({
+              try: () => definition.replay(projected, message),
+              catch: cause =>
+                new ReplayError({
+                  message: cause instanceof Error ? cause.message : 'Replay failed',
+                  cause,
+                }),
+            })
             // Validated and encoded by `persist`; decoding here would demand the
             // encoded side and break a transforming `shared` codec.
             const next: ReplicaState<Shared> = {
@@ -469,6 +485,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
               pending: [...current.pending, operation],
             }
             yield* persist(next, current)
+            yield* Ref.set(projection, { state: next, shared: replayed })
             yield* Queue.offer(wake, undefined)
             return [undefined, next] as const
           }),

@@ -36,6 +36,7 @@ export {
   InvalidExchangeError,
   InvalidOutboxError,
   InvalidReplicaHistoryError,
+  ReplayError,
   ReplicaClosedError,
   StorageError,
   UnsupportedClockVersionError,
