@@ -35,14 +35,12 @@ describe('Remote.plan', () => {
 
     expect(
       plan(store, [{ entity: 'User', id: 'u1', fields: ['name', 'email'] }], {
-        now: 10,
-        freshness: 50,
+        freshness: { now: 10, freshness: 50 },
       }),
     ).toEqual([])
     expect(
       plan(store, [{ entity: 'User', id: 'u1', fields: ['name', 'email'] }], {
-        now: 100,
-        freshness: 50,
+        freshness: { now: 100, freshness: 50 },
       }),
     ).toEqual([{ entity: 'User', id: 'u1', fields: ['name', 'email'] }])
   })
@@ -120,8 +118,8 @@ describe('Remote.plan', () => {
     const store = writeEntity(emptyStore, entityKey('User', 'u1'), { name: 'ada' }, 0)
     const requirements = [{ entity: 'User', id: 'u1', fields: ['name'] }]
 
-    expect(plan(store, requirements, { now: 50, freshness: 50 })).toEqual([])
-    expect(plan(store, requirements, { now: 51, freshness: 50 })).toEqual([
+    expect(plan(store, requirements, { freshness: { now: 50, freshness: 50 } })).toEqual([])
+    expect(plan(store, requirements, { freshness: { now: 51, freshness: 50 } })).toEqual([
       { entity: 'User', id: 'u1', fields: ['name'] },
     ])
   })
@@ -129,7 +127,9 @@ describe('Remote.plan', () => {
   it('a tombstone is never refreshed, even when stale by age', () => {
     const store = tombstone(emptyStore, entityKey('User', 'u1'))
     expect(
-      plan(store, [{ entity: 'User', id: 'u1', fields: ['name'] }], { now: 1000, freshness: 1 }),
+      plan(store, [{ entity: 'User', id: 'u1', fields: ['name'] }], {
+        freshness: { now: 1000, freshness: 1 },
+      }),
     ).toEqual([])
   })
 
@@ -166,7 +166,7 @@ describe('Remote.plan', () => {
         requested.set(`E:${id}`, set)
       }
 
-      const freshness = random() < 0.5 ? { now: i, freshness: 5 } : undefined
+      const freshness = random() < 0.5 ? { freshness: { now: i, freshness: 5 } } : undefined
       const first = plan(store, requirements, freshness)
       expect(plan(store, requirements, freshness)).toEqual(first)
 

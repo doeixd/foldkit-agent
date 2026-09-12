@@ -21,7 +21,7 @@ import {
   type EntitySourceContext,
   type QuerySource,
 } from 'foldkit-remote-server'
-import type { AnyEntityBinding } from './binding.js'
+import type { AnyEntityBinding, ManyRelation, ManyToManyRelation } from './binding.js'
 import { idColumn, projectsAny } from './columns.js'
 import { cursorSelection, keysetWhere, orderByTerms, type OrderTerm } from './cursor.js'
 import { DrizzleDatabase, type DrizzleDatabaseService } from './database.js'
@@ -44,6 +44,40 @@ export * from './window.js'
  */
 const pick = <T>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
   record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
+
+/**
+ * Where a collection relation's children are read from: the table holding the
+ * parent key (the target itself for `many`, the join table for `manyToMany`),
+ * the join to the target when there is one, and the parent-side column the
+ * children are grouped under.
+ */
+const childSide = (
+  binding: AnyEntityBinding,
+  relation: ManyRelation<AnyEntityBinding> | ManyToManyRelation<AnyEntityBinding>,
+): {
+  readonly table: Table
+  readonly parent: AnyColumn
+  readonly child: AnyColumn
+  readonly join: { readonly table: Table; readonly on: SQL } | undefined
+  readonly parentKey: AnyColumn
+} => {
+  const child = idColumn(relation.entity)
+  return relation.kind === 'many'
+    ? {
+        table: relation.entity.table,
+        parent: relation.foreignKey,
+        child,
+        join: undefined,
+        parentKey: relation.localKey,
+      }
+    : {
+        table: relation.through,
+        parent: relation.localColumn,
+        child,
+        join: { table: relation.entity.table, on: eq(relation.foreignColumn, child) },
+        parentKey: idColumn(binding),
+      }
+}
 
 /** A whole id batch as one `IN (...)` — the normalized-store advantage. */
 export const whereIds = (binding: AnyEntityBinding, ids: ReadonlyArray<string>): SQL =>
@@ -125,6 +159,22 @@ export const normalize = (
     id: String(row.id),
     values: relationRefs(binding, fields, row),
   }))
+
+/**
+ * The `returning` columns for `fields` and the normalization of the rows they
+ * yield, paired so a mutation cannot select one set of columns and normalize
+ * another.
+ */
+export const returning = (
+  binding: AnyEntityBinding,
+  fields: readonly string[],
+): {
+  readonly columns: Record<string, AnyColumn>
+  readonly patches: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<NormalizedPatch>
+} => ({
+  columns: selectColumns(binding, fields),
+  patches: rows => normalize(binding, rows, fields),
+})
 
 /**
  * A pruned reader backed by an injected executor. Use it when the database is
@@ -219,6 +269,7 @@ export const source = <P = unknown>(
   }
   return {
     entity: binding.name,
+    fields: new Set(Object.keys(binding.fields)),
     read: context =>
       Effect.gen(function* () {
         if (context.ids.length === 0) return []
@@ -230,8 +281,8 @@ export const source = <P = unknown>(
           if (computed === undefined) continue
           const relation = binding.relations[computed.relation]
           if (relation === undefined || relation.kind === 'one') continue
-          const parentColumn = relation.kind === 'many' ? relation.localKey : idColumn(binding)
-          columns[parentColumn.name] = parentColumn
+          const { parentKey } = childSide(binding, relation)
+          columns[parentKey.name] = parentKey
         }
         const rows = yield* selectRows(database, binding.table, columns, {
           where: whereIds(binding, context.ids),
@@ -260,11 +311,14 @@ export const source = <P = unknown>(
             continue
           }
 
-          const targetId = idColumn(relation.entity)
-          const order: ReadonlyArray<OrderTerm> =
-            relation.orderBy === undefined || relation.orderBy.length === 0
-              ? [{ column: targetId, direction: 'asc' }]
-              : relation.orderBy
+          const side = childSide(binding, relation)
+          const targetId = side.child
+          // The target id is the final tie-breaker, so ranking and ordering
+          // agree and a page never drops a row that ties on the order columns.
+          const declared = relation.orderBy ?? []
+          const order: ReadonlyArray<OrderTerm> = declared.some(term => term.column === targetId)
+            ? declared
+            : [...declared, { column: targetId, direction: 'asc' }]
           const naturalOrder = orderByTerms(order, 'forward')
           const parentKeys = [
             ...new Set(
@@ -280,143 +334,106 @@ export const source = <P = unknown>(
               })
             }
             const empty = { refs: [] as ReadonlyArray<string>, hasNext: false, hasPrevious: false }
-            // The ORDER BY is the same for every parent; only the keyset differs.
             const traversalOrder = orderByTerms(order, shape.traversal)
-            const pages = yield* Effect.forEach(
-              parentKeys,
-              parentKey =>
-                Effect.gen(function* () {
-                  let cursorValues: ReadonlyArray<unknown> | undefined
-                  if (shape.cursor !== undefined) {
-                    const cursorRows = yield* selectRows(
-                      database,
-                      relation.entity.table,
-                      cursorSelection(order),
-                      { where: eq(targetId, cursorId(shape.cursor)), limit: 1 },
-                    )
-                    const cursorRow = cursorRows[0]
-                    if (cursorRow === undefined) {
-                      return yield* new RemoteServerError({
-                        message: `Relation "${field}" cursor no longer resolves`,
-                      })
-                    }
-                    cursorValues = order.map(term => cursorRow[term.column.name])
-                  }
 
-                  const keyset =
-                    cursorValues === undefined
-                      ? undefined
-                      : keysetWhere(order, cursorValues, shape.traversal)
-                  const parentWhere =
-                    relation.kind === 'many'
-                      ? eq(relation.foreignKey, parentKey)
-                      : eq(relation.localColumn, parentKey)
-                  const where = withFilters(parentWhere, relation.where, policyWhere, keyset)
+            let keyset: SQL | undefined
+            if (shape.cursor !== undefined) {
+              const cursorRows = yield* selectRows(
+                database,
+                relation.entity.table,
+                cursorSelection(order),
+                { where: eq(targetId, cursorId(shape.cursor)), limit: 1 },
+              )
+              const cursorRow = cursorRows[0]
+              if (cursorRow === undefined) {
+                return yield* new RemoteServerError({
+                  message: `Relation "${field}" cursor no longer resolves`,
+                })
+              }
+              keyset = keysetWhere(
+                order,
+                order.map(term => cursorRow[term.column.name]),
+                shape.traversal,
+              )
+            }
 
-                  const childRows =
-                    relation.kind === 'many'
-                      ? yield* selectRows(
-                          database,
-                          relation.entity.table,
-                          { child: targetId, parent: relation.foreignKey },
-                          {
-                            where,
-                            orderBy: traversalOrder,
-                            limit: shape.pageSize + 1,
-                          },
-                        )
-                      : yield* selectRows(
-                          database,
-                          relation.through,
-                          { child: targetId, parent: relation.localColumn },
-                          {
-                            where,
-                            innerJoin: {
-                              table: relation.entity.table,
-                              on: eq(relation.foreignColumn, targetId),
-                            },
-                            orderBy: traversalOrder,
-                            limit: shape.pageSize + 1,
-                          },
-                        )
+            const byParent = new Map<string, Array<Record<string, unknown>>>()
+            if (parentKeys.length > 0) {
+              const where = withFilters(
+                inArray(side.parent, parentKeys),
+                relation.where,
+                policyWhere,
+                keyset,
+              )
+              // One statement for every parent: rank each parent's children in
+              // a window and keep the first `pageSize + 1` of each, so the
+              // statement count does not grow with the number of parents.
+              const ranking = sql`row_number() over (partition by ${side.parent} order by ${sql.join([...traversalOrder], sql`, `)})`
+              const joined =
+                side.join === undefined
+                  ? sql`${side.table}`
+                  : sql`${side.table} inner join ${side.join.table} on ${side.join.on}`
+              const ranked = sql`(select p, k from (select ${side.parent} as p, ${targetId} as k, ${ranking} as rn from ${joined} where ${where}) as ranked where rn <= ${shape.pageSize + 1})`
+              const childRows = yield* selectRows(
+                database,
+                side.table,
+                { child: targetId, parent: side.parent },
+                {
+                  where: sql`(${side.parent}, ${targetId}) in ${ranked}`,
+                  innerJoin: side.join,
+                  orderBy: traversalOrder,
+                },
+              )
+              for (const child of childRows) {
+                const rows_ = byParent.get(String(child.parent)) ?? []
+                rows_.push(child)
+                byParent.set(String(child.parent), rows_)
+              }
+            }
 
-                  const natural =
-                    shape.traversal === 'backward' ? [...childRows].reverse() : childRows
-                  const page = buildPage({
-                    rows: natural,
-                    pageSize: shape.pageSize,
-                    traversal: shape.traversal,
-                    cursor: shape.cursor,
-                    cursorOf: row => String(row.child),
-                  })
-                  return [
-                    String(parentKey),
-                    {
-                      refs: page.rows.map(child =>
-                        Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
-                      ),
-                      hasNext: page.hasNext,
-                      hasPrevious: page.hasPrevious,
-                    },
-                  ] as const
-                }),
-              { concurrency: 10 },
-            )
-            const byParent = new Map(pages)
             for (const row of rows) {
               const key = row[field]
-              row[field] =
-                key === null || key === undefined ? empty : (byParent.get(String(key)) ?? empty)
+              if (key === null || key === undefined) {
+                row[field] = empty
+                continue
+              }
+              // An empty page under a cursor still has its cursor-side boundary.
+              const childRows = byParent.get(String(key)) ?? []
+              const natural = shape.traversal === 'backward' ? [...childRows].reverse() : childRows
+              const page = buildPage({
+                rows: natural,
+                pageSize: shape.pageSize,
+                traversal: shape.traversal,
+                cursor: shape.cursor,
+                cursorOf: child => String(child.child),
+              })
+              row[field] = {
+                refs: page.rows.map(child =>
+                  Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
+                ),
+                hasNext: page.hasNext,
+                hasPrevious: page.hasPrevious,
+              }
             }
             continue
           }
 
           const byParent = new Map<string, string[]>()
           if (parentKeys.length > 0) {
-            if (relation.kind === 'many') {
-              const childRows = yield* selectRows(
-                database,
-                relation.entity.table,
-                { child: targetId, parent: relation.foreignKey },
-                {
-                  where: withFilters(
-                    inArray(relation.foreignKey, parentKeys),
-                    relation.where,
-                    policyWhere,
-                  ),
-                  orderBy: naturalOrder,
-                },
-              )
-              for (const child of childRows) {
-                const refs = byParent.get(String(child.parent)) ?? []
-                refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.child) }))
-                byParent.set(String(child.parent), refs)
-              }
-            } else {
-              const throughRows = yield* selectRows(
-                database,
-                relation.through,
-                { child: targetId, parent: relation.localColumn },
-                {
-                  where: withFilters(
-                    inArray(relation.localColumn, parentKeys),
-                    relation.where,
-                    policyWhere,
-                  ),
-                  innerJoin: {
-                    table: relation.entity.table,
-                    on: eq(relation.foreignColumn, targetId),
-                  },
-                  orderBy: naturalOrder,
-                },
-              )
-              for (const through of throughRows) {
-                const refs = byParent.get(String(through.parent)) ?? []
-                refs.push(
-                  Entity.refKey({ entity: relation.entity.name, id: String(through.child) }),
-                )
-                byParent.set(String(through.parent), refs)
-              }
+            const childRows = yield* selectRows(
+              database,
+              side.table,
+              { child: targetId, parent: side.parent },
+              {
+                where: withFilters(inArray(side.parent, parentKeys), relation.where, policyWhere),
+                innerJoin: side.join,
+                orderBy: naturalOrder,
+              },
+            )
+            for (const child of childRows) {
+              const refs = byParent.get(String(child.parent)) ?? []
+              refs.push(Entity.refKey({ entity: relation.entity.name, id: String(child.child) }))
+              byParent.set(String(child.parent), refs)
             }
           }
           for (const row of rows) {
@@ -434,11 +451,11 @@ export const source = <P = unknown>(
               message: `Computed field "${field}" needs collection relation "${computed.relation}"`,
             })
           }
-          const parentColumn = relation.kind === 'many' ? relation.localKey : idColumn(binding)
+          const side = childSide(binding, relation)
           const parentKeys = [
             ...new Set(
               rows
-                .map(row => row[parentColumn.name])
+                .map(row => row[side.parentKey.name])
                 .filter(key => key !== null && key !== undefined),
             ),
           ]
@@ -446,44 +463,22 @@ export const source = <P = unknown>(
           const countPolicy = pick(options?.policies, computed.relation)?.(context.principal)
           if (parentKeys.length > 0) {
             const count = sql<number>`count(*)`.mapWith(Number)
-            const countRows =
-              relation.kind === 'many'
-                ? yield* selectRows(
-                    database,
-                    relation.entity.table,
-                    { count, parent: relation.foreignKey },
-                    {
-                      where: withFilters(
-                        inArray(relation.foreignKey, parentKeys),
-                        computed.where,
-                        countPolicy,
-                      ),
-                      groupBy: [relation.foreignKey],
-                    },
-                  )
-                : yield* selectRows(
-                    database,
-                    relation.through,
-                    { count, parent: relation.localColumn },
-                    {
-                      where: withFilters(
-                        inArray(relation.localColumn, parentKeys),
-                        computed.where,
-                        countPolicy,
-                      ),
-                      innerJoin: {
-                        table: relation.entity.table,
-                        on: eq(relation.foreignColumn, idColumn(relation.entity)),
-                      },
-                      groupBy: [relation.localColumn],
-                    },
-                  )
+            const countRows = yield* selectRows(
+              database,
+              side.table,
+              { count, parent: side.parent },
+              {
+                where: withFilters(inArray(side.parent, parentKeys), computed.where, countPolicy),
+                innerJoin: side.join,
+                groupBy: [side.parent],
+              },
+            )
             for (const countRow of countRows) {
               counts.set(String(countRow.parent), Number(countRow.count))
             }
           }
           for (const row of rows) {
-            const key = row[parentColumn.name]
+            const key = row[side.parentKey.name]
             row[field] = key === null || key === undefined ? 0 : (counts.get(String(key)) ?? 0)
           }
         }

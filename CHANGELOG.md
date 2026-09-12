@@ -59,6 +59,100 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-remote` (private)
 
+- **Review hardening.** One plan: `Remote.plan(bound, model, projection,
+  options?)` replaces `planProjection`/`observeProjection`/`planSurface`
+  (a Surface's is `surface.projection(params)`); `Remote.retain(projections,
+  toMessage?, options)` drops the bound remote, and `observe`/`live`/`retain`
+  default `toMessage` to the identity; `Remote.storeOf(bound, model)` is the
+  visible store (base under pending layers), memoized per model state so every
+  read and plan of one render shares it; `Remote.live` takes `{ now }`;
+  `Remote.visibleItems` and `RetainOptions.connections` accept a `QueryRef`.
+  A merged cursor page keeps the stored page's near boundary instead of
+  inventing one, and pages merged within one read result see each other.
+  `ConnectionChange.prepend`/`append`/`remove` (was `Optimistic.*`) build the
+  connection half of `MutateOptions.optimistic`; `OptimisticState` is the
+  model slice. Persistence is namespace-only (`RemotePersistence.*`); the
+  wire caps `MAX_FIELDS_PER_REQUEST` (256) and `MAX_RELATION_DEPTH` (8) with
+  static nesting; `Entity.patch` takes wire-shaped values; `Selection.make`
+  refuses an empty selection, which would require nothing and read `Ready`.
+  `Remote.clientLayer` is generic in the RPC client's requirements, so
+  in-process `RemoteServer.handlers` over a database become a `RemoteClient`
+  with one `Layer.provide` instead of a hand-written adapter.
+- **Recursive nested selections.** `Selection.make(Project, { owner:
+  UserSummary })` now reads through the ref into the target instead of failing
+  to decode: the field codec follows the entity field's shape (ref, nullable
+  ref, array of refs, or a page of refs through
+  `Selection.connection(Entity, window, nested)`, which reads a `Page` of
+  items), `Remote.select` assembles every level from the normalized store and
+  reads `Initial` until each is present, and the requirement carries the graph
+  (`relations`, on `foldkit-surface`'s `Requirement`, with `Requirement.merge`
+  and `Requirement.mergeRelation`). `plan` attaches a relation to a field
+  being fetched and follows a known relation's refs into concrete
+  requirements. `Entity.ref`/`refPage` codecs are annotated, and `refsIn` /
+  `relationShape` are exported. Breaking wire change: `ReadBatch` and
+  `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (now 3), `ReadRequest` gains
+  `relations`, and a version mismatch fails with `RemoteProtocolError`
+  (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
+- **One statement per windowed relation.** `foldkit-remote-drizzle` ranks a
+  windowed relation's children per parent in a window function and keeps the
+  first `pageSize + 1` of each, so a `Selection.connection` over many parents
+  no longer runs one page query per parent; the statement count of a windowed
+  nested read no longer grows with the number of parents (#65, Phase E item 16).
+  Its `source` declares the binding's fields (`EntitySource.fields`), so the
+  server never asks it for another; `first: 0` is honored as a page of
+  boundaries only rather than falling back to the default size;
+  `returning(binding, fields)` pairs a mutation's `returning` columns with
+  the normalization of the rows they yield.
+- **Property tests and two fixes they found.** Seeded property checks over
+  connection merge, live event ordering, and optimistic convergence. `merge`
+  now puts a terminal-start segment first and a terminal-end segment last, so
+  a gap never reorders the sides; `foldkit-remote-server` chunks a nested
+  level's fan-out by `maxIdsPerEntity` instead of refusing it (#65, Phase E).
+- **The durable boundary, stated.** The README says what a Remote mutation is
+  (an immediate, server-derived command) and what it is not (durable intent,
+  which `foldkit-sync`/`foldkit-durable` own); no second queue (#65, section 9).
+- **Hydration hardening.** Snapshots are deterministic (equal stores give
+  byte-equal text), carry a `scope`, and respect `maxBytes` on save and
+  restore; `dehydrate`/`hydrate` are the text forms for SSR, `mergeStores`
+  and the new `Hydrated { entities, merge }` Message bring one into the Model
+  by `replace` or `preserve-existing`, and runtime state is never in a
+  snapshot. `REMOTE_CACHE_VERSION` is 3; `stableStringify` is exported (#65,
+  section 8).
+- **Live pruning.** A live `ConnectionRemove` hides a server-known edge (a
+  `remove` overlay), not only a pending insert; `ConnectionMerged` prunes the
+  settled overlays a page supersedes and leaves a pending request's alone;
+  `visibleItems` skips an edge whose target is a tombstone when given the
+  store, and `Remote.visibleItems(model, connection)` reads all of it (#65,
+  section 7).
+- **A mutation owns its optimistic operations.** `MutationStarted { requestId,
+  optimistic }` applies entity patches (`Entity.patch`) and connection changes
+  (`ConnectionChange.prepend`/`append`/`remove`, new) as a layer and overlays owned
+  by the request; `MutationSucceeded` releases both and records the result's
+  confirmed `connections` (new on `MutationResult` and the server's
+  `MutationOutcome`) in the same position, and `MutationFailed` drops both.
+  `visibleItems` reads pending prepends newest-first and hides `remove`
+  overlays. Breaking: `OptimisticAdded`/`OptimisticRemoved` are gone,
+  `Remote.mutate` returns `connections`, `Remote.mutateInto` takes
+  `{ optimistic }`, and the protocol version is 3 (#65, section 5).
+- **Coalesced reads.** `Remote.clientLayer` (and `Remote.coalesced` for a
+  hand-written client) batch requirements issued together into one
+  `ReadBatch`, union overlapping fields, join a requirement already in flight,
+  and release it when the read fails; built on Effect's `RequestResolver`
+  with an optional `window` (#65, section 2).
+- **Cache retention.** `Remote.retain(projections, toMessage?, {
+  connections, grace })` is a Subscription entry whose dependencies are the
+  retention roots; it emits the new `RetentionChanged` Message after `grace`,
+  and `Remote.update` applies the pure `gc(state, roots)`, keeping what the
+  roots reach through refs and nested relations, retained connections' edges,
+  and pending optimistic layers and overlays (#65, section 3).
+- **Request policies.** `RemotePolicy.cacheFirst` / `staleWhileRevalidate({
+  maxAge })` / `networkOnly` on `Remote.observe` and `Remote.prefetch` decide
+  what a field the store already holds means. A refreshing policy emits
+  `RefreshStarted` (new `RemoteMessage`) before the read, marking the refetched
+  fields stale so `Remote.select` reads `Refreshing`, which was unreachable
+  before. Breaking: the pure planners take `PlanOptions` (`{ freshness, force }`)
+  instead of a bare `PlanFreshness`, and `prefetch` takes `{ policy, now }`
+  instead of `{ freshness }` (#65, section 4).
 - **A `Contract` for `Module`.** `Remote.at` attaches `contract`: the bound
   Remote owns its store's Model path, named after it.
 - **A real Remote submodel.** `RemoteModel` is the four producers' shared state
@@ -93,6 +187,30 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   application.
 
 ### `foldkit-remote-server` (private)
+
+- **Review hardening.** A request for a field the Entity does not declare
+  never reaches `read` or `authorize` (`RemoteServer.entity(Project, …)`
+  records the declared fields; `EntitySource.fields`); the per-entity id cap
+  counts a batch's distinct ids across its window groups, and a live
+  subscription is refused over the same cap; the wire refuses, rather than
+  silently truncates, a selection nested past `MAX_RELATION_DEPTH`.
+  `RemoteServer.liveHub(entities)` takes the entity sources, so the mutation
+  sources that signal it can be built after it; subscribers sharing a
+  principal share a read by the principal's identity, not its serialization;
+  `HandlerOptions<P, R>` types the hub; `RemoteServer.prepend`/`append`/
+  `remove(connection, ref)` build a mutation outcome's connection changes.
+- **A live hub.** `RemoteServer.liveHub(entities)` tracks each live
+  subscriber's requirements and principal; `hub.changed(ref, fields)` re-reads
+  the changed fields a subscriber selects through the entity source under its
+  principal and streams the patch, `hub.deleted(ref)` streams a delete, and
+  `handlers(server, principal, { live: hub })` registers every subscription
+  (#65, section 6).
+- **Nested resolution in one read.** `FoldkitRemoteRead` resolves a request's
+  `relations` level by level: each level's refs become the next level's
+  requests, a target the batch already read is not read again, every level is
+  authorized through its own entity source, and `HandlerOptions.maxDepth`
+  (default 8) caps traversal. Both read and live handlers refuse another
+  protocol version with `RemoteProtocolError` (#65, section 1).
 
 - **Live handler.** `RemoteServer.live` and the compiled `FoldkitRemoteLive`
   handler were missing; the server can now stream the client's live requirements.
@@ -213,10 +331,18 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `SurfaceView.describe` value plus its `toMarkdown`; `pnpm demo` runs it and a
   test asserts every line. Remote is not part of this example.
 
+### `foldkit-kitchen-sink` (example)
+
+- The transcript now runs the whole Remote path end to end: a nested `owner`
+  selection over Drizzle, a live subscription fed by the server's hub from the
+  rename mutation, an optimistic insert into the projects connection confirmed
+  in place by the mutation result, and a dehydrate/hydrate round trip that
+  leaves nothing to fetch (#65, Phase E).
+
 ### `foldkit-remote-example` (example)
 
 - **Remote-backed trace.** A `ProjectPage` Surface selects a project out of a
-  `foldkit-remote` store; `Remote.planSurface` reports the requirement,
+  `foldkit-remote` store; `Remote.plan` reports the requirement,
   `Remote.prefetch` fills it against an in-process `RemoteClient`, the projected
   `RemoteData` moves `Initial → Ready`, a SurfaceView styles and decorates it, a
   `Remote.mutateInto` rename is visible through the same projection, and a

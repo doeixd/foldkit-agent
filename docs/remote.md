@@ -87,11 +87,16 @@ ProjectsByOwner(u7)   Project:p9  Project:p7  Project:p4  [gap]  Project:p1
 ## Requirements and observation
 
 A Surface's projection carries its remote **requirements** — entity, id, fields,
-and a pagination window per relation — as plain data. Reading is pure; it
-performs no I/O.
+a pagination window per relation, and through `relations`, the slice required of
+each relation's target — as plain data. Reading is pure; it performs no I/O. A
+nested selection (`owner: UserSummary`) reads through the ref in the store and
+assembles the target's fields; the store itself stays normalized.
 
 The planner diffs requirements against the store and returns only the missing or
-stale fields. It is deterministic and takes `now` as input (`PlanFreshness`)
+stale fields. A relation whose field is being fetched rides on the request, so
+the server resolves the graph in one read; a relation the store already holds is
+followed into concrete requirements for its targets. It is deterministic and
+takes `now` as input (`PlanFreshness`)
 rather than reading the clock, so the same store and requirements produce the same
 plan.
 
@@ -109,10 +114,25 @@ const subscriptions = (model: Model) => [
 emits a `RemoteMessage`. A fully-known Surface emits nothing. SSR, route/hover
 prefetch, and tests reuse the same plan through `Remote.prefetch`.
 
+What a field the store already holds means is a `RemotePolicy` on `observe` and
+`prefetch`: `cacheFirst` (default) fetches only what is missing,
+`staleWhileRevalidate({ maxAge })` refetches an entry older than the window, and
+`networkOnly` fetches every selected field. A policy compiles to planner options;
+it is not a second cache. A refreshing policy emits `RefreshStarted` before the
+read, which marks the refetched fields stale.
+
+Reads through `Remote.clientLayer` coalesce: requirements issued together are one
+batch, a requirement already in flight is joined, and every waiter gets the
+whole result. Retention is a Message too: `Remote.retain` lists the observed
+projections as roots and emits `RetentionChanged` after a grace period, and the
+reducer's pure `gc` keeps what the roots reach through the store's refs plus any
+pending optimistic change.
+
 In the view, a remote field is a `RemoteData`. `Remote.select` produces
-`Initial` until its selected fields are present, `Ready` once they are, `Failed`
-if the server data does not decode, and `NotFound` for a tombstone. `Loading` and
-`Refreshing` exist for a caller that tracks a request lifecycle explicitly. There
+`Initial` until its selected fields are present, `Ready` once they are,
+`Refreshing` while a selected field is stale (an observer is refetching it),
+`Failed` if the server data does not decode, and `NotFound` for a tombstone.
+`Loading` exists for a caller that tracks a request lifecycle explicitly. There
 is no hidden suspense; the states are explicit.
 
 ## Mutations and live data
@@ -131,16 +151,22 @@ is idempotent per `requestId`, so a transport retry cannot apply the same change
 twice. The application could equally reduce the patches by hand; `Remote.mutateInto`
 is the one-step form.
 
-Optimistic changes are ordered **layers** over the base store, not inverse
-patches: the visible store is recomputed as base + layers, success merges the
-server patch and removes the layer, and failure removes the layer. Overlapping
-layers therefore rebase for free.
+Optimistic changes belong to the mutation: `MutationStarted` carries its entity
+patches and connection changes (`ConnectionChange.prepend`/`append`/`remove`), and
+success or failure releases them together by request id. Patches are ordered
+**layers** over the base store, not inverse patches: the visible store is
+recomputed as base + layers, so overlapping layers rebase for free. Connection
+changes are overlays outside the server-known region; a result's confirmed
+`connections` take the place of the request's own, so a temporary edge becomes
+the real one in place.
 
 Live data is an Effect streaming RPC. Each stream has a monotonic cursor:
 duplicates are ignored, and an event **ahead** of the cursor is a gap — it is not
 applied, and the stream is recorded so the host can resync rather than silently
 miss facts. Entity events update the store; connection events change membership
-and ordering.
+and ordering. A deleted entity is a tombstone that every connection listing it
+skips, a live removal hides a known edge until a fresh page brings it back, and
+a merged page prunes the settled overlays it supersedes.
 
 ## One owner per datum
 
@@ -160,11 +186,16 @@ once.
 
 ## Persistence and recovery
 
-`RemotePersistence.save`/`restore` snapshot the entity store through Effect's
-`KeyValueStore`. The cache is server-derived and **disposable**: a version
-mismatch or malformed snapshot is removed and the planner refetches. This is the
-opposite of Sync's preserve-and-recover policy, because Remote holds no unsent
-user edits; there is nothing to lose.
+A snapshot is the entity store and nothing else; runtime state stays with the
+session. `dehydrate`/`hydrate` are the deterministic text forms (SSR embeds
+one in the page), `RemotePersistence.save`/`restore` keep one in Effect's
+`KeyValueStore`, and the `Hydrated` Message merges one into the Model by policy
+(`replace` or `preserve-existing`). A snapshot names its version and `scope`
+and may be bounded by `maxBytes`. The cache is server-derived and
+**disposable**: a snapshot that is another version, another scope, oversized,
+or malformed is removed and the planner refetches. This is the opposite of
+Sync's preserve-and-recover policy, because Remote holds no unsent user edits;
+there is nothing to lose.
 
 ## When not to use Remote
 

@@ -1,6 +1,13 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Entity, Remote, Selection, type BoundRemote, type RemoteModel } from '../src/index.js'
+import {
+  Entity,
+  Remote,
+  Selection,
+  type BoundRemote,
+  type RemoteModel,
+  initialRemoteModel,
+} from '../src/index.js'
 
 const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema.String }))
 
@@ -9,6 +16,17 @@ describe('Remote core', () => {
     const selection = Selection.make(User, { id: true, name: true })
     expect(selection.entity).toBe('User')
     expect(selection.fields).toEqual(['id', 'name'])
+  })
+
+  it('refuses an empty selection, which would require nothing and read Ready', () => {
+    expect(() => Selection.make(User, {})).toThrow(/picks at least one field/)
+  })
+
+  it('refuses a page whose nested selection is of another entity', () => {
+    const Comment = Entity.make('Comment', Schema.Struct({ id: Schema.String }))
+    expect(() =>
+      Selection.connection(Comment, { first: 1 }, Selection.make(User, { id: true }) as never),
+    ).toThrow(/a page of "Comment" cannot select "User"/)
   })
 
   it('names entities and builds a typed ref', () => {
@@ -67,11 +85,11 @@ describe('Remote core', () => {
     expect(Numeric.ref(7).id).toBe('7')
   })
 
-  it('preserves nested selection key order and schema', () => {
+  it('preserves nested selection key order, schema, and relation requirement', () => {
     const Owner = Entity.make('Owner', Schema.Struct({ id: Schema.String, name: Schema.String }))
     const Project = Entity.make(
       'Project',
-      Schema.Struct({ id: Schema.String, name: Schema.String, owner: Owner.schema }),
+      Schema.Struct({ id: Schema.String, name: Schema.String, owner: Entity.ref(Owner) }),
     )
     const selection = Selection.make(Project, {
       name: true,
@@ -79,6 +97,7 @@ describe('Remote core', () => {
     })
 
     expect(selection.fields).toEqual(['name', 'owner'])
+    expect(selection.relations).toEqual({ owner: { entity: 'Owner', fields: ['id', 'name'] } })
     const decoded = Schema.decodeUnknownSync(
       selection.schema as unknown as Schema.ConstraintDecoder<unknown>,
     )({
@@ -122,7 +141,7 @@ describe('Remote core', () => {
       comments: Selection.connection(Comment, { first: 5 }),
     })
     const bound = {
-      store: { get: () => ({ entities: {}, connections: {}, requests: {}, mutations: {} }) },
+      store: { get: () => initialRemoteModel },
     } as unknown as BoundRemote<unknown, RemoteModel>
 
     expect(Remote.select(bound, selection)('p1').requirements).toEqual([

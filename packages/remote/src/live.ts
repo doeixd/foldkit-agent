@@ -4,27 +4,23 @@
  * are ignored, and a gap is surfaced so the caller can resume or invalidate.
  * Subscriptions are selection-aware and driven by active Surfaces.
  */
+import type { EdgeRef } from './connection.js'
 import { type Connection, type Edge, hasNext, hasPrevious } from './connection.js'
-import { addOverlay, type ConnectionOverlay, type Optimistic } from './optimistic.js'
+import { addOverlay, type OptimisticState } from './optimistic.js'
 import type { LiveInsertion, LivePolicy } from './query.js'
 import { entityKey, tombstone, writeEntity, type EntityStore } from './store.js'
 
 export type LiveCursor = number
 
-export interface EntityRef {
-  readonly entity: string
-  readonly id: string
-}
-
 export type LiveEvent =
   | {
       readonly _tag: 'EntityPatched'
-      readonly ref: EntityRef
+      readonly ref: EdgeRef
       readonly values: Readonly<Record<string, unknown>>
       readonly changed: ReadonlyArray<string>
       readonly cursor: LiveCursor
     }
-  | { readonly _tag: 'EntityDeleted'; readonly ref: EntityRef; readonly cursor: LiveCursor }
+  | { readonly _tag: 'EntityDeleted'; readonly ref: EdgeRef; readonly cursor: LiveCursor }
   | {
       readonly _tag: 'ConnectionInsert'
       readonly connection: string
@@ -128,18 +124,18 @@ export const applyEntityEvent = (
 
 export interface ConnectionApplied {
   readonly state: LiveState
-  readonly optimistic: Optimistic
+  readonly optimistic: OptimisticState
   readonly outcome: LiveOutcome
 }
 
 const removeEdgeOverlays = (
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   connection: string,
   key: string,
-): Optimistic => ({
+): OptimisticState => ({
   ...optimistic,
   overlays: optimistic.overlays.map(overlay =>
-    overlay.connection !== connection
+    overlay.connection !== connection || overlay.position === 'remove'
       ? overlay
       : { ...overlay, edges: overlay.edges.filter(edge => edge.key !== key) },
   ),
@@ -147,7 +143,7 @@ const removeEdgeOverlays = (
 
 export const applyConnectionEvent = (
   state: LiveState,
-  optimistic: Optimistic,
+  optimistic: OptimisticState,
   event: Extract<
     LiveEvent,
     { _tag: 'ConnectionInsert' | 'ConnectionRemove' | 'ConnectionInvalidate' }
@@ -190,9 +186,16 @@ export const applyConnectionEvent = (
       }
     }
     case 'ConnectionRemove':
+      // Strip the edge from pending inserts and hide it wherever else it is
+      // (a server-known segment included) until a fresh page says otherwise.
       return {
         state: advance(state, event.cursor),
-        optimistic: removeEdgeOverlays(optimistic, event.connection, event.edge.key),
+        optimistic: addOverlay(removeEdgeOverlays(optimistic, event.connection, event.edge.key), {
+          id: `live:${event.cursor}`,
+          connection: event.connection,
+          edges: [event.edge],
+          position: 'remove',
+        }),
         outcome,
       }
     case 'ConnectionInvalidate':

@@ -13,26 +13,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Effect, Layer, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import * as Update from 'foldkit/update'
-import {
-  Entity,
-  Mutation,
-  Query,
-  Remote,
-  RemoteClient,
-  Selection,
-  type RemoteModel,
-} from 'foldkit-remote'
-import {
-  databaseLayer,
-  entity,
-  normalize,
-  query,
-  selectColumns,
-  source,
-} from 'foldkit-remote-drizzle'
+import { Mutation, Query, Remote, RemoteClient, Selection, type RemoteModel } from 'foldkit-remote'
+import { databaseLayer, entity, returning, one, query, source } from 'foldkit-remote-drizzle'
 import { RemoteServer } from 'foldkit-remote-server'
 import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import {
@@ -59,15 +44,22 @@ import {
 
 export const sqlite = new DatabaseSync(':memory:')
 sqlite.exec(`
+  CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL);
   CREATE TABLE projects (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL, status TEXT NOT NULL
   );
+  INSERT INTO users (id, name) VALUES ('u1', 'Ada');
   INSERT INTO projects (id, name, owner_id, status) VALUES
     ('p1', 'Apollo', 'u1', 'active'),
     ('p2', 'Borealis', 'u1', 'archived');
 `)
 
 export const db = drizzle({ client: sqlite })
+
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+})
 
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
@@ -77,35 +69,92 @@ export const projects = sqliteTable('projects', {
 })
 
 /** The binding is the Remote `EntityDescriptor`; no second field declaration. */
-export const Project = entity('Project', projects)
+export const User = entity('User', users)
 
-export const ProjectSummary = Selection.make(Project, { id: true, name: true, status: true })
+/** `owner` is a relation: the entity field is a ref, and the read resolves it. */
+export const Project = entity('Project', projects, {
+  relations: { owner: one(User, { field: projects.ownerId }) },
+})
+
+/**
+ * A nested selection: the Surface reads the owner's name through the ref, and
+ * one `FoldkitRemoteRead` resolves both entities.
+ */
+export const ProjectSummary = Selection.make(Project, {
+  id: true,
+  name: true,
+  status: true,
+  owner: Selection.make(User, { name: true }),
+})
 
 export const RenameProject = Mutation.make('RenameProject', {
   Input: Schema.Struct({ id: Schema.String, name: Schema.String }),
   Output: Schema.Struct({ id: Schema.String }),
 })
 
+export const ProjectsByOwner = Query.make('ProjectsByOwner', {
+  Input: Schema.Struct({ ownerId: Schema.String }),
+  Result: Query.connection({ name: 'Project' }),
+})
+
+export const CreateProject = Mutation.make('CreateProject', {
+  Input: Schema.Struct({ id: Schema.String, name: Schema.String, ownerId: Schema.String }),
+  Output: Schema.Struct({ id: Schema.String }),
+})
+
+/**
+ * The live hub: mutation sources tell it what changed, and every live
+ * subscriber that selects those fields receives them, re-read through the
+ * entity source under its own principal. It needs only the entity sources.
+ */
+const entitySources = [source(User), source(Project)]
+export const liveHub = Effect.runSync(RemoteServer.liveHub(entitySources))
+
 const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
   Effect.gen(function* () {
-    const fields = ['id', 'name', 'status'] as const
+    const project = returning(Project, ['id', 'name', 'status'])
     const rows = yield* Effect.promise(() =>
       Promise.resolve(
         db
           .update(projects)
           .set({ name: input.name })
           .where(eq(projects.id, input.id))
-          .returning(selectColumns(Project, fields)),
+          .returning(project.columns),
       ),
     )
-    return { output: { id: input.id }, entities: normalize(Project, rows, fields) }
+    // Live subscribers that select `name` learn of the rename from here.
+    yield* liveHub.changed(Project.ref(input.id), ['name'])
+    return { output: { id: input.id }, entities: project.patches(rows) }
   }),
 )
 
-export const ProjectsByOwner = Query.make('ProjectsByOwner', {
-  Input: Schema.Struct({ ownerId: Schema.String }),
-  Result: Query.connection({ name: 'Project' }),
-})
+/**
+ * A mutation that also changes a connection: the result carries the confirmed
+ * insert, so the client's optimistic prepend becomes the real edge in place.
+ */
+const CreateProjectSource = RemoteServer.mutation(CreateProject, ({ input }) =>
+  Effect.gen(function* () {
+    const project = returning(Project, ['id', 'name', 'status'])
+    const rows = yield* Effect.promise(() =>
+      Promise.resolve(
+        db
+          .insert(projects)
+          .values({ id: input.id, name: input.name, ownerId: input.ownerId, status: 'active' })
+          .returning(project.columns),
+      ),
+    )
+    return {
+      output: { id: input.id },
+      entities: project.patches(rows),
+      connections: [
+        RemoteServer.prepend(
+          ProjectsByOwner.ref({ ownerId: input.ownerId }),
+          Project.ref(input.id),
+        ),
+      ],
+    }
+  }),
+)
 
 const ProjectsByOwnerSource = query(ProjectsByOwner, {
   entity: Project,
@@ -114,8 +163,8 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 })
 
 export const Data = Remote.make({
-  entities: [Project],
-  mutations: [RenameProject],
+  entities: [User, Project],
+  mutations: [RenameProject, CreateProject],
   queries: [ProjectsByOwner],
 })
 
@@ -277,18 +326,12 @@ export const openReplica = KitchenSync.openReplica(replicaId('kitchen-a'), memor
  */
 export const serverClient = (principal: string): Layer.Layer<RemoteClient> => {
   const server = RemoteServer.make({
-    entities: [source(Project)],
-    mutations: [RenameProjectSource],
+    entities: entitySources,
+    mutations: [RenameProjectSource, CreateProjectSource],
     queries: [ProjectsByOwnerSource],
   })
   // Every source names a descriptor the domain declared.
   RemoteServer.validate(Data, server)
-  const handlers = RemoteServer.handlers(server, principal)
-  const onDatabase = databaseLayer(db)
-  return Layer.succeed(RemoteClient, {
-    read: batch => handlers.FoldkitRemoteRead(batch).pipe(Effect.provide(onDatabase)),
-    query: request => handlers.FoldkitRemoteQuery(request).pipe(Effect.provide(onDatabase)),
-    mutate: request => handlers.FoldkitRemoteMutate(request).pipe(Effect.provide(onDatabase)),
-    live: () => Stream.empty,
-  })
+  const handlers = RemoteServer.handlers(server, principal, { live: liveHub })
+  return Remote.clientLayer(handlers).pipe(Layer.provide(databaseLayer(db)))
 }

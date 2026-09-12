@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type Connection,
   cursor,
   edge,
   emptyConnection,
@@ -167,5 +168,24 @@ describe('Connection.merge', () => {
       const keys = items(again).map(value => value.key)
       expect(new Set(keys).size).toBe(keys.length)
     }
+  })
+})
+
+describe('Connection segment order', () => {
+  it('puts a terminal-start segment first and a terminal-end segment last, whatever the merge order', () => {
+    const head = segment([edge({ entity: 'E', id: 'a' })], terminal, cursor('c1'))
+    const tail = segment([edge({ entity: 'E', id: 'z' })], cursor('c8'), terminal)
+    const middle = segment([edge({ entity: 'E', id: 'm' })], cursor('c4'), cursor('c5'))
+    const ids = (connection: Connection) => items(connection).map(item => item.ref.id)
+    expect(ids([tail, middle, head].reduce((c, p) => merge(c, p), emptyConnection))).toEqual([
+      'a',
+      'm',
+      'z',
+    ])
+    expect(ids([middle, tail, head].reduce((c, p) => merge(c, p), emptyConnection))).toEqual([
+      'a',
+      'm',
+      'z',
+    ])
   })
 })

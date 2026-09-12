@@ -33,9 +33,14 @@ describe('shapeWindow', () => {
       { traversal: 'backward', cursor: undefined, pageSize: 25 },
     ],
     [
-      'falls back to the default for a non-positive size',
-      { last: 0 },
+      'falls back to the default for a negative size',
+      { last: -1 },
       { traversal: 'backward', cursor: undefined, pageSize: 20 },
+    ],
+    [
+      'honors a size of zero',
+      { first: 0 },
+      { traversal: 'forward', cursor: undefined, pageSize: 0 },
     ],
     [
       'falls back to the default for a fractional size',

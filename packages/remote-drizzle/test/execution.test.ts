@@ -1,7 +1,7 @@
 import { eq, type SQL } from 'drizzle-orm'
 import { pgTable, PgDialect, text } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
-import { Selection } from 'foldkit-remote'
+import { Selection, REMOTE_PROTOCOL_VERSION } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
 import {
@@ -10,6 +10,7 @@ import {
   many,
   manyToMany,
   normalize,
+  returning,
   one,
   source,
   type DrizzleDatabaseService,
@@ -103,7 +104,10 @@ describe('RemoteDrizzle execution', () => {
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
-        .FoldkitRemoteRead({ requests: [{ entity: 'User', id: 'a', fields: ['name'] }] })
+        .FoldkitRemoteRead({
+          version: REMOTE_PROTOCOL_VERSION,
+          requests: [{ entity: 'User', id: 'a', fields: ['name'] }],
+        })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
@@ -148,7 +152,10 @@ describe('RemoteDrizzle execution', () => {
     const result = await Effect.runPromise(
       Effect.result(
         RemoteServer.handlers(server, null)
-          .FoldkitRemoteRead({ requests: [{ entity: 'User', id: 'a', fields: ['name'] }] })
+          .FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
+            requests: [{ entity: 'User', id: 'a', fields: ['name'] }],
+          })
           .pipe(Effect.provideService(DrizzleDatabase, failing)),
       ),
     )
@@ -298,7 +305,7 @@ describe('RemoteDrizzle execution', () => {
     expect(records[0]!.values.toString).toEqual(['Comment:c2'])
   })
 
-  it('loads a bounded page per parent when a first window is given', async () => {
+  it('loads a bounded page for every parent in one statement when a first window is given', async () => {
     const { database, calls } = fakeDatabaseQueue([
       [
         { id: 'p1', comments: 'p1' },
@@ -307,8 +314,8 @@ describe('RemoteDrizzle execution', () => {
       [
         { child: 'c1', parent: 'p1' },
         { child: 'c2', parent: 'p1' },
+        { child: 'c3', parent: 'p2' },
       ],
-      [{ child: 'c3', parent: 'p2' }],
     ])
 
     const records = await Effect.runPromise(
@@ -338,9 +345,10 @@ describe('RemoteDrizzle execution', () => {
         },
       },
     ])
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(2)
     expect(Object.keys(calls[1]!.selection)).toEqual(['child', 'parent'])
-    expect(calls[1]!.limit).toBe(2)
+    // The page bound lives in the ranking subquery, not a LIMIT on the statement.
+    expect(calls[1]!.limit).toBeUndefined()
   })
 
   it('loads the last page per parent for a last window', async () => {
@@ -398,7 +406,7 @@ describe('RemoteDrizzle execution', () => {
       hasPrevious: true,
     })
     expect(calls).toHaveLength(3)
-    expect(Object.keys(calls[1]!.selection)).toEqual(['body'])
+    expect(Object.keys(calls[1]!.selection)).toEqual(['body', 'id'])
 
     const dialect = new PgDialect()
     expect(dialect.sqlToQuery(calls[2]!.where as SQL).sql).toContain('"comments"."body" <')
@@ -493,6 +501,15 @@ describe('RemoteDrizzle execution', () => {
 
     expect(patches).toEqual([
       { entity: 'Project', id: 'p1', values: { id: 'p1', name: 'P', owner: 'User:u1' } },
+    ])
+  })
+
+  it('returning pairs the selected columns with their normalization', () => {
+    const project = returning(ProjectBinding, ['name', 'owner'])
+
+    expect(Object.keys(project.columns)).toEqual(['id', 'name', 'owner'])
+    expect(project.patches([{ id: 'p1', name: 'P', owner: null }])).toEqual([
+      { entity: 'Project', id: 'p1', values: { id: 'p1', name: 'P', owner: null } },
     ])
   })
 

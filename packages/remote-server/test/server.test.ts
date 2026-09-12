@@ -1,6 +1,15 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
-import { Entity, Mutation, Query, ReadBatch, Remote, RemoteClient, RemoteRpc } from 'foldkit-remote'
+import {
+  Entity,
+  Mutation,
+  Query,
+  ReadBatch,
+  REMOTE_PROTOCOL_VERSION,
+  Remote,
+  RemoteClient,
+  RemoteRpc,
+} from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import { RemoteServer, RemoteServerError, type ServerDefinition } from '../src/index.js'
 
@@ -75,7 +84,7 @@ const read = (principal: string, requests: ReadonlyArray<Request>) =>
     Effect.scoped(
       Effect.gen(function* () {
         const client = yield* RpcTest.makeClient(RemoteRpc)
-        return yield* client.FoldkitRemoteRead({ requests })
+        return yield* client.FoldkitRemoteRead({ version: REMOTE_PROTOCOL_VERSION, requests })
       }),
     ).pipe(Effect.provide(layer(principal))),
   )
@@ -125,7 +134,10 @@ describe('RemoteServer', () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const client = yield* RemoteClient
-        return yield* client.read({ requests: [{ entity: 'User', id: 'u1', fields: ['id'] }] })
+        return yield* client.read({
+          version: REMOTE_PROTOCOL_VERSION,
+          requests: [{ entity: 'User', id: 'u1', fields: ['id'] }],
+        })
       }).pipe(Effect.provide(Remote.clientLayer(RemoteServer.handlers(server, 'admin')))),
     )
 
@@ -165,6 +177,7 @@ describe('RemoteServer', () => {
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(RemoteRpc)
           return yield* client.FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
             requests: [{ entity: 'User', id: 'u1', fields: ['id'] }],
           })
         }),
@@ -225,6 +238,7 @@ describe('RemoteServer', () => {
           Effect.gen(function* () {
             const client = yield* RpcTest.makeClient(RemoteRpc)
             return yield* client.FoldkitRemoteRead({
+              version: REMOTE_PROTOCOL_VERSION,
               requests: [{ entity: 'User', id: 'u1', fields: ['id'] }],
             })
           }),
@@ -260,6 +274,7 @@ describe('RemoteServer', () => {
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(RemoteRpc)
           return yield* client.FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
             requests: [
               { entity: 'User', id: 'u1', fields: ['id', 'name'] },
               { entity: 'User', id: 'u1', fields: ['name', 'admin'] },
@@ -315,6 +330,7 @@ describe('RemoteServer', () => {
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(RemoteRpc)
           return yield* client.FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
             requests: [{ entity: 'User', id: 'u1', fields: ['id', 'toString'] }],
           })
         }),
@@ -350,6 +366,7 @@ describe('RemoteServer', () => {
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(RemoteRpc)
           return yield* client.FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
             requests: [{ entity: 'User', id: 'u1', fields: ['name'] }],
           })
         }),
@@ -390,6 +407,7 @@ describe('RemoteServer', () => {
           Effect.gen(function* () {
             const client = yield* RpcTest.makeClient(RemoteRpc)
             return yield* client.FoldkitRemoteRead({
+              version: REMOTE_PROTOCOL_VERSION,
               requests: [
                 { entity: 'User', id: 'a', fields: ['id'] },
                 { entity: 'User', id: 'b', fields: ['id'] },
@@ -409,17 +427,21 @@ describe('RemoteServer', () => {
     const seen: Array<unknown> = []
     const server = RemoteServer.make({
       entities: [
-        RemoteServer.entity<string>(User, {
-          read: ({ ids, fields, windows }) => {
-            seen.push(windows)
-            return Effect.succeed(
-              ids.map(id => ({
-                id,
-                values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
-              })),
-            )
+        // By name only: the source declares no fields, so `posts` is not filtered.
+        RemoteServer.entity<string>(
+          { name: 'User' },
+          {
+            read: ({ ids, fields, windows }) => {
+              seen.push(windows)
+              return Effect.succeed(
+                ids.map(id => ({
+                  id,
+                  values: Object.fromEntries(fields.map(field => [field, `${field}:${id}`])),
+                })),
+              )
+            },
           },
-        }),
+        ),
       ],
     })
     const layer = RemoteRpc.toLayer({
@@ -430,7 +452,7 @@ describe('RemoteServer', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(RemoteRpc)
-          return yield* client.FoldkitRemoteRead({ requests })
+          return yield* client.FoldkitRemoteRead({ version: REMOTE_PROTOCOL_VERSION, requests })
         }),
       ).pipe(Effect.provide(layer)),
     )
@@ -454,6 +476,63 @@ describe('RemoteServer', () => {
     ).toEqual([undefined])
   })
 
+  it('never reads an inherited property as a window', async () => {
+    expect(
+      await readWithWindows([
+        {
+          entity: 'User',
+          id: 'u1',
+          fields: ['toString', 'posts'],
+          windows: { posts: { first: 1 } },
+        },
+      ]),
+    ).toEqual([{ posts: { first: 1 } }])
+  })
+
+  it('never asks the source for a field the Entity does not declare', async () => {
+    const seen: Array<{ fields: ReadonlyArray<string>; windows: unknown }> = []
+    const authorized: Array<ReadonlyArray<string>> = []
+    const server = RemoteServer.make({
+      entities: [
+        RemoteServer.entity<string>(User, {
+          authorize: (_principal, fields) => {
+            authorized.push(fields)
+            return fields
+          },
+          read: ({ ids, fields, windows }) => {
+            seen.push({ fields, windows })
+            return Effect.succeed(
+              ids.map(id => ({ id, values: Object.fromEntries(fields.map(f => [f, f])) })),
+            )
+          },
+        }),
+      ],
+    })
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
+            requests: [
+              {
+                entity: 'User',
+                id: 'u1',
+                fields: ['name', 'posts', '__proto__'],
+                windows: { posts: { first: 3 } },
+              },
+              { entity: 'User', id: 'u2', fields: ['posts'] },
+            ],
+          })
+        }),
+      ).pipe(Effect.provide(RemoteRpc.toLayer(RemoteServer.handlers(server, 'user')))),
+    )
+
+    expect(seen).toEqual([{ fields: ['name'], windows: undefined }])
+    expect(authorized).toEqual([['name']])
+    expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { name: 'name' } }])
+  })
+
   const collectLive = (
     definition: ServerDefinition<string, never>,
     payload: { requirements: ReadonlyArray<Request>; after: number },
@@ -462,7 +541,9 @@ describe('RemoteServer', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const client = yield* RpcTest.makeClient(RemoteRpc)
-          return yield* client.FoldkitRemoteLive(payload).pipe(Stream.runCollect)
+          return yield* client
+            .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, ...payload })
+            .pipe(Stream.runCollect)
         }),
       ).pipe(Effect.provide(RemoteRpc.toLayer(RemoteServer.handlers(definition, 'user')))),
     )
@@ -562,5 +643,46 @@ describe('RemoteServer', () => {
       entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
     })
     expect(() => RemoteServer.validate(domain, server)).toThrow(/User.*not declared/)
+  })
+})
+
+describe('RemoteServer mutation connection changes', () => {
+  it('returns the connection changes a mutation source reports', async () => {
+    const AddComment = Mutation.make('AddComment', {
+      Input: Schema.Struct({ body: Schema.String }),
+      Output: Schema.Struct({ id: Schema.String }),
+    })
+    const definition = RemoteServer.make({
+      entities: [],
+      mutations: [
+        RemoteServer.mutation(AddComment, () =>
+          Effect.succeed({
+            output: { id: 'c9' },
+            connections: [RemoteServer.prepend('Feed', { entity: 'Comment', id: 'c9' })],
+          }),
+        ),
+      ],
+    })
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* RpcTest.makeClient(RemoteRpc)
+          return yield* client.FoldkitRemoteMutate({
+            requestId: 'r1',
+            mutation: 'AddComment',
+            input: { body: 'hi' },
+          })
+        }),
+      ).pipe(Effect.provide(RemoteRpc.toLayer(RemoteServer.handlers(definition, 'user')))),
+    )
+    expect(result.connections).toEqual([
+      {
+        _tag: 'Insert',
+        connection: 'Feed',
+        position: 'prepend',
+        edge: { entity: 'Comment', id: 'c9', key: 'Comment:c9' },
+      },
+    ])
+    expect(result.entities).toEqual([])
   })
 })

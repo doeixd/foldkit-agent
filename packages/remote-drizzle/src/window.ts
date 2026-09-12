@@ -7,8 +7,9 @@
  * `THIRD_PARTY_NOTICES.md`).
  *
  * The window is client-supplied, so the size is clamped: a non-integer or
- * non-positive request falls back to the default, and no request may exceed
- * `maxSize` (a huge page would otherwise reach the database as a huge LIMIT).
+ * negative request falls back to the default, `0` is honored (a page of
+ * boundaries only), and no request may exceed `maxSize` (a huge page would
+ * otherwise reach the database as a huge LIMIT).
  */
 import type { QueryWindow } from 'foldkit-remote'
 import type { Traversal } from './cursor.js'
@@ -32,7 +33,7 @@ export const shapeWindow = (window: QueryWindow, options: WindowOptions = {}): W
   const max = options.maxSize ?? DEFAULT_MAX_PAGE_SIZE
   const requested = window.first ?? window.last
   const pageSize =
-    typeof requested === 'number' && Number.isInteger(requested) && requested >= 1
+    typeof requested === 'number' && Number.isInteger(requested) && requested >= 0
       ? requested
       : fallback
 

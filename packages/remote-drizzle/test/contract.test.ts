@@ -1,6 +1,14 @@
 import { pgTable, text } from 'drizzle-orm/pg-core'
 import { Effect } from 'effect'
-import { Remote, Selection, emptyStore, type BoundRemote, type RemoteModel } from 'foldkit-remote'
+import {
+  Remote,
+  Selection,
+  emptyStore,
+  type BoundRemote,
+  type RemoteModel,
+  REMOTE_PROTOCOL_VERSION,
+  initialRemoteModel,
+} from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
 import { DrizzleDatabase, entity, many, one, source } from '../src/index.js'
@@ -57,14 +65,14 @@ describe('RemoteDrizzle end to end', () => {
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
-        .FoldkitRemoteRead({ requests: [request] })
+        .FoldkitRemoteRead({ version: REMOTE_PROTOCOL_VERSION, requests: [request] })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
     const store = Remote.writeRead(emptyStore, [request], result)
     const bound = {
       store: {
-        get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),
+        get: () => ({ ...initialRemoteModel, entities: store }),
       },
     } as unknown as BoundRemote<unknown, RemoteModel>
 
@@ -102,14 +110,14 @@ describe('RemoteDrizzle end to end', () => {
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
-        .FoldkitRemoteRead({ requests: [request] })
+        .FoldkitRemoteRead({ version: REMOTE_PROTOCOL_VERSION, requests: [request] })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
     const store = Remote.writeRead(emptyStore, [request], result)
     const bound = {
       store: {
-        get: () => ({ entities: store, connections: {}, requests: {}, mutations: {} }),
+        get: () => ({ ...initialRemoteModel, entities: store }),
       },
     } as unknown as BoundRemote<unknown, RemoteModel>
 

@@ -5,624 +5,84 @@
  * live classification, optimistic layers) performs no I/O. The `Remote.*`
  * helpers that read or mutate go through the `RemoteClient` Effect service.
  */
-import { Context, Effect, Layer, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
+import { Effect, Layer, Result, Schema, Stream } from 'effect'
+import type { Duration } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
-import type { Contract, ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
-import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
 import {
-  addLayer,
-  emptyOptimistic,
-  removeLayer,
-  type EntityLayer,
-  type Optimistic,
+  Requirement,
+  type Contract,
+  type ModelRef,
+  type Projection,
+  type Surface,
+} from 'foldkit-surface'
+import {
+  RemoteClient,
+  coalescedLayer,
+  liveEventOf,
+  mutateRemote,
+  remoteError,
+  type RemoteRpcClient,
+} from './client.js'
+import { emptyConnection, type Edge } from './connection.js'
+import type { EntityDescriptor } from './entity.js'
+import { inspectEntity, inspectRemote } from './inspect.js'
+import type { LiveCursor } from './live.js'
+import {
+  initialRemoteModel,
+  remoteMessageSchema,
+  remoteModelSchema,
+  retentionRootsSchema,
+  updateRemote,
+  writeRead,
+  type RemoteMessage,
+  type RemoteModel,
+} from './model.js'
+import type { MutationDescriptor } from './mutation.js'
+import {
+  connectionIdentity,
+  visibleItems,
+  visibleStore,
+  type ConnectionIdentity,
+  type OptimisticState,
+  type OptimisticOperation,
 } from './optimistic.js'
+import { plan, type PlanOptions } from './plan.js'
+import { RemotePolicy } from './policy.js'
+import type { QueryDescriptor, QueryRef } from './query.js'
+import { remoteDataSchema, type RemoteData } from './remoteData.js'
+import type { RetentionRoots } from './retain.js'
+import { assemble, relationOf, type Selection } from './selection.js'
+import { entityKey, isTombstone, type EntityStore } from './store.js'
 import {
-  applyConnectionEvent,
-  applyEntityEvent,
-  emptyLiveState,
-  type LiveCursor,
-  type LiveEvent,
-  type LiveState,
-} from './live.js'
-import {
-  beginMutation,
-  emptyMutationState,
-  failMutation,
-  reconcileMutation,
-  type MutationState,
-  type NormalizedPatch,
-} from './mutation.js'
-import {
-  entityKey,
-  emptyStore,
-  isTombstone,
-  readField,
-  writeEntity,
-  type EntityEntry,
-  type EntityStore,
-} from './store.js'
-import { plan, windowKey, type PlanFreshness } from './plan.js'
-import {
-  MutationRequest,
-  MutationResult,
-  NormalizedEntity,
-  QueryRequest,
   QueryResult,
-  ReadBatch,
-  ReadBatchResult,
   ReadRequest,
+  REMOTE_PROTOCOL_VERSION,
   RemoteLiveError,
-  RemoteMutationError,
+  RemoteProtocolError,
   RemoteQueryError,
-  RemoteReadError,
   RemoteRpc,
-  type LiveChange,
-  type LiveRequirement,
 } from './wire.js'
-import type { LivePolicy, QueryDescriptor, QueryRef, QueryWindow } from './query.js'
+import type { CoalesceOptions } from './coalesce.js'
 
-type AnySchema = Schema.Schema<unknown>
-
-export * from './store.js'
-export * from './plan.js'
+export * from './client.js'
+export * from './coalesce.js'
 export * from './connection.js'
-export * from './query.js'
+export * from './entity.js'
+export * from './inspect.js'
+export * from './live.js'
+export * from './model.js'
 export * from './mutation.js'
 export * from './optimistic.js'
-export * from './live.js'
 export * from './persistence.js'
+export * from './plan.js'
+export * from './policy.js'
+export * from './query.js'
+export * from './relation.js'
+export * from './remoteData.js'
+export * from './retain.js'
+export * from './selection.js'
+export * from './store.js'
 export * from './wire.js'
-
-// ===========================================================================
-// Entity
-// ===========================================================================
-
-declare const entityRefFields: unique symbol
-
-/**
- * A normalized reference to an entity. `F` is a phantom carrying the entity's
- * fields so `Entity.patch` can type its patch; it is absent at runtime.
- */
-export interface EntityRef<
-  Name extends string,
-  F extends Schema.Struct.Fields = Schema.Struct.Fields,
-> {
-  readonly entity: Name
-  readonly id: string
-  readonly [entityRefFields]?: F
-}
-
-export interface EntityDescriptor<Name extends string, F extends Schema.Struct.Fields> {
-  readonly name: Name
-  readonly schema: Schema.Struct<F>
-  readonly fields: F
-  // A method, not a property: method signatures are bivariant, so a concrete
-  // descriptor stays assignable to `EntityDescriptor<any, any>` (which appears
-  // in every heterogeneous collection, e.g. `Remote.make`'s entities).
-  ref(id: Schema.Schema.Type<F['id']>): EntityRef<Name, F>
-}
-
-const encodeRef = (ref: { readonly entity: string; readonly id: string }): string =>
-  `${ref.entity}:${ref.id}`
-
-const decodeRef = (encoded: string): { readonly entity: string; readonly id: string } => {
-  const separator = encoded.indexOf(':')
-  return separator === -1
-    ? { entity: encoded, id: '' }
-    : { entity: encoded.slice(0, separator), id: encoded.slice(separator + 1) }
-}
-
-/**
- * Relations are **references**, never inline target schemas: a ref cannot
- * reconstruct a full entity, and dereferencing is a store concern. Because the
- * target schema is not inlined, recursive relations cannot arise through the
- * schema graph.
- */
-const refCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema.Codec<
-  EntityRef<Name, F>,
-  string
-> =>
-  Schema.Struct({ entity: Schema.String, id: Schema.String }).pipe(
-    Schema.encodeTo(Schema.String, {
-      decode: SchemaGetter.transform(decodeRef),
-      encode: SchemaGetter.transform(encodeRef),
-    }),
-  ) as unknown as Schema.Codec<EntityRef<Name, F>, string>
-
-export interface EntityPatch<Name extends string, F extends Schema.Struct.Fields> {
-  readonly entity: Name
-  readonly id: string
-  readonly values: Partial<Schema.Struct.Type<F>>
-}
-
-/**
- * One authoritative page of a paginated relation: refs (never inline entities)
- * plus whether more exist. The adapter does not hold segmentation state; the
- * client merges pages.
- */
-export interface RefPage<
-  Name extends string,
-  F extends Schema.Struct.Fields = Schema.Struct.Fields,
-> {
-  readonly refs: ReadonlyArray<EntityRef<Name, F>>
-  readonly hasNext: boolean
-  readonly hasPrevious: boolean
-}
-
-const refPageCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema.Codec<
-  RefPage<Name, F>,
-  {
-    readonly refs: ReadonlyArray<string>
-    readonly hasNext: boolean
-    readonly hasPrevious: boolean
-  }
-> =>
-  Schema.Struct({
-    refs: Schema.Array(refCodec<Name, F>()),
-    hasNext: Schema.Boolean,
-    hasPrevious: Schema.Boolean,
-  }) as unknown as Schema.Codec<
-    RefPage<Name, F>,
-    {
-      readonly refs: ReadonlyArray<string>
-      readonly hasNext: boolean
-      readonly hasPrevious: boolean
-    }
-  >
-
-export const Entity = {
-  make: <
-    const Name extends string,
-    const F extends Schema.Struct.Fields & { readonly id: Schema.Schema<unknown> },
-  >(
-    name: Name,
-    schema: Schema.Struct<F>,
-  ): EntityDescriptor<Name, F> => ({
-    name,
-    schema,
-    fields: schema.fields,
-    ref: id => ({ entity: name, id: String(id) }) as EntityRef<Name, F>,
-  }),
-
-  /** A relation to a known entity, decoded as a reference. */
-  ref: <Name extends string, F extends Schema.Struct.Fields>(
-    _entity: EntityDescriptor<Name, F>,
-  ): Schema.Codec<EntityRef<Name, F>, string> => refCodec<Name, F>(),
-
-  /** A relation by name, for recursive or forward references. */
-  refTo: <Name extends string>(_name: Name): Schema.Codec<EntityRef<Name>, string> =>
-    refCodec<Name, Schema.Struct.Fields>(),
-
-  /**
-   * The wire key a relation field carries (`"Entity:id"`). Adapters that read a
-   * foreign key emit this so the ref codec can decode it on the client.
-   */
-  refKey: (ref: { readonly entity: string; readonly id: string }): string => encodeRef(ref),
-
-  /** Splits a ref key back into its entity and id. */
-  refParts: (key: string): { readonly entity: string; readonly id: string } => decodeRef(key),
-
-  /** A relation value of one authoritative page of refs. */
-  refPage: <Name extends string, F extends Schema.Struct.Fields>(
-    _entity: EntityDescriptor<Name, F>,
-  ): Schema.Codec<
-    RefPage<Name, F>,
-    {
-      readonly refs: ReadonlyArray<string>
-      readonly hasNext: boolean
-      readonly hasPrevious: boolean
-    }
-  > => refPageCodec<Name, F>(),
-
-  patch: <Name extends string, F extends Schema.Struct.Fields>(
-    ref: EntityRef<Name, F>,
-    patch: Partial<Schema.Struct.Type<F>>,
-  ): EntityPatch<Name, F> => ({ entity: ref.entity, id: ref.id, values: patch }),
-}
-
-// ===========================================================================
-// Selection
-// ===========================================================================
-
-export interface Selection<Value, Name extends string = string> {
-  readonly entity: Name
-  readonly fields: readonly string[]
-  /** A pure codec: entity fields carry no decoding or encoding services. */
-  readonly schema: Schema.Codec<Value, unknown, never, never>
-  /** Pagination windows for nested relation fields, keyed by field name. */
-  readonly connections?: Readonly<Record<string, QueryWindow>> | undefined
-  /** Present when this selection is itself a paginated relation. */
-  readonly window?: QueryWindow | undefined
-}
-
-type SelectionOf<F extends Schema.Struct.Fields> = {
-  readonly [K in keyof F]?: true | Selection<unknown>
-}
-
-type SelectionValue<F extends Schema.Struct.Fields, Sel> = {
-  readonly [K in keyof Sel & keyof F]: Sel[K] extends true
-    ? Schema.Schema.Type<F[K]>
-    : Sel[K] extends Selection<infer V>
-      ? V
-      : never
-}
-
-export const Selection = {
-  make: <Name extends string, F extends Schema.Struct.Fields, const Sel extends SelectionOf<F>>(
-    entity: EntityDescriptor<Name, F>,
-    selection: Sel,
-  ): Selection<SelectionValue<F, Sel>, Name> => {
-    const picked: Record<string, AnySchema> = {}
-    const connections: Record<string, QueryWindow> = {}
-    for (const key of Object.keys(selection)) {
-      const choice = (selection as Record<string, unknown>)[key]
-      if (choice === true) {
-        picked[key] = entity.fields[key] as AnySchema
-        continue
-      }
-      const nested = choice as Selection<unknown>
-      picked[key] = nested.schema as AnySchema
-      if (nested.window !== undefined) connections[key] = nested.window
-    }
-    return {
-      entity: entity.name,
-      fields: Object.keys(selection),
-      schema: Schema.Struct(picked) as unknown as Schema.Codec<
-        SelectionValue<F, Sel>,
-        unknown,
-        never,
-        never
-      >,
-      ...(Object.keys(connections).length === 0 ? {} : { connections }),
-    }
-  },
-
-  /** A paginated relation: one page of refs to `entity`, with a window. */
-  connection: <Name extends string, F extends Schema.Struct.Fields>(
-    entity: EntityDescriptor<Name, F>,
-    window: QueryWindow,
-  ): Selection<RefPage<Name, F>, Name> => ({
-    entity: entity.name,
-    fields: [],
-    schema: Entity.refPage(entity) as unknown as Schema.Codec<
-      RefPage<Name, F>,
-      unknown,
-      never,
-      never
-    >,
-    window,
-  }),
-}
-
-// ===========================================================================
-// RemoteData and the Remote scope
-// ===========================================================================
-
-export interface MutationDescriptor<Name extends string, Input, Output> {
-  readonly name: Name
-  readonly Input: Schema.Codec<Input>
-  readonly Output: Schema.Codec<Output>
-}
-
-export const Mutation = {
-  make: <const Name extends string, Input, Output>(
-    name: Name,
-    config: { readonly Input: Schema.Codec<Input>; readonly Output: Schema.Codec<Output> },
-  ): MutationDescriptor<Name, Input, Output> => ({
-    name,
-    Input: config.Input,
-    Output: config.Output,
-  }),
-}
-
-export interface RemoteError {
-  readonly _tag: string
-  readonly message: string
-}
-
-export type RemoteData<A> =
-  | { readonly _tag: 'Initial' }
-  | { readonly _tag: 'Loading' }
-  | { readonly _tag: 'Ready'; readonly value: A }
-  | { readonly _tag: 'Refreshing'; readonly value: A }
-  | { readonly _tag: 'Failed'; readonly error: RemoteError; readonly previous?: A }
-  | { readonly _tag: 'NotFound' }
-
-const remoteErrorSchema = Schema.Struct({ _tag: Schema.String, message: Schema.String })
-
-/** A `RemoteData` schema, so a projection that reads remote state is typed. */
-const remoteDataSchema = <A>(value: Schema.Schema<A>): Schema.Schema<RemoteData<A>> =>
-  Schema.Union([
-    Schema.Struct({ _tag: Schema.Literal('Initial') }),
-    Schema.Struct({ _tag: Schema.Literal('Loading') }),
-    Schema.Struct({ _tag: Schema.Literal('Ready'), value }),
-    Schema.Struct({ _tag: Schema.Literal('Refreshing'), value }),
-    Schema.Struct({
-      _tag: Schema.Literal('Failed'),
-      error: remoteErrorSchema,
-      previous: Schema.optional(value),
-    }),
-    Schema.Struct({ _tag: Schema.Literal('NotFound') }),
-  ]) as unknown as Schema.Schema<RemoteData<A>>
-
-export const RemoteData = {
-  /**
-   * The `RemoteData` schema for a value schema. Exposed so a `RemoteData` can
-   * be embedded in a hand-written Model schema, not only through `Remote.select`.
-   */
-  schema: <A>(value: Schema.Schema<A>): Schema.Schema<RemoteData<A>> => remoteDataSchema(value),
-
-  /** Exhaustive: omitting a state is a compile error. */
-  match: <A, R>(
-    data: RemoteData<A>,
-    cases: {
-      readonly Initial: () => R
-      readonly Loading: () => R
-      readonly Ready: (value: A) => R
-      readonly Refreshing: (value: A) => R
-      readonly Failed: (error: RemoteError, previous: Option.Option<A>) => R
-      readonly NotFound: () => R
-    },
-  ): R => {
-    switch (data._tag) {
-      case 'Initial':
-        return cases.Initial()
-      case 'Loading':
-        return cases.Loading()
-      case 'Ready':
-        return cases.Ready(data.value)
-      case 'Refreshing':
-        return cases.Refreshing(data.value)
-      case 'Failed':
-        return cases.Failed(
-          data.error,
-          data.previous === undefined ? Option.none() : Option.some(data.previous),
-        )
-      case 'NotFound':
-        return cases.NotFound()
-    }
-  },
-
-  map: <A, B>(data: RemoteData<A>, f: (value: A) => B): RemoteData<B> => {
-    switch (data._tag) {
-      case 'Ready':
-        return { _tag: 'Ready', value: f(data.value) }
-      case 'Refreshing':
-        return { _tag: 'Refreshing', value: f(data.value) }
-      case 'Failed':
-        return data.previous === undefined
-          ? { _tag: 'Failed', error: data.error }
-          : { _tag: 'Failed', error: data.error, previous: f(data.previous) }
-      default:
-        return data
-    }
-  },
-}
-
-/**
- * The normalized cache as a Foldkit Submodel. `Remote.make` returns a schema and
- * an `update` for this shape; `Remote.update` reconciles every producer.
- */
-export interface RemoteModel {
-  /** Entity values, presence, staleness, tombstones, and applied windows. */
-  readonly entities: EntityStore
-  /** Normalized ordered connections, keyed by connection identity. */
-  readonly connections: Readonly<Record<string, Connection>>
-  /** Optimistic entity layers and connection overlays over the base store. */
-  readonly optimistic: Optimistic
-  /** Live cursor and boundary state, keyed by the subscription's stream key. */
-  readonly live: Readonly<Record<string, LiveState>>
-  /** Mutation pending/applied/failed ledger. */
-  readonly mutations: MutationState
-  /** Streams whose live cursor fell behind; the caller should resync or refetch. */
-  readonly gaps: ReadonlySet<string>
-}
-
-export const initialRemoteModel: RemoteModel = {
-  entities: emptyStore,
-  connections: {},
-  optimistic: emptyOptimistic,
-  live: {},
-  mutations: emptyMutationState,
-  gaps: new Set(),
-}
-
-/** The entity store and the mutation ledger are runtime values, not wire shapes. */
-const runtimeSchema = Schema.Unknown
-
-const remoteModelSchema = (): Schema.Schema<RemoteModel> =>
-  Schema.Struct({
-    entities: runtimeSchema,
-    connections: Schema.Record(Schema.String, runtimeSchema),
-    optimistic: runtimeSchema,
-    live: Schema.Record(Schema.String, runtimeSchema),
-    mutations: runtimeSchema,
-    gaps: runtimeSchema,
-  }) as unknown as Schema.Schema<RemoteModel>
-
-/** The submodel's Messages; each reduces to `RemoteModel` through `Remote.update`. */
-export type RemoteMessage =
-  | {
-      readonly _tag: 'ReadReceived'
-      readonly requests: readonly Requirement[]
-      readonly result: Schema.Schema.Type<typeof ReadBatchResult>
-      readonly now: number
-    }
-  | {
-      readonly _tag: 'ReadFailed'
-      readonly requests: readonly Requirement[]
-      readonly error: RemoteError
-    }
-  | { readonly _tag: 'MutationStarted'; readonly requestId: string }
-  | {
-      readonly _tag: 'MutationSucceeded'
-      readonly requestId: string
-      readonly entities: readonly NormalizedPatch[]
-    }
-  | { readonly _tag: 'MutationFailed'; readonly requestId: string; readonly error: RemoteError }
-  | {
-      readonly _tag: 'LiveReceived'
-      readonly stream: string
-      readonly event: LiveEvent
-      readonly policy?: LivePolicy
-      readonly now: number
-    }
-  | { readonly _tag: 'GapCleared'; readonly stream: string }
-  | { readonly _tag: 'ConnectionMerged'; readonly connection: string; readonly page: Segment }
-  | { readonly _tag: 'ConnectionInvalidated'; readonly connection: string }
-  | { readonly _tag: 'ConnectionRefreshed'; readonly connection: string }
-  | { readonly _tag: 'OptimisticAdded'; readonly layer: EntityLayer }
-  | { readonly _tag: 'OptimisticRemoved'; readonly id: string }
-
-const remoteMessageSchema = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal('ReadReceived'),
-    requests: Schema.Array(ReadRequest),
-    result: ReadBatchResult,
-    now: Schema.Number,
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('ReadFailed'),
-    requests: Schema.Array(ReadRequest),
-    error: remoteErrorSchema,
-  }),
-  Schema.Struct({ _tag: Schema.Literal('MutationStarted'), requestId: Schema.String }),
-  Schema.Struct({
-    _tag: Schema.Literal('MutationSucceeded'),
-    requestId: Schema.String,
-    entities: Schema.Array(NormalizedEntity),
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('MutationFailed'),
-    requestId: Schema.String,
-    error: remoteErrorSchema,
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal('LiveReceived'),
-    stream: Schema.String,
-    event: Schema.Unknown,
-    policy: Schema.optional(Schema.Unknown),
-    now: Schema.Number,
-  }),
-  Schema.Struct({ _tag: Schema.Literal('GapCleared'), stream: Schema.String }),
-  Schema.Struct({
-    _tag: Schema.Literal('ConnectionMerged'),
-    connection: Schema.String,
-    page: Schema.Unknown,
-  }),
-  Schema.Struct({ _tag: Schema.Literal('ConnectionInvalidated'), connection: Schema.String }),
-  Schema.Struct({ _tag: Schema.Literal('ConnectionRefreshed'), connection: Schema.String }),
-  Schema.Struct({ _tag: Schema.Literal('OptimisticAdded'), layer: Schema.Unknown }),
-  Schema.Struct({ _tag: Schema.Literal('OptimisticRemoved'), id: Schema.String }),
-]) as unknown as Schema.Schema<RemoteMessage>
-
-const setConnectionStale = (
-  connections: Readonly<Record<string, Connection>>,
-  connection: string,
-  stale: boolean,
-): Readonly<Record<string, Connection>> => {
-  const current = connections[connection] ?? emptyConnection
-  return { ...connections, [connection]: { ...current, stale } }
-}
-
-const markGap = (model: RemoteModel, stream: string): RemoteModel =>
-  model.gaps.has(stream) ? model : { ...model, gaps: new Set([...model.gaps, stream]) }
-
-const clearGap = (model: RemoteModel, stream: string): RemoteModel =>
-  model.gaps.has(stream)
-    ? { ...model, gaps: new Set([...model.gaps].filter(entry => entry !== stream)) }
-    : model
-
-/**
- * The pure reducer all four producers share. A live event that arrives ahead of
- * its cursor is a gap: it is not applied, and the stream is recorded so the host
- * can resubscribe rather than silently miss facts.
- */
-export const updateRemote = (model: RemoteModel, message: RemoteMessage): RemoteModel => {
-  switch (message._tag) {
-    case 'ReadReceived':
-      return {
-        ...model,
-        entities: writeRead(model.entities, message.requests, message.result, message.now),
-      }
-    case 'ReadFailed':
-      return model
-    case 'MutationStarted':
-      return { ...model, mutations: beginMutation(model.mutations, message.requestId) }
-    case 'MutationSucceeded': {
-      const reconciled = reconcileMutation(
-        model.entities,
-        model.mutations,
-        message.requestId,
-        message.entities,
-      )
-      // Settling the layer is remove-the-layer, so overlapping optimistic layers
-      // rebase instead of needing inverse patches.
-      return {
-        ...model,
-        entities: reconciled.store,
-        mutations: reconciled.state,
-        optimistic: removeLayer(model.optimistic, message.requestId),
-      }
-    }
-    case 'MutationFailed':
-      return {
-        ...model,
-        mutations: failMutation(model.mutations, message.requestId),
-        optimistic: removeLayer(model.optimistic, message.requestId),
-      }
-    case 'LiveReceived': {
-      const state = model.live[message.stream] ?? emptyLiveState
-      if (message.event._tag === 'EntityPatched' || message.event._tag === 'EntityDeleted') {
-        const applied = applyEntityEvent(state, model.entities, message.event, message.now)
-        return applied.outcome === 'gap'
-          ? markGap(model, message.stream)
-          : clearGap(
-              {
-                ...model,
-                entities: applied.store,
-                live: { ...model.live, [message.stream]: applied.state },
-              },
-              message.stream,
-            )
-      }
-      const applied = applyConnectionEvent(state, model.optimistic, message.event, message.policy)
-      return applied.outcome === 'gap'
-        ? markGap(model, message.stream)
-        : clearGap(
-            {
-              ...model,
-              optimistic: applied.optimistic,
-              live: { ...model.live, [message.stream]: applied.state },
-            },
-            message.stream,
-          )
-    }
-    case 'GapCleared':
-      return clearGap(model, message.stream)
-    case 'ConnectionMerged': {
-      const current = model.connections[message.connection] ?? emptyConnection
-      return {
-        ...model,
-        connections: { ...model.connections, [message.connection]: merge(current, message.page) },
-      }
-    }
-    case 'ConnectionInvalidated':
-      return {
-        ...model,
-        connections: setConnectionStale(model.connections, message.connection, true),
-      }
-    case 'ConnectionRefreshed':
-      return {
-        ...model,
-        connections: setConnectionStale(model.connections, message.connection, false),
-      }
-    case 'OptimisticAdded':
-      return { ...model, optimistic: addLayer(model.optimistic, message.layer) }
-    case 'OptimisticRemoved':
-      return { ...model, optimistic: removeLayer(model.optimistic, message.id) }
-  }
-}
 
 type EntityName<D> = D extends EntityDescriptor<infer Name, any> ? Name : never
 
@@ -666,124 +126,64 @@ export interface BoundRemote<AppModel, Store extends RemoteModel, Names extends 
   readonly [boundRemoteNames]?: Names
 }
 
+/**
+ * The store a read or plan sees: the base with every pending optimistic layer
+ * applied, so a request's patches show until it settles and a temporary id is
+ * not planned as a fetch.
+ */
 const storeOf = <AppModel, Store extends RemoteModel, Names extends string>(
   bound: BoundRemote<AppModel, Store, Names>,
   model: AppModel,
-): EntityStore => bound.store.get(model).entities
-
-/**
- * The transport boundary. `foldkit-remote` never talks to a transport directly;
- * it depends on this Effect service, which a later phase wires to Effect RPC.
- */
-export class RemoteClient extends Context.Service<
-  RemoteClient,
-  {
-    readonly read: (
-      batch: Schema.Schema.Type<typeof ReadBatch>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError>
-    readonly query: (
-      request: Schema.Schema.Type<typeof QueryRequest>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
-    readonly mutate: (
-      request: Schema.Schema.Type<typeof MutationRequest>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
-    readonly live: (request: {
-      readonly requirements: ReadonlyArray<Requirement>
-      readonly after: LiveCursor
-    }) => Stream.Stream<LiveEvent, RemoteLiveError>
-  }
->()('foldkit-remote/RemoteClient') {}
-
-interface WireRefPage {
-  readonly refs: ReadonlyArray<string>
-  readonly hasNext: boolean
-  readonly hasPrevious: boolean
-}
-
-const isWireRefPage = (value: unknown): value is WireRefPage => {
-  if (value === null || typeof value !== 'object') return false
-  const page = value as Record<string, unknown>
-  return (
-    Array.isArray(page.refs) &&
-    page.refs.every(ref => typeof ref === 'string') &&
-    typeof page.hasNext === 'boolean' &&
-    typeof page.hasPrevious === 'boolean'
-  )
-}
-
-/** Appends (after) or prepends (before) an incoming page onto the stored one. */
-const mergeWireRefPages = (
-  current: WireRefPage,
-  next: WireRefPage,
-  direction: 'after' | 'before',
-): WireRefPage => {
-  const refs =
-    direction === 'after'
-      ? [...new Set([...current.refs, ...next.refs])]
-      : [...new Set([...next.refs, ...current.refs])]
-  return direction === 'after'
-    ? { refs, hasNext: next.hasNext, hasPrevious: true }
-    : { refs, hasNext: true, hasPrevious: next.hasPrevious }
-}
-
-/**
- * Writes a read result into the store, recording each field's applied window so
- * a later request with a different window refetches. A relation page requested
- * with a cursor is merged onto the page already stored, so "load more"
- * accumulates rather than replaces. Every read path should use this rather than
- * reducing `writeEntity` by hand.
- */
-const writeRead = (
-  store: EntityStore,
-  requests: ReadonlyArray<Requirement>,
-  result: Schema.Schema.Type<typeof ReadBatchResult>,
-  now = 0,
 ): EntityStore => {
-  const byEntity = new Map<
-    string,
-    { windows: Record<string, string>; merge: Map<string, 'after' | 'before'> }
-  >()
-  for (const request of requests) {
-    const key = entityKey(request.entity, request.id)
-    let entry = byEntity.get(key)
-    if (entry === undefined) {
-      entry = { windows: {}, merge: new Map() }
-      byEntity.set(key, entry)
-    }
-    for (const [field, window] of Object.entries(request.windows ?? {})) {
-      entry.windows[field] = windowKey(window)
-      const direction =
-        window.after !== undefined ? 'after' : window.before !== undefined ? 'before' : undefined
-      if (direction !== undefined) entry.merge.set(field, direction)
-    }
-  }
-
-  return result.entities.reduce((current, entity) => {
-    const key = entityKey(entity.entity, entity.id)
-    const entry = byEntity.get(key)
-    let values = entity.values
-    if (entry !== undefined && entry.merge.size > 0) {
-      const previous = current[key]
-      if (previous !== undefined) {
-        const merged: Record<string, unknown> = { ...values }
-        for (const [field, direction] of entry.merge) {
-          const incoming = values[field]
-          const existing = previous.values[field]
-          if (isWireRefPage(incoming) && isWireRefPage(existing)) {
-            merged[field] = mergeWireRefPages(existing, incoming, direction)
-          }
-        }
-        values = merged
-      }
-    }
-    return writeEntity(current, key, values, now, entry?.windows)
-  }, store)
+  const remote = bound.store.get(model)
+  return visibleStoreOf(remote.entities, remote.optimistic)
 }
 
-const remoteError = (error: { readonly _tag: string; readonly message: string }): RemoteError => ({
-  _tag: error._tag,
-  message: error.message,
-})
+// The visible store is recomputed only when the base store or the layers
+// change, so reads and plans across renders of one Model share it.
+const visibleStores = new WeakMap<OptimisticState, WeakMap<EntityStore, EntityStore>>()
+
+const visibleStoreOf = (entities: EntityStore, optimistic: OptimisticState): EntityStore => {
+  let byStore = visibleStores.get(optimistic)
+  if (byStore === undefined) {
+    byStore = new WeakMap()
+    visibleStores.set(optimistic, byStore)
+  }
+  let visible = byStore.get(entities)
+  if (visible === undefined) {
+    visible = visibleStore(entities, optimistic)
+    byStore.set(entities, visible)
+  }
+  return visible
+}
+
+export interface MutateOptions {
+  /** What the request changes before the server answers; released when it settles. */
+  readonly optimistic?: ReadonlyArray<OptimisticOperation> | undefined
+}
+
+/** The default `toMessage`: the application reduces `RemoteMessage` itself. */
+const identityMessage = (message: RemoteMessage): RemoteMessage => message
+
+export interface RetainOptions {
+  /** The query connections the application shows, by `QueryRef` or identity. */
+  readonly connections?: ReadonlyArray<ConnectionIdentity> | undefined
+  /** How long the roots must be stable before collecting; default none. */
+  readonly grace?: Duration.Input | undefined
+}
+
+/** How `Remote.observe` and `Remote.prefetch` treat fields the store already holds. */
+export interface ObserveOptions {
+  /** Default `RemotePolicy.cacheFirst`. */
+  readonly policy?: RemotePolicy | undefined
+  /** The clock a refreshing policy reads; default `Date.now`. */
+  readonly now?: (() => number) | undefined
+}
+
+export interface LiveOptions {
+  /** The clock `LiveReceived` stamps events with; default `Date.now`. */
+  readonly now?: (() => number) | undefined
+}
 
 /** A stable key for a live subscription's requirement set. */
 const liveStreamKey = (requirements: readonly Requirement[]): string =>
@@ -794,144 +194,6 @@ const liveStreamKey = (requirements: readonly Requirement[]): string =>
     )
     .sort()
     .join('|')
-
-/** A serializable summary of a RemoteModel for DevTools and diagnostics. */
-export interface RemoteInspection {
-  readonly entities: ReadonlyArray<{
-    readonly key: string
-    readonly present: ReadonlyArray<string>
-    readonly stale: ReadonlyArray<string>
-    readonly tombstone: boolean
-    readonly updatedAt: number
-    readonly windows: Readonly<Record<string, string>>
-  }>
-  readonly connections: ReadonlyArray<string>
-  readonly live: ReadonlyArray<string>
-  readonly gaps: ReadonlyArray<string>
-  readonly mutations: {
-    readonly pending: ReadonlyArray<string>
-    readonly failed: ReadonlyArray<string>
-    readonly applied: number
-  }
-}
-
-const inspectEntry = (key: string, entry: EntityEntry): RemoteInspection['entities'][number] => ({
-  key,
-  present: [...entry.present],
-  stale: [...entry.stale],
-  tombstone: entry.tombstone,
-  updatedAt: entry.updatedAt,
-  windows: { ...entry.windows },
-})
-
-/** A pure, serializable view of the whole cache. */
-export const inspectRemote = (model: RemoteModel): RemoteInspection => ({
-  entities: Object.entries(model.entities).map(([key, entry]) => inspectEntry(key, entry)),
-  connections: Object.keys(model.connections),
-  live: Object.keys(model.live),
-  gaps: [...model.gaps],
-  mutations: {
-    pending: [...model.mutations.pending],
-    failed: [...model.mutations.failed],
-    applied: model.mutations.applied.size,
-  },
-})
-
-/** A pure, serializable view of one entity, or `undefined` if unknown. */
-export const inspectEntity = (
-  model: RemoteModel,
-  key: string,
-): RemoteInspection['entities'][number] | undefined => {
-  const entry = model.entities[key]
-  return entry === undefined ? undefined : inspectEntry(key, entry)
-}
-
-/**
- * The methods an Effect RPC client for `RemoteRpc` exposes. `R` is the
- * environment a handler needs; it defaults to `never`, which is what a real
- * transport client satisfies. `RemoteServer.handlers` returns this type with its
- * own `R`, so the two sides cannot drift apart.
- */
-export interface RemoteRpcClient<R = never> {
-  readonly FoldkitRemoteRead: (
-    payload: Schema.Schema.Type<typeof ReadBatch>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError, R>
-  readonly FoldkitRemoteQuery: (
-    payload: Schema.Schema.Type<typeof QueryRequest>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
-  readonly FoldkitRemoteMutate: (
-    payload: Schema.Schema.Type<typeof MutationRequest>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError, R>
-  readonly FoldkitRemoteLive: (
-    payload: Schema.Schema.Type<typeof LiveRequirement>,
-  ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError, R>
-}
-
-/** Reconstructs the client's `LiveEvent` from the wire's flattened `LiveChange`. */
-export const liveEventOf = (change: Schema.Schema.Type<typeof LiveChange>): LiveEvent => {
-  switch (change._tag) {
-    case 'EntityPatched':
-      return {
-        _tag: 'EntityPatched',
-        ref: { entity: change.entity, id: change.id },
-        values: change.values,
-        changed: change.changed,
-        cursor: change.cursor,
-      }
-    case 'EntityDeleted':
-      return {
-        _tag: 'EntityDeleted',
-        ref: { entity: change.entity, id: change.id },
-        cursor: change.cursor,
-      }
-    case 'ConnectionInsert':
-      return {
-        _tag: 'ConnectionInsert',
-        connection: change.connection,
-        position: change.position,
-        edge: { key: change.edge.key, ref: { entity: change.edge.entity, id: change.edge.id } },
-        cursor: change.cursor,
-      }
-    case 'ConnectionRemove':
-      return {
-        _tag: 'ConnectionRemove',
-        connection: change.connection,
-        edge: { key: change.edge.key, ref: { entity: change.edge.entity, id: change.edge.id } },
-        cursor: change.cursor,
-      }
-    case 'ConnectionInvalidate':
-      return { _tag: 'ConnectionInvalidate', connection: change.connection, cursor: change.cursor }
-  }
-}
-
-/**
- * `Remote.mutate` as a standalone effect, so `Remote.mutateInto` can reuse it
- * without the object literal referencing itself.
- */
-const mutateRemote = Effect.fn('Remote.mutate')(function* <Name extends string, Input, Output>(
-  mutation: MutationDescriptor<Name, Input, Output>,
-  input: Input,
-  requestId: string,
-) {
-  yield* Effect.annotateCurrentSpan({ mutation: mutation.name, requestId })
-  const client = yield* RemoteClient
-  const encoded = yield* Schema.encodeUnknownEffect(mutation.Input)(input).pipe(
-    Effect.catchTag('SchemaError', error =>
-      Effect.fail(new RemoteMutationError({ message: error.message })),
-    ),
-  )
-  const result = yield* client.mutate({
-    requestId,
-    mutation: mutation.name,
-    input: encoded,
-  })
-  const output = yield* Schema.decodeUnknownEffect(mutation.Output)(result.output).pipe(
-    Effect.catchTag('SchemaError', error =>
-      Effect.fail(new RemoteMutationError({ message: error.message })),
-    ),
-  )
-  return { output, entities: result.entities }
-})
 
 export const Remote = {
   /**
@@ -1001,90 +263,76 @@ export const Remote = {
    * A Projection node that reads a `RemoteData` value out of the store. The id
    * is supplied by the caller, usually from a Surface's params. The assembled
    * value is decoded against the Selection, so malformed server data surfaces
-   * as `Failed` instead of being asserted into `Value`.
+   * as `Failed` instead of being asserted into `Value`. A present value with a
+   * stale field reads as `Refreshing`: an observer is refetching it.
    */
   select:
     <AppModel, Store extends RemoteModel, Names extends string, Value, Name extends Names>(
       bound: BoundRemote<AppModel, Store, Names>,
-      selection: Selection<Value, Name>,
+      selection: Selection<Value, Name, 'entity'>,
     ) =>
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
       Model: remoteDataSchema(selection.schema),
       dependencies: [],
-      requirements: [
-        {
-          entity: selection.entity,
-          id,
-          fields: selection.fields,
-          ...(selection.connections === undefined ? {} : { windows: selection.connections }),
-        },
-      ],
+      requirements: [{ ...relationOf(selection), id }],
       read: (root: AppModel): RemoteData<Value> => {
         const store = storeOf(bound, root)
         const key = entityKey(selection.entity, id)
         if (isTombstone(store, key)) return { _tag: 'NotFound' }
-        const values: Record<string, unknown> = {}
-        for (const field of selection.fields) {
-          const value = readField(store, key, field)
-          if (Option.isNone(value)) return { _tag: 'Initial' }
-          values[field] = value.value
-        }
-        const decoded = Schema.decodeUnknownResult(selection.schema)(values)
+        const assembled = assemble(store, key, relationOf(selection))
+        if (assembled === undefined) return { _tag: 'Initial' }
+        const decoded = Schema.decodeUnknownResult(selection.schema)(assembled.values)
         return Result.isFailure(decoded)
           ? { _tag: 'Failed', error: { _tag: 'DecodeError', message: decoded.failure.message } }
-          : { _tag: 'Ready', value: decoded.success }
+          : assembled.refreshing
+            ? { _tag: 'Refreshing', value: decoded.success }
+            : { _tag: 'Ready', value: decoded.success }
       },
     }),
 
-  /** The pure plan for a projection against a store. */
-  planProjection: <Root, Value>(
-    store: EntityStore,
-    projection: Projection<Root, Value>,
-    freshness?: PlanFreshness,
-  ): ReadonlyArray<Requirement> => plan(store, projection.requirements, freshness),
-
-  /** The pure plan for a projection against a Model, reading its remote store. */ observeProjection:
-    <AppModel, Store extends RemoteModel, Value>(
-      bound: BoundRemote<AppModel, Store>,
-      model: AppModel,
-      projection: Projection<AppModel, Value>,
-      freshness?: PlanFreshness,
-    ): ReadonlyArray<Requirement> =>
-      plan(storeOf(bound, model), projection.requirements, freshness),
-
-  /** The pure plan for a Surface's projection. */
-  planSurface: <AppModel, Store extends RemoteModel, Model, Message, Params>(
+  /**
+   * The pure plan for a projection against a Model: the requirements its
+   * remote store does not satisfy, under `options` (freshness, force). A
+   * Surface's projection is `surface.projection(params)`.
+   */
+  plan: <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
-    surface: Surface<AppModel, Model, Message, Params>,
-    params: Params,
-    freshness?: PlanFreshness,
-  ): ReadonlyArray<Requirement> =>
-    plan(storeOf(bound, model), surface.projection(params).requirements, freshness),
+    projection: Projection<AppModel, Value>,
+    options?: PlanOptions,
+  ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements, options),
+
+  /**
+   * The store reads see: the base store under the pending optimistic layers.
+   * One store is shared by every read and plan of a Model whose remote state
+   * has not changed.
+   */
+  storeOf: <AppModel, Store extends RemoteModel>(
+    bound: BoundRemote<AppModel, Store>,
+    model: AppModel,
+  ): EntityStore => storeOf(bound, model),
 
   /**
    * Executes the plan against the `RemoteClient` and returns a new store. Used
    * for SSR route prefetch, hover prefetch, and tests. Never called during render.
-   * `freshness` (milliseconds) refetches present fields older than that. The
-   * caller reads the wall clock; the planner itself stays pure and time-injected.
+   * `policy` decides what a present field means (default cache-first); `now`
+   * is the clock it reads, so the planner itself stays pure and time-injected.
    */
   prefetch: Effect.fn('Remote.prefetch')(function* <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     projection: Projection<AppModel, Value>,
-    options: { readonly freshness?: number } = {},
+    options: ObserveOptions = {},
   ) {
     const store = storeOf(bound, model)
-    const freshness: PlanFreshness | undefined =
-      options.freshness === undefined
-        ? undefined
-        : { now: Date.now(), freshness: options.freshness }
-    const missing = plan(store, projection.requirements, freshness)
+    const { policy = RemotePolicy.cacheFirst, now = Date.now } = options
+    const at = now()
+    const missing = plan(store, projection.requirements, RemotePolicy.toPlan(policy, at))
     if (missing.length === 0) return store
     yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
     const client = yield* RemoteClient
-    const result = yield* client.read({ requests: missing })
-    return writeRead(store, missing, result)
+    const result = yield* client.read({ version: REMOTE_PROTOCOL_VERSION, requests: missing })
+    return writeRead(store, missing, result, at)
   }),
 
   /**
@@ -1098,14 +346,67 @@ export const Remote = {
    * application provides the transport's RPC layer instead of writing the
    * `LiveChange`-to-`LiveEvent` mapping by hand.
    */
-  clientLayer: (client: RemoteRpcClient): Layer.Layer<RemoteClient> =>
-    Layer.succeed(RemoteClient, {
-      read: batch => client.FoldkitRemoteRead(batch),
-      query: request => client.FoldkitRemoteQuery(request),
-      mutate: request => client.FoldkitRemoteMutate(request),
-      live: ({ requirements, after }) =>
-        client.FoldkitRemoteLive({ requirements, after }).pipe(Stream.map(liveEventOf)),
-    }),
+  clientLayer: <R = never>(
+    client: RemoteRpcClient<R>,
+    options: CoalesceOptions = {},
+  ): Layer.Layer<RemoteClient, never, R> =>
+    coalescedLayer(
+      Layer.effect(
+        RemoteClient,
+        Effect.gen(function* () {
+          // What the RPC client needs (a database under in-process handlers,
+          // nothing under a transport) is supplied once, when the layer is built.
+          const context = yield* Effect.context<R>()
+          return {
+            read: batch => client.FoldkitRemoteRead(batch).pipe(Effect.provideContext(context)),
+            query: request =>
+              client.FoldkitRemoteQuery(request).pipe(Effect.provideContext(context)),
+            mutate: request =>
+              client.FoldkitRemoteMutate(request).pipe(Effect.provideContext(context)),
+            live: ({ requirements, after }) =>
+              client
+                .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
+                .pipe(Stream.map(liveEventOf), Stream.provideContext(context)),
+          }
+        }),
+      ),
+      options,
+    ),
+
+  /**
+   * Wraps a `RemoteClient` layer so its reads coalesce: requirements issued
+   * together become one batch, and a requirement already in flight is joined.
+   * `Remote.clientLayer` applies this; use it on a hand-written client.
+   */
+  coalesced: coalescedLayer,
+
+  /**
+   * A Foldkit Subscription entry that keeps the cache to what the active
+   * Surfaces reach. `projections` are the ones the application observes (the
+   * same it passes to `Remote.observe`), `connections` the query connections
+   * it shows; anything else is collected once the roots have been stable for
+   * `grace`, so a route transition that comes straight back does not thrash.
+   */
+  retain: <AppModel, Message = RemoteMessage>(
+    projections: ReadonlyArray<Projection<AppModel, unknown>>,
+    toMessage: (message: RemoteMessage) => Message = identityMessage as never,
+    options: RetainOptions = {},
+  ): EntryWithoutKeepAlive<AppModel, Message, RetentionRoots, never> => {
+    const roots: RetentionRoots = {
+      requirements: Requirement.merge(projections.flatMap(projection => projection.requirements)),
+      connections: [...new Set((options.connections ?? []).map(connectionIdentity))].sort(),
+    }
+    return {
+      dependenciesSchema: retentionRootsSchema,
+      modelToDependencies: () => roots,
+      dependenciesToStream: current =>
+        Stream.fromEffect(
+          Effect.succeed(toMessage({ _tag: 'RetentionChanged', roots: current })).pipe(
+            Effect.delay(options.grace ?? 0),
+          ),
+        ),
+    }
+  },
 
   /**
    * Runs a `Query` through `RemoteClient`, encoding its input from the ref.
@@ -1140,6 +441,21 @@ export const Remote = {
     },
   }),
 
+  /**
+   * The edges a connection shows: its server-known region with pending and
+   * confirmed overlays placed around it, minus removed edges and edges whose
+   * target is a tombstone.
+   */
+  visibleItems: (model: RemoteModel, connection: ConnectionIdentity): ReadonlyArray<Edge> => {
+    const identity = connectionIdentity(connection)
+    return visibleItems(
+      model.connections[identity] ?? emptyConnection,
+      identity,
+      model.optimistic.overlays,
+      model.entities,
+    )
+  },
+
   /** A pure, serializable view of the whole cache. */
   inspect: inspectRemote,
 
@@ -1156,7 +472,9 @@ export const Remote = {
   /**
    * Runs a mutation and reconciles its patches into a `RemoteModel` in one step,
    * returning the new model alongside the typed Output. The model-level form of
-   * `MutationStarted` → `RemoteClient.mutate` → `MutationSucceeded`.
+   * `MutationStarted` → `RemoteClient.mutate` → `MutationSucceeded`; in an
+   * application the three are `update` (with `optimistic`), a Command, and the
+   * Message the Command returns, so the optimistic operations show meanwhile.
    */
   mutateInto: Effect.fn('Remote.mutateInto')(function* <
     Name extends string,
@@ -1170,13 +488,19 @@ export const Remote = {
     mutation: MutationDescriptor<Name, Input, Output>,
     input: Input,
     requestId: string,
+    options: MutateOptions = {},
   ) {
-    const started = updateRemote(bound.store.get(model), { _tag: 'MutationStarted', requestId })
+    const started = updateRemote(bound.store.get(model), {
+      _tag: 'MutationStarted',
+      requestId,
+      ...(options.optimistic === undefined ? {} : { optimistic: options.optimistic }),
+    })
     const outcome = yield* mutateRemote(mutation, input, requestId)
     const settled = updateRemote(started, {
       _tag: 'MutationSucceeded',
       requestId,
       entities: outcome.entities,
+      connections: outcome.connections,
     })
     return {
       output: outcome.output,
@@ -1188,7 +512,9 @@ export const Remote = {
    * A Foldkit Subscription entry that plans a Surface's missing fields from the
    * Model and fetches them through `RemoteClient`, emitting a `RemoteMessage`
    * per outcome. Wrap it in an application Message (`toMessage`) and reduce it
-   * with the domain's `update`.
+   * with the domain's `update`. Under a refreshing `policy` the entry first
+   * emits `RefreshStarted`, so the fields being refetched read as `Refreshing`
+   * while the request is pending.
    */
   observe: <
     AppModel,
@@ -1197,47 +523,62 @@ export const Remote = {
     Model,
     SurfaceMessage,
     Params,
-    Message,
+    Message = RemoteMessage,
   >(
     bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    toMessage: (message: RemoteMessage) => Message,
+    toMessage: (message: RemoteMessage) => Message = identityMessage as never,
+    options: ObserveOptions = {},
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
     { readonly requirements: ReadonlyArray<Requirement> },
     RemoteClient
-  > => ({
-    dependenciesSchema: Schema.Struct({
-      requirements: Schema.Array(ReadRequest),
-    }),
-    modelToDependencies: model => ({
-      requirements: plan(storeOf(bound, model), surface.projection(params).requirements),
-    }),
-    dependenciesToStream: ({ requirements }) =>
-      requirements.length === 0
-        ? Stream.empty
-        : Stream.fromEffect(
-            Effect.gen(function* () {
-              const client = yield* RemoteClient
-              const now = Date.now()
-              const result = yield* Effect.result(client.read({ requests: requirements }))
-              return Result.isFailure(result)
-                ? toMessage({
-                    _tag: 'ReadFailed',
-                    requests: requirements,
-                    error: remoteError(result.failure),
-                  })
-                : toMessage({
-                    _tag: 'ReadReceived',
-                    requests: requirements,
-                    result: result.success,
-                    now,
-                  })
-            }),
-          ),
-  }),
+  > => {
+    const { policy = RemotePolicy.cacheFirst, now = Date.now } = options
+    const read = (requirements: ReadonlyArray<Requirement>) =>
+      Effect.gen(function* () {
+        const client = yield* RemoteClient
+        const at = now()
+        const result = yield* Effect.result(
+          client.read({ version: REMOTE_PROTOCOL_VERSION, requests: requirements }),
+        )
+        return Result.isFailure(result)
+          ? toMessage({
+              _tag: 'ReadFailed',
+              requests: requirements,
+              error: remoteError(result.failure),
+            })
+          : toMessage({
+              _tag: 'ReadReceived',
+              requests: requirements,
+              result: result.success,
+              now: at,
+            })
+      })
+    return {
+      dependenciesSchema: Schema.Struct({
+        requirements: Schema.Array(ReadRequest),
+      }),
+      modelToDependencies: model => ({
+        requirements: plan(
+          storeOf(bound, model),
+          surface.projection(params).requirements,
+          RemotePolicy.toPlan(policy, now()),
+        ),
+      }),
+      dependenciesToStream: ({ requirements }) =>
+        requirements.length === 0
+          ? Stream.empty
+          : Stream.concat(
+              RemotePolicy.refreshes(policy)
+                ? Stream.succeed(toMessage({ _tag: 'RefreshStarted', requests: requirements }))
+                : Stream.empty,
+              Stream.fromEffect(read(requirements)),
+            ),
+    }
+  },
 
   /**
    * A Foldkit Subscription entry that consumes the live stream for a Surface's
@@ -1252,12 +593,13 @@ export const Remote = {
     Model,
     SurfaceMessage,
     Params,
-    Message,
+    Message = RemoteMessage,
   >(
     bound: BoundRemote<AppModel, Store, Names>,
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
-    toMessage: (message: RemoteMessage) => Message,
+    toMessage: (message: RemoteMessage) => Message = identityMessage as never,
+    options: LiveOptions = {},
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
@@ -1290,11 +632,11 @@ export const Remote = {
                 _tag: 'LiveReceived',
                 stream: liveStreamKey(requirements),
                 event,
-                now: Date.now(),
+                now: (options.now ?? Date.now)(),
               }),
             ),
             Stream.catchIf(
-              (_error): _error is RemoteLiveError => true,
+              (_error): _error is RemoteLiveError | RemoteProtocolError => true,
               error =>
                 Stream.succeed(
                   toMessage({

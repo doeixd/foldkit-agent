@@ -190,7 +190,7 @@ describe('Live data', () => {
     expect(liveHasPrevious(connection, applied.state, 'Feed')).toBe(false)
   })
 
-  it('a remove for an edge not in an overlay is harmless and advances the cursor', () => {
+  it('a remove for an edge not in an overlay hides it and advances the cursor', () => {
     const result = applyConnectionEvent(emptyLiveState, emptyOptimistic, {
       _tag: 'ConnectionRemove',
       connection: 'Feed',
@@ -198,7 +198,14 @@ describe('Live data', () => {
       cursor: 1,
     })
     expect(result.state.cursor).toBe(1)
-    expect(result.optimistic.overlays).toEqual([])
+    expect(result.optimistic.overlays).toEqual([
+      {
+        id: 'live:1',
+        connection: 'Feed',
+        edges: [edge({ entity: 'E', id: 'z' })],
+        position: 'remove',
+      },
+    ])
   })
 
   it('a ConnectionInvalidate marks the connection stale', () => {

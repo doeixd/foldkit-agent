@@ -112,14 +112,29 @@ export interface EntityBinding<
  */
 export type AnyEntityBinding = EntityBinding<any, any, any>
 
-export const one = <Target extends AnyEntityBinding, const Nullable extends boolean = false>(
+// Overloads rather than `Nullable extends boolean = false`: with `nullable`
+// omitted, inference widens the parameter to `boolean` instead of taking the
+// default, which would make every ref nullable.
+interface One {
+  <Target extends AnyEntityBinding>(
+    entity: Target,
+    options: { readonly field: AnyColumn; readonly nullable: true },
+  ): OneRelation<Target, true>
+  <Target extends AnyEntityBinding>(
+    entity: Target,
+    options: { readonly field: AnyColumn; readonly nullable?: false | undefined },
+  ): OneRelation<Target, false>
+}
+
+/** A ref field; with `nullable: true` the ref may be `null`, as the column may. */
+export const one: One = <Target extends AnyEntityBinding>(
   entity: Target,
-  options: { readonly field: AnyColumn; readonly nullable?: Nullable | undefined },
-): OneRelation<Target, Nullable> => ({
+  options: { readonly field: AnyColumn; readonly nullable?: boolean | undefined },
+): OneRelation<Target, any> => ({
   kind: 'one',
   entity,
   field: options.field,
-  nullable: (options.nullable ?? false) as Nullable,
+  nullable: options.nullable ?? false,
 })
 
 export const many = <Target extends AnyEntityBinding>(

@@ -53,9 +53,11 @@ const ProjectSummary = Selection.make(Project, { id: true, name: true, owner: tr
 
 const Data = Remote.make({ entities: [User, Project] })
 
-const Server = RemoteServer.make(Data, {
+const Server = RemoteServer.make({
   entities: [source(User), source(Project)],
 })
+// Every source names a descriptor the domain declared.
+RemoteServer.validate(Data, Server)
 
 // The handlers require `DrizzleDatabase`; provide it with the application's db.
 const handlers = RemoteServer.handlers(Server, principal)
@@ -163,9 +165,9 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 - A nullable ordered column pages under Postgres' default NULL ordering (ASC:
   nulls last, DESC: nulls first); the keyset predicate uses `IS NULL` / `IS NOT
   NULL` rather than comparing a column to NULL.
-- The window is client-supplied: `first`/`last` are clamped to a positive integer
-  under `maxPageSize` (default 100), and `after`/`before` or `first`/`last`
-  cannot be combined.
+- The window is client-supplied: `first`/`last` are clamped to a non-negative
+  integer under `maxPageSize` (default 100), with `0` honored as boundaries
+  only, and `after`/`before` or `first`/`last` cannot be combined.
 - A cursor that no longer resolves fails the query rather than silently returning
   page one.
 
@@ -254,10 +256,12 @@ const selection = Selection.make(Project, {
 })
 ```
 
-The read runs one bounded query per parent (concurrency 10) and emits
-`{ refs, hasNext, hasPrevious }`. `first` and `last` page per parent; `after` and
-`before` cursors work when the read targets a single parent (a cursor across
-parents is ambiguous and fails). Changing the window refetches the relation, and
+The read pages every parent in one statement: children are ranked per parent
+in a window (`row_number() over (partition by parent order by ...)`) and the
+first `pageSize + 1` of each are kept, so the statement count does not grow
+with the number of parents. It emits `{ refs, hasNext, hasPrevious }`. `first`
+and `last` page per parent; `after` and `before` cursors work when the read
+targets a single parent (a cursor across parents is ambiguous and fails). Changing the window refetches the relation, and
 a cursor page applied through `Remote.update` merges onto the stored page (append
 for `after`, prepend for `before`), so "load more" accumulates.
 
@@ -283,20 +287,21 @@ the injected-executor path, does not compute fields.
 ## Mutation results
 
 Reads are where the adapter compiles query shape. A mutation uses Drizzle
-directly and returns patches; `selectColumns` picks the columns and `normalize`
-maps the returned rows, rewriting a `one` relation to its ref key.
+directly and returns patches; `returning(Project, fields)` pairs the columns
+to select with the normalization of the rows they yield, rewriting a `one`
+relation to its ref key (`selectColumns` and `normalize` are the halves).
 
 ```ts
-import { normalize, selectColumns } from 'foldkit-remote-drizzle'
+import { returning } from 'foldkit-remote-drizzle'
 
-const fields = ['id', 'name', 'owner']
+const project = returning(Project, ['id', 'name', 'owner'])
 const rows = yield* db
   .update(projects)
   .set({ name })
   .where(eq(projects.id, id))
-  .returning(selectColumns(Project, fields))
+  .returning(project.columns)
 
-return { output: { id }, entities: normalize(Project, rows, fields) }
+return { output: { id }, entities: project.patches(rows) }
 ```
 
 ## Compose a server
@@ -304,10 +309,11 @@ return { output: { id }, entities: normalize(Project, rows, fields) }
 ```ts
 import { RemoteServer } from 'foldkit-remote-server'
 
-const Server = RemoteServer.make(Data, {
+const Server = RemoteServer.make({
   entities: [UserSource, ProjectSource],
   queries: [ProjectsByOwnerSource],
 })
+RemoteServer.validate(Data, Server)
 
 // handlers require DrizzleDatabase
 const handlers = RemoteServer.handlers(Server, principal)
@@ -369,15 +375,16 @@ joins, grouping and limits, but not Postgres NULL ordering.
 - Singular, to-many, and many-to-many relations selected as refs work (above). A
   to-many relation loads its children in one `IN (...)`; a many-to-many joins the
   through table to the target. A `Selection.connection` window loads one bounded
-  page per parent (`first`/`last`, plus `after`/`before` for a single parent). An
-  embedded target object is not supported, and `reader`, the injected-executor
-  path, does not load or compute.
+  page per parent in one ranked statement (`first`/`last`, plus `after`/`before`
+  for a single parent). An embedded target object is not supported, and `reader`,
+  the injected-executor path, does not load or compute.
 - Computed fields are counts only (total, not per-page). Other aggregates are not
   built.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
-- Nested pagination runs one query per parent. `bench/nested.bench.ts` measures
-  the cost; a window-function rewrite is deferred because it needs a subquery in
-  the query contract (see `docs/design/remote-drizzle-DESIGN.md`).
+- Nested pagination needs window functions and row-value `IN` in the database
+  (Postgres, SQLite 3.25+, MySQL 8+). `bench/nested.bench.ts` times one source
+  read over 50 parents; `test/nested.test.ts` pins that the statement count
+  of a windowed nested read does not grow with the number of parents.
 
 ## License
 
