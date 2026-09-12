@@ -12,9 +12,15 @@
  */
 import { and, eq, inArray, sql, type AnyColumn, type SQL, type Table } from 'drizzle-orm'
 import { Effect } from 'effect'
-import type { QueryDescriptor } from 'foldkit-remote'
+import type { NormalizedPatch, QueryDescriptor } from 'foldkit-remote'
 import { Entity } from 'foldkit-remote'
-import { RemoteServerError, type EntitySource, type QuerySource } from 'foldkit-remote-server'
+import {
+  RemoteServerError,
+  type EntityRecord,
+  type EntitySource,
+  type EntitySourceContext,
+  type QuerySource,
+} from 'foldkit-remote-server'
 import type { AnyEntityBinding } from './binding.js'
 import { idColumn, projectsAny } from './columns.js'
 import { cursorSelection, keysetWhere, orderByTerms, type OrderTerm } from './cursor.js'
@@ -34,17 +40,6 @@ export * from './window.js'
 /** A whole id batch as one `IN (...)` — the normalized-store advantage. */
 export const whereIds = (binding: AnyEntityBinding, ids: ReadonlyArray<string>): SQL =>
   inArray(idColumn(binding), ids)
-
-export interface EntityRecord {
-  readonly id: string
-  readonly values: Readonly<Record<string, unknown>>
-}
-
-export interface ReadContext {
-  readonly ids: readonly string[]
-  readonly fields: readonly string[]
-  readonly principal: unknown
-}
 
 export interface SourceQuery {
   readonly columns: Record<string, AnyColumn>
@@ -116,11 +111,7 @@ export const normalize = (
   binding: AnyEntityBinding,
   rows: ReadonlyArray<Record<string, unknown>>,
   fields: readonly string[],
-): ReadonlyArray<{
-  readonly entity: string
-  readonly id: string
-  readonly values: Record<string, unknown>
-}> =>
+): ReadonlyArray<NormalizedPatch> =>
   rows.map(row => ({
     entity: binding.name,
     id: String(row.id),
@@ -135,11 +126,11 @@ export const normalize = (
  * with the principal's allowed fields by `RemoteServer`) become columns.
  */
 export const reader =
-  <E, R = never>(
+  <P = unknown, E = never, R = never>(
     binding: AnyEntityBinding,
     run: (query: SourceQuery) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E, R>,
   ) =>
-  (context: ReadContext): Effect.Effect<ReadonlyArray<EntityRecord>, E, R> =>
+  (context: EntitySourceContext<P>): Effect.Effect<ReadonlyArray<EntityRecord>, E, R> =>
     Effect.gen(function* () {
       if (context.ids.length === 0) return []
       if (!projectsAny(binding, context.fields)) return []
