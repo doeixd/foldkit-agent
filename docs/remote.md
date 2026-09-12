@@ -182,10 +182,10 @@ user edits; there is nothing to lose.
 
 ## Current limits
 
-- There is no worked `examples/remote` yet. The executable trace is the test
-  suites: `pnpm exec vitest run packages/remote/test packages/remote-server/test`.
-  The package README walks the full `make → at → select → observe → mutate →
-  update` flow.
+- `examples/remote` is a worked `make → at → select → plan → prefetch → render →
+  mutate` trace, asserted line by line. The test suites remain the exhaustive
+  executable specification: `pnpm exec vitest run packages/remote/test
+  packages/remote-server/test`.
 - Live **connection** events are represented on the wire: `LiveChange` carries
   entity patches and deletes plus connection insert/remove/invalidate changes,
   and `RemoteServer.live` streams them.

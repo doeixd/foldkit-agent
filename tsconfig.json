@@ -17,6 +17,7 @@
     { "path": "./packages/mixins-surface" },
     { "path": "./examples/todo" },
     { "path": "./examples/sync" },
-    { "path": "./examples/mixins" }
+    { "path": "./examples/mixins" },
+    { "path": "./examples/remote" }
   ]
 }

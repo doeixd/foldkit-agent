@@ -176,6 +176,16 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `SurfaceView.describe` value plus its `toMarkdown`; `pnpm demo` runs it and a
   test asserts every line. Remote is not part of this example.
 
+### `foldkit-remote-example` (example)
+
+- **Remote-backed trace.** A `ProjectPage` Surface selects a project out of a
+  `foldkit-remote` store; `Remote.planSurface` reports the requirement,
+  `Remote.prefetch` fills it against an in-process `RemoteClient`, the projected
+  `RemoteData` moves `Initial → Ready`, a SurfaceView styles and decorates it, a
+  `Remote.mutateInto` rename is visible through the same projection, and a
+  malformed stored value surfaces as `Failed`. `pnpm demo` runs it; a test asserts
+  every line.
+
 ### `foldkit-agent`
 
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The

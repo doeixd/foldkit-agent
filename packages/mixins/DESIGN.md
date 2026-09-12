@@ -370,7 +370,8 @@ text; collection stays caller-owned.
 10. Surface adapter (separate package). `foldkit-mixins-surface` bridges a
     Surface's projected Model and Message subset to a SlotView. Started, not
     complete.
-11. Remote-backed example. Deferred while `foldkit-remote` is in flux.
+11. Remote-backed example. Done: `examples/remote` traces plan → prefetch →
+    render → mutate → decode failure.
 12. Advanced Style compiler. Started: pseudo/media, deterministic class + CSS.
 13. DevTools/agent metadata. Started: `SurfaceView.describe`/`toMarkdown`.
 

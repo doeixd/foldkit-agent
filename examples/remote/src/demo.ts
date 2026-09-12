@@ -9,14 +9,7 @@ import { Effect, Layer, Schema, Stream } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
-import {
-  Behavior,
-  Capability,
-  Slot,
-  Slots,
-  Style,
-  type SlotAttributes,
-} from 'foldkit-mixins'
+import { Behavior, Capability, Slot, Slots, Style, type SlotAttributes } from 'foldkit-mixins'
 import { SurfaceView } from 'foldkit-mixins-surface'
 import {
   Entity,
@@ -143,7 +136,10 @@ const classTokens = (attributes: SlotAttributes<PageMessage>): ReadonlyArray<str
 
 const dataAttribute = (attributes: SlotAttributes<PageMessage>, key: string): unknown => {
   for (const attribute of attributes) {
-    if (tagOf(attribute) === 'DataAttribute' && (attribute as { readonly key?: string }).key === key) {
+    if (
+      tagOf(attribute) === 'DataAttribute' &&
+      (attribute as { readonly key?: string }).key === key
+    ) {
       return (attribute as { readonly value?: unknown }).value
     }
   }
@@ -171,7 +167,7 @@ const FakeClient = Layer.succeed(RemoteClient, {
       const input = request.input as { readonly id: string; readonly name: string }
       return {
         output: { id: input.id },
-        entities: [{ entity: 'Project', id: input.id, values: {} }],
+        entities: [{ entity: 'Project', id: input.id, values: { name: input.name } }],
       }
     }),
   live: () => Stream.empty,
@@ -236,7 +232,10 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   lines.push(`mutation RenameProject: output ${JSON.stringify(renamed.output)}`)
   lines.push(`after mutation: ${describeData(projection.read(renamed.model))}`)
 
-  const corrupted = withStore(loaded, writeEntity(store, entityKey('Project', 'p1'), { status: 42 }))
+  const corrupted = withStore(
+    loaded,
+    writeEntity(store, entityKey('Project', 'p1'), { status: 42 }),
+  )
   lines.push(`corrupt store: ${describeData(projection.read(corrupted))}`)
 
   return lines

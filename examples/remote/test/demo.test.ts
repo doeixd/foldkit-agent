@@ -11,7 +11,9 @@ describe('foldkit-remote example', () => {
     expect(lines).toContain('rendered classes: project-card')
     expect(lines).toContain('rendered status: active')
     expect(lines).toContain('mutation RenameProject: output {"id":"p1"}')
-    expect(lines).toContain('after mutation: Ready {"id":"p1","name":"Apollo II","status":"active"}')
+    expect(lines).toContain(
+      'after mutation: Ready {"id":"p1","name":"Apollo II","status":"active"}',
+    )
     expect(lines).toContain('corrupt store: Failed DecodeError')
   })
 })
