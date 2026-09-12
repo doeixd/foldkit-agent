@@ -43,11 +43,8 @@ export interface SyncConfig<
   readonly durable: Ms
   /**
    * A pure reducer over the shared subset; only durable Messages reach it. It
-   * runs during replay and optimistic projection, so a Message whose `update`
-   * would produce Commands contributes only its state change here. Each replay
-   * installs the shared value into `initial` before applying the Message, so cost
-   * is proportional to the Model rather than the shared slice; project narrowly
-   * or keep the Model small if an outbox can be long.
+   * runs during replay and optimistic projection, so their Commands are dropped;
+   * each replay starts from `initial`, so cost tracks the Model.
    */
   readonly replay: (
     shared: Schema.Struct.Type<Fields>,

@@ -117,7 +117,8 @@ const shared = Effect.runSync(replica.shared)
 - A redacted status (`replica.status`): the pending count, the cursor, the last
   exchange failure, and the operations the server refused — enough for a UI to
   explain and recover without exposing Messages or the Model. `statusChanges` is
-  the same status re-emitted after every submit and exchange.
+  the same status, emitted on subscribe and re-emitted after every submit and
+  exchange.
 - Strict decoding: an operation is always validated with the application's
   Message schema, and a Message the contract does not call durable is refused.
 - Branded positions: `Sequence` (a committed document position) and
@@ -131,8 +132,9 @@ const shared = Effect.runSync(replica.shared)
   so a hostile peer cannot inject a value your `Update` type does not describe.
   Presence can travel over a socket — `socketPresenceChannel` on the client and
   `servePresence` fanning through a `createPresenceHub` on the server — or
-  in-process via `loopbackPresenceChannel`. `presence.changes` is a `Stream` of
-  the live peers, re-emitted on every change, alongside the `subscribe` callback.
+  in-process via `loopbackPresenceChannel`. `presence.changes` is a `Stream` that
+  emits the current peers and re-emits them on every change, alongside the
+  `subscribe` callback.
 - The transport seam (`Transport`): an Effect service with a loopback layer, a
   bridge to and from the promise client the replica speaks, and a WebSocket
   client layer. The socket reconnects on an exponential, jittered backoff and

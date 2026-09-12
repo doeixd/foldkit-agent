@@ -64,6 +64,7 @@ describe('presence', () => {
         const b = yield* make({ id: 'b', ttl: '100 millis', channel })
 
         const collected = yield* b.changes.pipe(
+          Stream.filter(peers => peers.some(peer => peer.id === 'a')),
           Stream.take(1),
           Stream.runCollect,
           Effect.forkScoped,

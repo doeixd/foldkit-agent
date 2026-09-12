@@ -257,10 +257,9 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     ) as Exchange<Shared>
 
   const checkIdentity = (operation: Operation): void => {
-    if (
-      operation.localSequence < 1 ||
-      operation.opId !== `${operation.replicaId}:${operation.localSequence}`
-    ) {
+    // `LocalSequence` already rejects a non-positive counter; this checks the
+    // derived identity.
+    if (operation.opId !== `${operation.replicaId}:${operation.localSequence}`) {
       throw new Error('Invalid operation identity')
     }
   }
@@ -596,12 +595,17 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
         cursor: Effect.map(SynchronizedRef.get(stateRef), state => state.cursor),
         status,
-        statusChanges: Stream.fromPubSub(statusSignals).pipe(Stream.mapEffect(() => status)),
+        statusChanges: Stream.concat(
+          Stream.fromEffect(status),
+          Stream.fromPubSub(statusSignals).pipe(Stream.mapEffect(() => status)),
+        ),
         submit,
         synchronize,
         start,
         close: Effect.fn('Sync.close')(function* () {
           yield* Ref.set(closed, true)
+          // Wake `start` so it can observe `closed` and return.
+          yield* Queue.offer(wake, undefined)
           yield* storage.close
         })(),
       }

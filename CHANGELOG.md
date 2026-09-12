@@ -280,11 +280,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Grouped codec helpers.** `Sync.codec` collects `normalizeOperation`,
   `operationFrom`, `committedFrom`, and `decodeExchange`; they are advanced
   wire/transport helpers, not the application-facing surface.
-- **Presence as a Stream.** `Presence.changes` emits the live peers whenever the
-  set changes, composing with Effect like the journal's change stream;
-  `subscribe` remains for a callback edge.
-- **Observable status.** `Replica.statusChanges` re-emits `ReplicaStatus` after
-  every submit and exchange, so a UI can subscribe instead of polling `status`.
+- **Presence as a Stream.** `Presence.changes` emits the live peers on subscribe
+  and whenever the set changes, composing with Effect like the journal's change
+  stream; `subscribe` remains for a callback edge.
+- **Observable status.** `Replica.statusChanges` emits `ReplicaStatus` on
+  subscribe and after every submit and exchange, so a UI can subscribe instead of
+  polling `status`; `Replica.close` now wakes `Replica.start` so the loop returns
+  rather than waiting for the scope.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.

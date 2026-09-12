@@ -664,16 +664,19 @@ describe('Replica.start', () => {
     const applied = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.forkScoped(replica.start)
+          // A deterministic signal that the exchange was applied.
+          const settled = yield* replica.statusChanges.pipe(
+            Stream.filter(status => status.cursor === 1),
+            Stream.take(1),
+            Stream.runHead,
+            Effect.forkScoped,
+          )
+          const fiber = yield* Effect.forkScoped(replica.start.pipe(Effect.provide(exchange)))
           yield* replica.submit(created('a'))
-          let current = yield* replica.cursor
-          for (let attempt = 0; attempt < 200 && current === 0; attempt += 1) {
-            yield* Effect.sleep('2 millis')
-            current = yield* replica.cursor
-          }
+          yield* Fiber.join(settled)
           yield* Fiber.interrupt(fiber)
-          return current
-        }).pipe(Effect.provide(exchange)),
+          return yield* replica.cursor
+        }),
       ),
     )
 
@@ -688,6 +691,7 @@ describe('Replica.start', () => {
       Effect.scoped(
         Effect.gen(function* () {
           const fiber = yield* replica.statusChanges.pipe(
+            Stream.filter(status => status.pending === 1),
             Stream.take(1),
             Stream.runCollect,
             Effect.forkScoped,

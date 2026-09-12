@@ -182,7 +182,10 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    changes: Stream.fromPubSub(signals).pipe(Stream.mapEffect(() => peerList)),
+    changes: Stream.concat(
+      Stream.fromEffect(peerList),
+      Stream.fromPubSub(signals).pipe(Stream.mapEffect(() => peerList)),
+    ),
     close,
   }
 })
