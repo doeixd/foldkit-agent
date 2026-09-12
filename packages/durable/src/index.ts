@@ -21,6 +21,7 @@ export {
 } from './ids.js'
 export {
   CompactedCursorError,
+  EffectFailedError,
   IdentityConflictError,
   InvalidCompactionError,
   InvalidCursorError,

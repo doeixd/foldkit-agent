@@ -125,6 +125,9 @@ the ledger still says `pending`. A `failed` record can also be uncertain: a
 provider may have accepted a request before the response or local save failed.
 Calling `runEffect` again retries both `pending` and `failed` records. It does
 not decide whether retrying is safe, and it does not restart work automatically.
+Pass `{ retryFailed: false }` to fail fast with an `EffectFailedError` (carrying
+the recorded message) instead of retrying a `failed` record; `unfinished()`
+lists those records so a recovery worker can decide per intent.
 
 | Durable record | What recovery can conclude | Application policy |
 | --- | --- | --- |
@@ -229,9 +232,11 @@ a rotated journal silently turn an old retry into a new commit.
   needs Node 22 (`node:sqlite`). The storage contract is `SqlClient`, so a
   Postgres adapter is a driver swap.
 - The SQL module is under `unstable` in the pinned Effect release candidate.
-- `reduce`, `validate`, and `authorize` are synchronous and run inside the append
-  transaction, holding the SQLite write lock; they must be pure and fast and
-  cannot call a service. An encoded operation must be JSON-compatible.
+- `reduce` and `validate` are synchronous and run inside the append transaction,
+  holding the SQLite write lock; they must be pure and fast and cannot call a
+  service. `authorize` may return an `Effect`, but it runs there too, so it has
+  no service requirement and must stay local to the snapshot. An encoded
+  operation must be JSON-compatible.
 - The `[key, op_id]` and `[key, sequence]` uniqueness is enforced by the table
   schema; a server-authoritative deployment is still a single writer per database
   file. Use one `Journal` handle per file.

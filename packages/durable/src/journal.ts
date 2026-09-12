@@ -30,6 +30,7 @@ import {
 } from './ids.js'
 import {
   CompactedCursorError,
+  EffectFailedError,
   IdentityConflictError,
   InvalidCompactionError,
   InvalidCursorError,
@@ -96,8 +97,15 @@ export interface JournalOptions<Operation, Snapshot, Principal, OperationEncoded
    * snapshot.
    */
   readonly validate?: (request: ValidationRequest<Operation, Snapshot, Principal>) => void
-  /** Synchronous policy decision, run inside the append transaction. */
-  readonly authorize?: (request: AuthorizationRequest<Operation, Snapshot, Principal>) => boolean
+  /**
+   * Policy decision, run inside the append transaction. Return a `boolean`, or
+   * an `Effect` when the decision needs to suspend. A service requirement is not
+   * available: the decision runs while the write lock is held, so keep it local
+   * to the snapshot and fail with `JournalError`.
+   */
+  readonly authorize?: (
+    request: AuthorizationRequest<Operation, Snapshot, Principal>,
+  ) => boolean | Effect.Effect<boolean, JournalError>
 }
 
 export type EffectStatus = 'pending' | 'succeeded' | 'failed'
@@ -180,7 +188,8 @@ export interface Journal<Operation, Snapshot, Principal, OperationEncoded = unkn
   readonly runEffect: <Result, E>(
     key: string,
     run: Effect.Effect<Result, E>,
-  ) => Effect.Effect<Result, E | JournalError>
+    options?: { readonly retryFailed?: boolean },
+  ) => Effect.Effect<Result, E | JournalError | EffectFailedError>
   /** Removes an effect record so the next `runEffect` treats it as new work. */
   readonly clearEffect: (key: string) => Effect.Effect<void, JournalError>
   /** Drops a document's snapshot, operations, and effect records. */
@@ -579,10 +588,11 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         try: () => options.validate?.({ key, principal, operation, snapshot, cursor }),
         catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
       })
-      const allowed = yield* Effect.try({
+      const decision = yield* Effect.try({
         try: () => options.authorize?.({ key, principal, operation, snapshot }) ?? true,
         catch: cause => new InvalidOperationError({ message: 'Invalid operation', cause }),
       })
+      const allowed = typeof decision === 'boolean' ? decision : yield* decision
       if (!allowed)
         return yield* Effect.fail(
           new OperationRejectedError({
@@ -774,7 +784,11 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
       )
     })
 
-  const runEffect: Shape['runEffect'] = <Result, E>(key: string, run: Effect.Effect<Result, E>) =>
+  const runEffect: Shape['runEffect'] = <Result, E>(
+    key: string,
+    run: Effect.Effect<Result, E>,
+    options?: { readonly retryFailed?: boolean },
+  ) =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ key })
       // Check-and-reserve is one atomic step, so a concurrent call joins the
@@ -805,6 +819,18 @@ const makeShape = <Operation, Snapshot, Principal, OperationEncoded = unknown>(
         if (Option.isSome(recorded) && recorded.value.status === 'succeeded') {
           yield* Metric.update(journalMetrics.effectRunsCoalesced, 1)
           return recorded.value.result as Result
+        }
+        if (
+          options?.retryFailed === false &&
+          Option.isSome(recorded) &&
+          recorded.value.status === 'failed'
+        ) {
+          return yield* Effect.fail(
+            new EffectFailedError({
+              key,
+              message: recorded.value.error ?? 'The previous run failed',
+            }),
+          )
         }
 
         yield* Metric.update(journalMetrics.effectRuns, 1)

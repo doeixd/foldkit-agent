@@ -75,3 +75,12 @@ export class IdentityConflictError extends Schema.TaggedError<IdentityConflictEr
     message: Schema.String,
   },
 ) {}
+
+/** `runEffect` was asked not to retry a key whose previous run failed. */
+export class EffectFailedError extends Schema.TaggedError<EffectFailedError>()(
+  'EffectFailedError',
+  {
+    key: Schema.String,
+    message: Schema.String,
+  },
+) {}

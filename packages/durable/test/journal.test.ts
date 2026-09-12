@@ -612,6 +612,48 @@ describe('the journal surface', () => {
       expect(yield* journal.unfinished()).toEqual([])
       expect(Option.isNone(yield* journal.effect('k'))).toBe(true)
     }))
+
+  it('supports an Effect-returning authorization policy', () =>
+    withJournal(
+      function* (journal) {
+        expect((yield* Effect.result(journal.append(todos, add(1, 'a'), principal)))._tag).toBe(
+          'Failure',
+        )
+      },
+      { authorize: () => Effect.succeed(false) },
+    ))
+
+  it('allows when the Effect authorization policy allows', () =>
+    withJournal(
+      function* (journal) {
+        const committed = appendCommitted(yield* journal.append(todos, add(1, 'a'), principal))
+        expect(committed.sequence).toBe(1)
+      },
+      { authorize: () => Effect.succeed(true) },
+    ))
+
+  it('does not retry a failed effect when asked', () =>
+    withJournal(function* (journal) {
+      let runs = 0
+      const failing = Effect.gen(function* () {
+        runs += 1
+        return yield* Effect.fail(new Error('down'))
+      })
+      yield* Effect.result(journal.runEffect('k', failing))
+
+      const blocked = yield* Effect.result(
+        journal.runEffect('k', Effect.succeed('retry'), { retryFailed: false }),
+      )
+      expect(blocked._tag).toBe('Failure')
+      if (blocked._tag === 'Failure') {
+        expect(blocked.failure).toMatchObject({ _tag: 'EffectFailedError' })
+      }
+      expect(runs).toBe(1)
+
+      // The default still retries a pending/failed record.
+      expect(yield* journal.runEffect('k', Effect.succeed('retry'))).toBe('retry')
+      expect(runs).toBe(1)
+    }))
 })
 
 describe('the effect ledger', () => {

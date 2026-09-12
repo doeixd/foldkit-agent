@@ -219,6 +219,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Multiple journals.** `makeJournalLayer` and `JournalService` take an optional
   service key, so an application with more than one journal type does not
   collide on the default tag.
+- **Retry control and Effect authorization.** `runEffect(key, run, { retryFailed:
+  false })` fails fast with `EffectFailedError` instead of retrying a failed
+  record, and `authorize` may return an `Effect` (it runs inside the append
+  transaction, so it has no service requirement).
 
 ### `foldkit-sync`
 
