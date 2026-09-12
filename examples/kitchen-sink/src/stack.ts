@@ -13,19 +13,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
-import { Effect, Layer, Schema, Stream } from 'effect'
+import { Effect, Layer, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
 import * as Update from 'foldkit/update'
-import {
-  Mutation,
-  Query,
-  REMOTE_PROTOCOL_VERSION,
-  Remote,
-  RemoteClient,
-  Selection,
-  liveEventOf,
-  type RemoteModel,
-} from 'foldkit-remote'
+import { Mutation, Query, Remote, RemoteClient, Selection, type RemoteModel } from 'foldkit-remote'
 import {
   databaseLayer,
   entity,
@@ -350,16 +341,5 @@ export const serverClient = (principal: string): Layer.Layer<RemoteClient> => {
   // Every source names a descriptor the domain declared.
   RemoteServer.validate(Data, server)
   const handlers = RemoteServer.handlers(server, principal, { live: liveHub })
-  const onDatabase = databaseLayer(db)
-  return Remote.coalesced(
-    Layer.succeed(RemoteClient, {
-      read: batch => handlers.FoldkitRemoteRead(batch).pipe(Effect.provide(onDatabase)),
-      query: request => handlers.FoldkitRemoteQuery(request).pipe(Effect.provide(onDatabase)),
-      mutate: request => handlers.FoldkitRemoteMutate(request).pipe(Effect.provide(onDatabase)),
-      live: ({ requirements, after }) =>
-        handlers
-          .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
-          .pipe(Stream.map(liveEventOf), Stream.provide(onDatabase)),
-    }),
-  )
+  return Remote.clientLayer(handlers).pipe(Layer.provide(databaseLayer(db)))
 }

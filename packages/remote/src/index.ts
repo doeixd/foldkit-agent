@@ -959,10 +959,10 @@ export interface RetainOptions {
   readonly grace?: Duration.Input | undefined
 }
 
-const coalescedLayer = (
-  layer: Layer.Layer<RemoteClient>,
+const coalescedLayer = <E, R>(
+  layer: Layer.Layer<RemoteClient, E, R>,
   options: CoalesceOptions = {},
-): Layer.Layer<RemoteClient> =>
+): Layer.Layer<RemoteClient, E, R> =>
   Layer.effect(
     RemoteClient,
     Effect.gen(function* () {
@@ -1478,20 +1478,30 @@ export const Remote = {
    * application provides the transport's RPC layer instead of writing the
    * `LiveChange`-to-`LiveEvent` mapping by hand.
    */
-  clientLayer: (
-    client: RemoteRpcClient,
+  clientLayer: <R = never>(
+    client: RemoteRpcClient<R>,
     options: CoalesceOptions = {},
-  ): Layer.Layer<RemoteClient> =>
+  ): Layer.Layer<RemoteClient, never, R> =>
     coalescedLayer(
-      Layer.succeed(RemoteClient, {
-        read: batch => client.FoldkitRemoteRead(batch),
-        query: request => client.FoldkitRemoteQuery(request),
-        mutate: request => client.FoldkitRemoteMutate(request),
-        live: ({ requirements, after }) =>
-          client
-            .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
-            .pipe(Stream.map(liveEventOf)),
-      }),
+      Layer.effect(
+        RemoteClient,
+        Effect.gen(function* () {
+          // What the RPC client needs (a database under in-process handlers,
+          // nothing under a transport) is supplied once, when the layer is built.
+          const context = yield* Effect.context<R>()
+          return {
+            read: batch => client.FoldkitRemoteRead(batch).pipe(Effect.provideContext(context)),
+            query: request =>
+              client.FoldkitRemoteQuery(request).pipe(Effect.provideContext(context)),
+            mutate: request =>
+              client.FoldkitRemoteMutate(request).pipe(Effect.provideContext(context)),
+            live: ({ requirements, after }) =>
+              client
+                .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
+                .pipe(Stream.map(liveEventOf), Stream.provideContext(context)),
+          }
+        }),
+      ),
       options,
     ),
 

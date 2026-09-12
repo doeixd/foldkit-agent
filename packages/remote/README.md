@@ -425,7 +425,9 @@ the same as once.
 - **The transport seam.** `RemoteClient`, an Effect service with `read`, `query`,
   `mutate`, and `live`; the wire schemas and `RemoteRpc` group.
   `Remote.clientLayer(rpcClient)` adapts an Effect RPC client for `RemoteRpc` to
-  `RemoteClient`, including the `LiveChange`-to-`LiveEvent` mapping.
+  `RemoteClient`, including the `LiveChange`-to-`LiveEvent` mapping; what the
+  client requires (a database under in-process `RemoteServer.handlers`) is
+  supplied to the layer with `Layer.provide`.
 - **Disposable cache persistence.** Deterministic, scoped, size-bounded
   snapshots of the entity store: `dehydrate`/`hydrate` as text, `save`/`restore`
   over `KeyValueStore`, and `Hydrated` to merge one into the Model.

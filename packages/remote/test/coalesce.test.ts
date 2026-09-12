@@ -254,7 +254,7 @@ describe('Remote.coalesced and Remote.clientLayer', () => {
           [client.read(batch(req('u1', ['name']))), client.read(batch(req('u2', ['name'])))],
           { concurrency: 'unbounded' },
         )
-      }).pipe(Effect.provide(Remote.clientLayer(rpc as never))),
+      }).pipe(Effect.provide(Remote.clientLayer(rpc))),
     )
     expect(raw.batches).toHaveLength(1)
     expect(Schema.is(Schema.Number)(raw.batches[0]!.version)).toBe(true)
