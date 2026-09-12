@@ -119,6 +119,9 @@ const shared = Effect.runSync(replica.shared)
   explain and recover without exposing Messages or the Model.
 - Strict decoding: an operation is always validated with the application's
   Message schema, and a Message the contract does not call durable is refused.
+- Branded positions: `Sequence` (a committed document position) and
+  `LocalSequence` (a replica's own 1-based counter) cannot be confused, so a
+  client counter is never passed where a committed position is expected.
 - Presence (`createPresence`): an ephemeral, TTL'd peer registry, deliberately
   outside the durable log. A peer that stops refreshing is dropped, not
   replayed. It is an Effect driven by the `Clock` (so a `TestClock` makes the

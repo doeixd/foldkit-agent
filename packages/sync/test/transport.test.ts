@@ -5,6 +5,7 @@ import {
   layerLoopback,
   layerSocket,
   nativeSocket,
+  sequence,
   serveSocket,
   toPromise,
   Transport,
@@ -61,7 +62,7 @@ describe('the transport service', () => {
     })
 
     expect(
-      await toPromise({ exchange: cursor => Effect.succeed({ cursor }) }).exchange(4, []),
+      await toPromise({ exchange: cursor => Effect.succeed({ cursor }) }).exchange(sequence(4), []),
     ).toEqual({ cursor: 4 })
   })
 })

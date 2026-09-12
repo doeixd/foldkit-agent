@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 import { IDBFactory } from 'fake-indexeddb'
-import { layerSocket, serveSocket, type SocketLike } from 'foldkit-sync'
+import { layerSocket, sequence, serveSocket, type SocketLike } from 'foldkit-sync'
 import { afterEach, expect, it } from 'vitest'
 import { Message } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
@@ -49,7 +49,9 @@ it('converges a replica through the socket transport', async () => {
   const journal = openJournal(':memory:')
   const { client, server } = socketPair()
   const handler = journal.transport(principal)
-  serveSocket(server, { exchange: (cursor, pending) => handler.exchange(cursor, pending) })
+  serveSocket(server, {
+    exchange: (cursor, pending) => handler.exchange(sequence(cursor), pending),
+  })
   const replica = await openReplicaEffect(
     'browser',
     await Effect.runPromise(openStorage('browser', new IDBFactory())),

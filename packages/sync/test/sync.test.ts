@@ -5,8 +5,10 @@ import {
   defineSync,
   documentId,
   layerFromPromise,
+  localSequence as toLocalSequence,
   opId,
   replicaId,
+  sequence as toSequence,
   StorageError,
   type Committed,
   type Exchange,
@@ -69,14 +71,14 @@ const CountingSync = defineSync({
 
 const created = (id: string, title = id): Message => ({ _tag: 'CreatedTodo', id, title })
 
-const operation = (replica: string, localSequence: number, message: Message): Operation => ({
+const operation = (replica: string, local: number, message: Message): Operation => ({
   protocolVersion: 1,
   schemaVersion: 1,
   documentId: documentId('todos'),
   replicaId: replicaId(replica),
-  localSequence,
-  opId: opId(`${replica}:${localSequence}`),
-  baseCursor: 0,
+  localSequence: toLocalSequence(local),
+  opId: opId(`${replica}:${local}`),
+  baseCursor: toSequence(0),
   message,
 })
 
@@ -87,7 +89,7 @@ const committed = (
   message: Message,
 ): Committed => ({
   ...operation(replica, localSequence, message),
-  serverSequence,
+  serverSequence: toSequence(serverSequence),
   actorId: 'owner',
 })
 
@@ -124,9 +126,8 @@ describe('the operation codec', () => {
     expect(() => Sync.normalizeOperation({ ...valid, opId: 'b:1' })).toThrow(
       'Invalid operation identity',
     )
-    expect(() => Sync.normalizeOperation({ ...valid, localSequence: 0 })).toThrow(
-      'Invalid operation identity',
-    )
+    // A 1-based local sequence is refused by the codec before the identity check.
+    expect(() => Sync.normalizeOperation({ ...valid, localSequence: 0 })).toThrow()
   })
 
   it('refuses a Message the contract does not call durable', () => {

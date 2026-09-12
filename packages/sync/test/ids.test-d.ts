@@ -1,21 +1,18 @@
 /**
- * Compile-time expectations for the branded sync identities. This file is
- * type-checked, not executed; every `@ts-expect-error` must stay an error.
+ * Branded position contract. Type-checked but not executed.
  */
-import { documentId, opId, replicaId } from '../src/index.js'
+import { localSequence, sequence, type LocalSequence, type Sequence } from '../src/index.js'
 
-const document = documentId('todos')
-const replica = replicaId('a')
-const operation = opId('a:1')
+const seq: Sequence = sequence(0)
+const local: LocalSequence = localSequence(1)
 
-// A branded id is still usable as its base type.
-const asString: string = document
-const alsoString: string = replica
-const operationAsString: string = operation
+// @ts-expect-error a committed position is not a replica's own counter
+const _badLocal: LocalSequence = seq
+// @ts-expect-error a replica's own counter is not a committed position
+const _badSeq: Sequence = local
+// @ts-expect-error a plain number is not a committed position
+const _plain: Sequence = 0
 
-// @ts-expect-error a replica id is not a document id
-const swappedDocument: ReturnType<typeof documentId> = replica
-// @ts-expect-error an operation id is not a replica id
-const swappedReplica: ReturnType<typeof replicaId> = operation
-// @ts-expect-error a plain string does not carry the document brand
-const plainDocument: ReturnType<typeof documentId> = 'todos'
+void _badLocal
+void _badSeq
+void _plain

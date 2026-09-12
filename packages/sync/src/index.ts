@@ -16,7 +16,18 @@ export {
   type SyncConfig,
 } from './make.js'
 export { project, type WritableProjection } from './project.js'
-export { DocumentId, OpId, ReplicaId, documentId, opId, replicaId } from './ids.js'
+export {
+  DocumentId,
+  LocalSequence,
+  OpId,
+  ReplicaId,
+  Sequence,
+  documentId,
+  localSequence,
+  opId,
+  replicaId,
+  sequence,
+} from './ids.js'
 export {
   CheckpointRegressionError,
   CommittedOrderError,

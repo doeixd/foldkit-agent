@@ -6,8 +6,10 @@ import { IDBFactory } from 'fake-indexeddb'
 import { Agent } from 'foldkit-agent'
 import {
   documentId,
+  localSequence,
   opId,
   replicaId,
+  sequence,
   StorageError,
   type Exchange,
   type Operation,
@@ -23,16 +25,16 @@ const principal = { actorId: 'owner', documentId: 'todos', canWrite: true }
 const created = (id: string, title = id) => Message.CreatedTodo({ id, title })
 const operation = (
   replica: string,
-  localSequence: number,
+  local: number,
   message: Message = created(replica),
 ): Operation => ({
   protocolVersion: 1,
   schemaVersion: 1,
   documentId: documentId('todos'),
   replicaId: replicaId(replica),
-  localSequence,
-  opId: opId(`${replica}:${localSequence}`),
-  baseCursor: 0,
+  localSequence: localSequence(local),
+  opId: opId(`${replica}:${local}`),
+  baseCursor: sequence(0),
   message,
 })
 let factory: IDBFactory
@@ -120,9 +122,9 @@ describe('the journal adapter', () => {
     expect(() => server.append(operation('a', 1), { ...principal, canWrite: false })).toThrow(
       'Unauthorized',
     )
-    await expect(server.transport({ ...principal, actorId: '' }).exchange(0, [])).rejects.toThrow(
-      'Unauthenticated',
-    )
+    await expect(
+      server.transport({ ...principal, actorId: '' }).exchange(sequence(0), []),
+    ).rejects.toThrow('Unauthenticated')
     expect(server.snapshot('todos').cursor).toBe(0)
   })
 
@@ -159,9 +161,11 @@ describe('the journal adapter', () => {
     const transport = server.transport(principal)
 
     // At the floor the retained tail still covers the range.
-    await expect(transport.exchange(1, [])).resolves.not.toHaveProperty('checkpoint')
+    await expect(transport.exchange(sequence(1), [])).resolves.not.toHaveProperty('checkpoint')
     // Below it the log cannot, so the snapshot is sent instead.
-    await expect(transport.exchange(0, [])).resolves.toMatchObject({ checkpoint: { cursor: 2 } })
+    await expect(transport.exchange(sequence(0), [])).resolves.toMatchObject({
+      checkpoint: { cursor: 2 },
+    })
   })
 
   it('sequences server-authored operations from the cursor', () => {
@@ -336,7 +340,7 @@ describe('the journal adapter', () => {
       await expect(
         guarded
           .transport(principal)
-          .exchange(0, [
+          .exchange(sequence(0), [
             operation('a', 1, Message.RenamedTodo({ id: 'todo', title: 'malicious' })),
           ]),
       ).rejects.toThrow()

@@ -1,4 +1,5 @@
 import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
+import { sequence } from './ids.js'
 import type { Operation, TransportClient } from './sync.js'
 
 /** The wire failure of a transport. A refusal is a result, not an error. */
@@ -53,7 +54,10 @@ export const layerLoopback = (
 export const layerFromPromise = (transport: TransportClient): Layer.Layer<Transport> =>
   Layer.succeed(Transport, {
     exchange: (cursor, pending) =>
-      Effect.tryPromise({ try: () => transport.exchange(cursor, pending), catch: failure }),
+      Effect.tryPromise({
+        try: () => transport.exchange(sequence(cursor), pending),
+        catch: failure,
+      }),
   })
 
 /** Bridges the service back to the promise client the replica consumes. */

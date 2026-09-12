@@ -4,8 +4,10 @@ import {
   defineSync,
   documentId,
   layerFromPromise,
+  localSequence as toLocalSequence,
   opId,
   replicaId,
+  sequence as toSequence,
   type Committed,
   type Operation,
   type Replica,
@@ -34,14 +36,14 @@ const Sync = defineSync({
       : { todos: [...shared.todos, { id: message.id, title: message.title }] },
 })
 
-const operation = (localSequence: number, id: string): Operation => ({
+const operation = (local: number, id: string): Operation => ({
   protocolVersion: 1,
   schemaVersion: 1,
   documentId: documentId('todos'),
   replicaId: replicaId('a'),
-  localSequence,
-  opId: opId(`a:${localSequence}`),
-  baseCursor: 0,
+  localSequence: toLocalSequence(local),
+  opId: opId(`a:${local}`),
+  baseCursor: toSequence(0),
   message: { _tag: 'CreatedTodo', id, title: id },
 })
 
@@ -51,8 +53,8 @@ const stateWith = (pending: number, committed: number): ReplicaState<Shared> => 
   documentId: documentId('todos'),
   replicaId: replicaId('a'),
   revision: pending,
-  nextLocalSequence: pending + 1,
-  cursor: 0,
+  nextLocalSequence: toLocalSequence(pending + 1),
+  cursor: toSequence(0),
   committed: {
     todos: Array.from({ length: committed }, (_, index) => ({
       id: `c${index}`,
@@ -71,7 +73,7 @@ const storageWith = (state: ReplicaState<Shared>): Storage => ({
 
 const committed = (serverSequence: number, id: string): Committed => ({
   ...operation(serverSequence, id),
-  serverSequence,
+  serverSequence: toSequence(serverSequence),
   actorId: 'owner',
 })
 

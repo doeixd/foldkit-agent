@@ -13,14 +13,16 @@ import {
   type ReplicaError,
 } from './errors.js'
 import type { Storage } from './indexedDb.js'
-import { DocumentId, OpId, ReplicaId } from './ids.js'
+import {
+  DocumentId,
+  LocalSequence,
+  OpId,
+  ReplicaId,
+  Sequence,
+  localSequence,
+  sequence,
+} from './ids.js'
 import { Transport, TransportError } from './transport.js'
-
-const Sequence = Schema.Number.check(
-  Schema.isInt(),
-  Schema.isGreaterThanOrEqualTo(0),
-  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
-)
 
 /** Wire and persisted-format versions. A bump must handle the older value explicitly. */
 const PROTOCOL_VERSION = 1
@@ -32,7 +34,7 @@ const OperationSchema = Schema.Struct({
   schemaVersion: Schema.Literal(SCHEMA_VERSION),
   documentId: DocumentId,
   replicaId: ReplicaId,
-  localSequence: Sequence,
+  localSequence: LocalSequence,
   opId: OpId,
   baseCursor: Sequence,
   message: Schema.Unknown,
@@ -69,7 +71,7 @@ export const syncMetrics = {
 }
 
 export interface Checkpoint<Shared> {
-  readonly cursor: number
+  readonly cursor: Sequence
   readonly model: Shared
 }
 
@@ -89,8 +91,8 @@ export interface ReplicaState<Shared> {
   readonly documentId: DocumentId
   readonly replicaId: ReplicaId
   readonly revision: number
-  readonly nextLocalSequence: number
-  readonly cursor: number
+  readonly nextLocalSequence: LocalSequence
+  readonly cursor: Sequence
   readonly committed: Shared
   readonly committedIds: ReadonlyArray<string>
   readonly pending: ReadonlyArray<Operation>
@@ -101,13 +103,13 @@ export interface ReplicaState<Shared> {
  * is the primary seam.
  */
 export interface TransportClient {
-  exchange(cursor: number, pending: ReadonlyArray<Operation>): Promise<unknown>
+  exchange(cursor: Sequence, pending: ReadonlyArray<Operation>): Promise<unknown>
 }
 
 /** A redacted view of a replica's state, for a UI to explain and recover. */
 export interface ReplicaStatus {
   readonly pending: number
-  readonly cursor: number
+  readonly cursor: Sequence
   /** The last exchange failure, cleared by a successful exchange. */
   readonly lastError: string | undefined
   /** Operations the server refused, most recent first. */
@@ -118,7 +120,7 @@ export interface Replica<Message, Shared> {
   /** The optimistic projection: committed state with pending operations replayed. */
   readonly shared: Effect.Effect<Shared>
   readonly pending: Effect.Effect<ReadonlyArray<Operation>>
-  readonly cursor: Effect.Effect<number>
+  readonly cursor: Effect.Effect<Sequence>
   /** Waiting/recovery information without exposing Messages or the Model. */
   readonly status: Effect.Effect<ReplicaStatus>
   readonly submit: (message: Message) => Effect.Effect<void, ReplicaError>
@@ -192,8 +194,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
     schemaVersion: Schema.Literal(SCHEMA_VERSION),
     documentId: DocumentId,
     replicaId: ReplicaId,
-    revision: Sequence,
-    nextLocalSequence: Sequence,
+    revision: Schema.Number,
+    nextLocalSequence: LocalSequence,
     cursor: Sequence,
     committed: definition.shared,
     committedIds: Schema.Array(Schema.String),
@@ -306,8 +308,8 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         documentId,
         replicaId,
         revision: 0,
-        nextLocalSequence: 1,
-        cursor: 0,
+        nextLocalSequence: localSequence(1),
+        cursor: sequence(0),
         committed: definition.empty,
         committedIds: [],
         pending: [],
@@ -424,7 +426,7 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             const next: ReplicaState<Shared> = {
               ...current,
               revision: current.revision + 1,
-              nextLocalSequence: current.nextLocalSequence + 1,
+              nextLocalSequence: localSequence(current.nextLocalSequence + 1),
               pending: [...current.pending, operation],
             }
             yield* persist(next, current)
