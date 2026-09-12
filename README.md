@@ -45,6 +45,7 @@ pnpm add foldkit-agent                       # the contract
 pnpm add foldkit-agent foldkit-agent-webmcp  # browser (WebMCP)
 pnpm add foldkit-agent foldkit-agent-mcp     # external MCP
 pnpm add foldkit-agent foldkit-agent-a2a     # A2A
+pnpm add foldkit-agent foldkit-agent-native  # Agent Native
 pnpm add foldkit-durable foldkit-sync        # offline, multiplayer, remote-agent state
 ```
 
