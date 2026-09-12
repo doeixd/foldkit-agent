@@ -74,6 +74,16 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
   `relations`, and a version mismatch fails with `RemoteProtocolError`
   (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
+- **A mutation owns its optimistic operations.** `MutationStarted { requestId,
+  optimistic }` applies entity patches (`Entity.patch`) and connection changes
+  (`Optimistic.prepend`/`append`/`remove`, new) as a layer and overlays owned
+  by the request; `MutationSucceeded` releases both and records the result's
+  confirmed `connections` (new on `MutationResult` and the server's
+  `MutationOutcome`) in the same position, and `MutationFailed` drops both.
+  `visibleItems` reads pending prepends newest-first and hides `remove`
+  overlays. Breaking: `OptimisticAdded`/`OptimisticRemoved` are gone,
+  `Remote.mutate` returns `connections`, `Remote.mutateInto` takes
+  `{ optimistic }`, and the protocol version is 3 (#65, section 5).
 - **Coalesced reads.** `Remote.clientLayer` (and `Remote.coalesced` for a
   hand-written client) batch requirements issued together into one
   `ReadBatch`, union overlapping fields, join a requirement already in flight,

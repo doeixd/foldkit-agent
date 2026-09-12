@@ -151,10 +151,14 @@ is idempotent per `requestId`, so a transport retry cannot apply the same change
 twice. The application could equally reduce the patches by hand; `Remote.mutateInto`
 is the one-step form.
 
-Optimistic changes are ordered **layers** over the base store, not inverse
-patches: the visible store is recomputed as base + layers, success merges the
-server patch and removes the layer, and failure removes the layer. Overlapping
-layers therefore rebase for free.
+Optimistic changes belong to the mutation: `MutationStarted` carries its entity
+patches and connection changes (`Optimistic.prepend`/`append`/`remove`), and
+success or failure releases them together by request id. Patches are ordered
+**layers** over the base store, not inverse patches: the visible store is
+recomputed as base + layers, so overlapping layers rebase for free. Connection
+changes are overlays outside the server-known region; a result's confirmed
+`connections` take the place of the request's own, so a temporary edge becomes
+the real one in place.
 
 Live data is an Effect streaming RPC. Each stream has a monotonic cursor:
 duplicates are ignored, and an event **ahead** of the cursor is a gap — it is not

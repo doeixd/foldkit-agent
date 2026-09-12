@@ -266,19 +266,31 @@ or already-applied result is a no-op.
 
 ### Optimistic updates
 
-Optimistic changes are ordered layers over the base store, not inverse patches:
-the visible store is recomputed, and settling removes the layer, so overlapping
-layers rebase for free.
+A mutation owns its optimistic operations: entity patches and connection
+changes, applied together when it starts and released together when it settles.
 
 ```ts
+// In update, before issuing the Command:
 Data.update(model.remote, {
-  _tag: 'OptimisticAdded',
-  layer: { id: requestId, patches: [{ entity: 'Project', id, values: { name } }] },
+  _tag: 'MutationStarted',
+  requestId,
+  optimistic: [
+    Entity.patch(Comment.ref(tempId), { id: tempId, body }),
+    Optimistic.prepend(commentsRef, Comment.ref(tempId)),
+  ],
 })
 ```
 
-`MutationSucceeded` writes the server's patches and removes the layer;
-`MutationFailed` removes the layer, revealing the base.
+Patches are ordered layers over the base store, not inverse patches: the visible
+store (`visibleStore`) is recomputed, and settling removes the layer, so
+overlapping layers rebase for free. Connection changes (`Optimistic.prepend`,
+`append`, `remove`) are overlays outside the server-known region; `visibleItems`
+places inserts newest-first and hides removed edges. `MutationSucceeded` writes
+the server's patches, releases the request's layer and overlays, and records the
+result's confirmed `connections` in the position the request's overlays held,
+so a temporary edge becomes the real one without a flicker and a page or live
+event that later carries the same edge does not duplicate it. `MutationFailed`
+releases both, revealing the base. A retried result is a no-op.
 
 ## Connections
 
