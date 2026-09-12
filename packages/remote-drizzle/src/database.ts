@@ -12,7 +12,7 @@
  * Effect driver when the two versions agree.
  */
 import type { AnyColumn, SQL, Table } from 'drizzle-orm'
-import { Context } from 'effect'
+import { Context, Layer } from 'effect'
 
 export interface DrizzleStatement extends PromiseLike<ReadonlyArray<Record<string, unknown>>> {
   where(condition: SQL | undefined): DrizzleStatement
@@ -33,3 +33,11 @@ export interface DrizzleDatabaseService {
 export class DrizzleDatabase extends Context.Service<DrizzleDatabase, DrizzleDatabaseService>()(
   'foldkit-remote-drizzle/DrizzleDatabase',
 ) {}
+
+/**
+ * Provides a Drizzle database as the `DrizzleDatabase` service. Any Drizzle
+ * database qualifies; the cast is confined here because its builder is generic
+ * over dialect and is not structurally nameable.
+ */
+export const databaseLayer = (database: unknown): Layer.Layer<DrizzleDatabase> =>
+  Layer.succeed(DrizzleDatabase, database as DrizzleDatabaseService)

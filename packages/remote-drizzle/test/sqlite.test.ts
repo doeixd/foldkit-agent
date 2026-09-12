@@ -6,13 +6,12 @@ import { Effect, Schema } from 'effect'
 import { Query } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import {
-  DrizzleDatabase,
+  databaseLayer,
   entity,
   many,
   manyToMany,
   query,
   source,
-  type DrizzleDatabaseService,
   type EntityBinding,
 } from '../src/index.js'
 
@@ -93,16 +92,18 @@ const setup = () => {
     insert into tags values ('t1', 'TypeScript'), ('t2', 'Databases');
     insert into post_tags values ('p1', 't1'), ('p1', 't2'), ('p2', 't1');
   `)
-  return { sqlite, database: drizzle({ client: sqlite }) as unknown as DrizzleDatabaseService }
+  return { sqlite, database: drizzle({ client: sqlite }) }
 }
 
 const read = (
   binding: EntityBinding<any, any>,
-  database: DrizzleDatabaseService,
+  database: unknown,
   context: Parameters<ReturnType<typeof source>['read']>[0],
 ) =>
   Effect.runPromise(
-    source(binding).read(context).pipe(Effect.provideService(DrizzleDatabase, database)),
+    source(binding)
+      .read(context)
+      .pipe(Effect.provide(databaseLayer(database))),
   )
 
 describe('RemoteDrizzle against in-process SQLite', () => {
@@ -188,7 +189,7 @@ describe('RemoteDrizzle against in-process SQLite', () => {
           relations: { comments: (principal: string) => eq(comments.body, principal) },
         })
           .read({ ids: ['p1'], fields: ['id', 'comments'], principal: 'a' })
-          .pipe(Effect.provideService(DrizzleDatabase, database)),
+          .pipe(Effect.provide(databaseLayer(database))),
       )
       expect(records[0]!.values.comments).toEqual(['Comment:c1'])
     } finally {
@@ -238,7 +239,7 @@ describe('RemoteDrizzle against in-process SQLite', () => {
         Effect.runPromise(
           source_
             .run({ input: {}, window, principal: null })
-            .pipe(Effect.provideService(DrizzleDatabase, database)),
+            .pipe(Effect.provide(databaseLayer(database))),
         )
 
       expect((await run({ first: 2 })).edges.map(edge => edge.id)).toEqual(['p1', 'p2'])

@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/node-sqlite'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Effect } from 'effect'
 import { bench, describe } from 'vitest'
-import { DrizzleDatabase, entity, many, source, type DrizzleDatabaseService } from '../src/index.js'
+import { databaseLayer, entity, many, source } from '../src/index.js'
 
 const require_ = createRequire(import.meta.url)
 const { DatabaseSync } = require_('node:sqlite') as typeof import('node:sqlite')
@@ -47,7 +47,7 @@ for (let parent = 0; parent < PARENTS; parent++) {
   }
 }
 
-const database = drizzle({ client: sqlite }) as unknown as DrizzleDatabaseService
+const database = drizzle({ client: sqlite })
 const ids = Array.from({ length: PARENTS }, (_, parent) => `p${parent}`)
 const read = source(ProjectBinding)
 
@@ -55,7 +55,7 @@ const run = (fields: ReadonlyArray<string>, windows?: Parameters<typeof read.rea
   Effect.runPromise(
     read
       .read({ ids, fields, principal: null, ...(windows === undefined ? {} : { windows }) })
-      .pipe(Effect.provideService(DrizzleDatabase, database)),
+      .pipe(Effect.provide(databaseLayer(database))),
   )
 
 describe(`remote-drizzle reads (${PARENTS} parents x ${CHILDREN} children)`, () => {

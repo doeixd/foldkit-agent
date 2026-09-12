@@ -17,19 +17,81 @@ Remote Selection / Query
  normalized Remote patches
 ```
 
+## Quick start
+
+```ts
+// schema.ts
+import { pgTable, text, uuid } from 'drizzle-orm/pg-core'
+
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+})
+export const projects = pgTable('projects', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+  ownerId: uuid('owner_id').notNull(),
+})
+```
+
+```ts
+// remote.ts
+import { Schema } from 'effect'
+import { Entity, Remote, Selection } from 'foldkit-remote'
+import { RemoteServer } from 'foldkit-remote-server'
+import { entity, source } from 'foldkit-remote-drizzle'
+import { projects, users } from './schema.js'
+
+// One declaration per entity: the table binding, and the Remote Entity that
+// `Selection` uses. The binding's derived Schema seeds the Entity.
+const User = entity('User', users)
+const Project = entity('Project', projects, {
+  relations: { owner: { entity: User, field: projects.ownerId } },
+})
+
+const UserEntity = Entity.make('User', User.Schema)
+const ProjectEntity = Entity.make(
+  'Project',
+  Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    owner: Entity.ref(UserEntity),
+  }),
+)
+
+// A Surface selects exactly these fields; a query is described separately.
+const ProjectSummary = Selection.make(ProjectEntity, { id: true, name: true, owner: true })
+
+const Data = Remote.make({ entities: [UserEntity, ProjectEntity] })
+
+const Server = RemoteServer.make(Data, {
+  entities: [source(User), source(Project)],
+})
+
+// The handlers require `DrizzleDatabase`; provide it with the application's db.
+const handlers = RemoteServer.handlers(Server, principal)
+```
+
+The application provides the database once:
+
+```ts
+import { databaseLayer } from 'foldkit-remote-drizzle'
+
+const DatabaseLive = databaseLayer(db)
+```
+
 ## Bind an entity to a table
 
 ```ts
 import { entity } from 'foldkit-remote-drizzle'
-import { users } from './schema.js'
 
 const User = entity('User', users)
 ```
 
-`entity(name, table, { schema?, relations? })` derives an Effect Schema from the
-table with `drizzle-orm/effect-schema` and exposes the table columns. The derived
-Schema can seed the Remote Entity, so the table is declared once and the Entity
-still checks field names:
+`entity(name, table, { schema?, relations?, computed? })` derives an Effect Schema
+from the table with `drizzle-orm/effect-schema` and exposes the table columns. The
+derived Schema can seed the Remote Entity, so the table is declared once and the
+Entity still checks field names:
 
 ```ts
 import { Entity } from 'foldkit-remote'
@@ -38,30 +100,23 @@ const User = entity('User', users)
 const UserEntity = Entity.make('User', User.Schema)
 ```
 
-Pass `schema` to override the derived Schema, and `relations` to name a foreign
-key:
-
-```ts
-const User = entity('User', users)
-const Project = entity('Project', projects, {
-  relations: { owner: { entity: User, field: projects.ownerId } },
-})
-```
-
-A table must have an `id` column; every read needs it for normalization even
-when the client did not select it.
+A table must have an `id` column; every read needs it for normalization even when
+the client did not select it. A relation (or computed) name that collides with a
+column is rejected at definition time, as is a computed field naming an
+undeclared or singular relation.
 
 ## Provide the database
 
 ```ts
-import { Layer } from 'effect'
-import { DrizzleDatabase } from 'foldkit-remote-drizzle'
+import { databaseLayer } from 'foldkit-remote-drizzle'
 
-const DatabaseLive = Layer.succeed(DrizzleDatabase, db)
+const DatabaseLive = databaseLayer(db)
 ```
 
 `db` is any Drizzle database whose select builder is thenable
-(`db.select(columns).from(table).where(...).orderBy(...).limit(...)`).
+(`db.select(columns).from(table).where(...).groupBy(...).orderBy(...).limit(...)`)
+— the same builder for any Drizzle dialect. `databaseLayer` confines the one cast
+the structurally-typed service needs, so the application does not write it.
 
 > `drizzle-orm/effect-postgres` is deliberately not imported: its driver calls
 > `Schema.TaggedErrorClass`, absent from `effect@4.0.0-rc.112`, and throws on
@@ -82,8 +137,8 @@ const UserSource = source(User, {
 The read prunes to the requested columns (always including the primary key),
 batches every id into one `IN (...)`, and returns `{ id, values }` records.
 Authorization stays in `RemoteServer`: the adapter only reads the fields it was
-handed. Use `reader(binding, run)` to inject your own executor for another
-driver or a test.
+handed. Use `reader(binding, run)` to inject your own executor for another driver
+or a test.
 
 ## Query connections
 
@@ -117,8 +172,8 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 - The window is client-supplied: `first`/`last` are clamped to a positive integer
   under `maxPageSize` (default 100), and `after`/`before` or `first`/`last`
   cannot be combined.
-- A cursor that no longer resolves fails the query rather than silently
-  returning page one.
+- A cursor that no longer resolves fails the query rather than silently returning
+  page one.
 
 ## Relations
 
@@ -219,10 +274,9 @@ const selection = Selection.make(ProjectEntity, {
 The read runs one bounded query per parent (concurrency 10) and emits
 `{ refs, hasNext, hasPrevious }`. `first` and `last` page per parent; `after` and
 `before` cursors work when the read targets a single parent (a cursor across
-parents is ambiguous and fails). Changing the window refetches the relation.
-Applying a cursor page through `Remote.writeRead` merges it onto the stored page
-(append for `after`, prepend for `before`), so "load more" accumulates; a page
-without a cursor replaces.
+parents is ambiguous and fails). Changing the window refetches the relation, and
+a cursor page applied through `Remote.update` merges onto the stored page (append
+for `after`, prepend for `before`), so "load more" accumulates.
 
 ## Computed fields
 
@@ -239,8 +293,9 @@ const Post = entity('Post', posts, {
 ```
 
 The Entity declares `commentCount` as a number and the Selection selects it. The
-config's `where` filters the counted rows. The count is the total, not the page,
-and `reader`, the injected-executor path, does not compute fields.
+config's `where` filters the counted rows, and the source's principal policy for
+that relation applies too. The count is the total, not the page, and `reader`,
+the injected-executor path, does not compute fields.
 
 ## Mutation results
 
@@ -266,7 +321,7 @@ return { output: { id }, entities: normalize(Project, rows, fields) }
 ```ts
 import { RemoteServer } from 'foldkit-remote-server'
 
-const Server = RemoteServer.make({}, {
+const Server = RemoteServer.make(Data, {
   entities: [UserSource, ProjectSource],
   queries: [ProjectsByOwnerSource],
 })
@@ -280,24 +335,49 @@ one environment: if two sources need different services, annotate the union,
 `RemoteServer.make<P, A | B>(...)`. This is a compile error rather than a
 silently dropped requirement.
 
+## Testing a binding
+
+Every adapter path is validated against a real database in
+`test/sqlite.test.ts`, which runs Drizzle on Node's built-in `node:sqlite` through
+`drizzle-orm/node-sqlite` — no external service. That is a good template for an
+application's own bindings: create the tables, insert rows, cast the Drizzle
+database to `DrizzleDatabaseService`, and assert the emitted refs, counts, and
+pages.
+
+```ts
+const sqlite = new DatabaseSync(':memory:')
+sqlite.exec('create table projects (...); insert into projects values (...);')
+const database = drizzle({ client: sqlite })
+
+const records = await Effect.runPromise(
+  source(Project)
+    .read({ ids: ['p1'], fields: ['name'], principal: null })
+    .pipe(Effect.provide(databaseLayer(database))),
+)
+```
+
 ## Dialect
 
 The compiler is table-agnostic (it accepts Drizzle's base `Table`), but its SQL
-semantics follow Postgres: keyset pagination assumes Postgres NULL ordering
-(ASC: nulls last, DESC: nulls first). The integration tests run against an
-in-process `node:sqlite` database as a compiler check; they exercise real SQL
-generation, joins, grouping and limits, but not Postgres NULL ordering.
+semantics follow Postgres: keyset pagination assumes Postgres NULL ordering (ASC:
+nulls last, DESC: nulls first). The integration tests run against an in-process
+`node:sqlite` database as a compiler check; they exercise real SQL generation,
+joins, grouping and limits, but not Postgres NULL ordering.
 
 ## Limits
 
-- Singular, to-many, and many-to-many relations selected as refs work (above).
-  A to-many relation loads its children in one `IN (...)`; a many-to-many joins
-  the through table to the target. Both order by the target id. A `Selection.connection`
-  window loads one bounded page per parent (`first`/`last`, plus `after`/`before`
-  for a single parent). An embedded target object is not supported yet, and
-  `reader`, the injected-executor path, does not load children.
+- Singular, to-many, and many-to-many relations selected as refs work (above). A
+  to-many relation loads its children in one `IN (...)`; a many-to-many joins the
+  through table to the target. A `Selection.connection` window loads one bounded
+  page per parent (`first`/`last`, plus `after`/`before` for a single parent). An
+  embedded target object is not supported, and `reader`, the injected-executor
+  path, does not load or compute.
+- Computed fields are counts only (total, not per-page). Other aggregates are not
+  built.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
-- No computed/aggregate selections yet.
+- Nested pagination runs one query per parent. `bench/nested.bench.ts` measures
+  the cost; a window-function rewrite is deferred because it needs a subquery in
+  the query contract (see `DESIGN.md`).
 
 ## License
 
