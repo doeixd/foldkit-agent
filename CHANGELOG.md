@@ -211,6 +211,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `Agent.forApplication<Principal>()(App)` — TypeScript cannot infer Model beside
   an explicit principal. A `Surface.application` now takes optional
   `initial`/`update` and accepts resource-carrying Commands.
+- **Subset ownership is enforced.** `Agent.forApplication(App).exposeSubset`
+  refuses a subset whose owner token belongs to a different application, matching
+  `Sync.forApplication`, so two structurally identical applications cannot mix
+  selections.
 
 ### `foldkit-durable`
 
