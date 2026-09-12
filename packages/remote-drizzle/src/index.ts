@@ -4,8 +4,8 @@
  *
  * It captures no connection and re-plans nothing: `Remote.plan` already produces
  * entity + id + field batches, so this maps a Selection's fields to Drizzle
- * columns and derives the Entity Schema from the table via
- * `drizzle-orm/effect-schema`.
+ * columns. Each entity is declared once with `entity(name, table)`, which is
+ * both the Drizzle binding and the Remote `EntityDescriptor`.
  *
  * Keyset pagination and required-column projection are adapted from fate's
  * Drizzle integration (MIT); see `THIRD_PARTY_NOTICES.md`.

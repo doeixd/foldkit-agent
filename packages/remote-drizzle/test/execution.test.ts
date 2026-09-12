@@ -448,6 +448,14 @@ describe('RemoteDrizzle execution', () => {
     ])
   })
 
+  it('leaves a collection relation as its raw key so the client refetches', () => {
+    // `normalize` cannot load children; a raw key fails the array schema rather
+    // than masquerading as an empty relation.
+    const patches = normalize(PostBinding, [{ id: 'p1', comments: 'p1' }], ['id', 'comments'])
+
+    expect(patches[0]!.values.comments).toBe('p1')
+  })
+
   it('applies a relation where filter to the child query', async () => {
     const filtered = entity('Post', posts, {
       relations: {
