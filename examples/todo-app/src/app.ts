@@ -41,6 +41,7 @@ export const Model = Schema.Struct({
   draft: Schema.String,
   filter: Filter,
   editingId: Schema.NullOr(Schema.String),
+  lastError: Schema.NullOr(Schema.String),
 })
 export type Model = typeof Model.Type
 
@@ -71,6 +72,7 @@ export const initialModel: Model = {
   draft: '',
   filter: 'all',
   editingId: null,
+  lastError: null,
 }
 
 export const update = (model: Model, message: Message): Update.Return<Model, Message> =>
@@ -142,8 +144,13 @@ export const replay = (shared: Shared, message: Message, transition = update): S
   if (!durableTags.has(message._tag)) throw new Error('Message is local-only')
   const result = transition({ ...initialModel, ...shared }, message)
   if (result.commands?.length) throw new Error('Durable transitions must not produce Commands')
-  const { todos, draft, filter, editingId } = result.model
-  if (draft !== initialModel.draft || filter !== initialModel.filter || editingId !== null) {
+  const { todos, draft, filter, editingId, lastError } = result.model
+  if (
+    draft !== initialModel.draft ||
+    filter !== initialModel.filter ||
+    editingId !== initialModel.editingId ||
+    lastError !== initialModel.lastError
+  ) {
     throw new Error('Durable transition changed local Model fields')
   }
   return decodeShared({ todos })
