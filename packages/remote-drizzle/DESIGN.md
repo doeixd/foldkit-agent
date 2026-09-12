@@ -14,6 +14,10 @@ document treats as B4: a typed connection store, optimistic layers, live and
 mutation state, and a `RemoteMessage` reducer (`fec7929`, `c966d00`). Step 8 is
 therefore landed in core, and `foldkit-remote-drizzle` integrates with it —
 `updateRemote`'s `ReadReceived` case calls the `writeRead` this work introduced.
+The table binding is now itself a `foldkit-remote` `EntityDescriptor`
+(`683ed6b`): `entity(name, table)` derives the fields from the table and adds a
+ref field per relation and a number per computed, so `Selection.make` and
+`source`/`query` share one declaration instead of two graphs joined by strings.
 Only the pieces this document already marks "measured/deferred" remain.
 
 This document gives, for each decision, the current behaviour, what it costs,
@@ -185,7 +189,8 @@ window because its value changed — correct.
 ## D3 — Relation authorization
 
 **Status: A2 landed in `d43c182` as a source-level policy.** `source(binding,
-{ relations })` filters a collection relation by principal. A1/A5 remain the
+{ policies })` filters a collection relation by principal; a policy keyed by a
+singular relation is rejected at definition time. A1/A5 remain the
 recommendation for field-level gating; A4 (server-level policy) is still open.
 
 ### Current behaviour
