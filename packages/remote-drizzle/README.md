@@ -334,9 +334,26 @@ const database = drizzle({ client: sqlite })
 
 const records = await Effect.runPromise(
   source(Project)
-    .read({ ids: ['p1'], fields: ['name'], principal: null })
+    .read({ ids: ['p1'], fields: ProjectView.fields, principal: null })
     .pipe(Effect.provide(databaseLayer(database))),
 )
+```
+
+The read emits ref keys; the same `Selection` schema the client decodes with turns
+them into refs, so a unit test can assert the client's view without a transport:
+
+```ts
+const wire = records[0]!.values
+// { id: 'p1', owner: 'User:u1', comments: ['Comment:c1', 'Comment:c2'] }
+Schema.decodeUnknownSync(ProjectView.schema)(wire)
+// { id: 'p1', owner: { entity: 'User', id: 'u1' }, comments: [{ entity: 'Comment', id: 'c1' }, …] }
+```
+
+`example/nested.ts` runs the whole path — declaration, source, wire, decode, a
+windowed page, and a keyset query — against seeded SQLite:
+
+```text
+pnpm exec tsx packages/remote-drizzle/example/nested.ts
 ```
 
 ## Dialect

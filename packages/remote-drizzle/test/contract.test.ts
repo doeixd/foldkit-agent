@@ -40,6 +40,13 @@ const selection = Selection.make(ProjectBinding, {
 })
 
 describe('RemoteDrizzle end to end', () => {
+  it('registers the bindings as the Remote entities', () => {
+    const data = Remote.make({ entities: [UserBinding, ProjectBinding] })
+
+    expect([...data.registry.entities.keys()]).toEqual(['User', 'Project'])
+    expect(data.registry.entities.get('Project')).toBe(ProjectBinding)
+  })
+
   it('serves a normalized read that Remote.select decodes into refs', async () => {
     const { database } = fakeDatabaseQueue([
       [{ id: 'p1', name: 'P', owner: 'u1', comments: 'p1' }],

@@ -181,14 +181,22 @@ describe('RemoteDrizzle execution', () => {
   it('emits null for an absent relation instead of a dangling ref', async () => {
     const { database } = fakeDatabase([{ id: 'p1', name: 'P', owner: null }])
     const read = source(ProjectBinding)
+    const selection = Selection.make(ProjectBinding, { id: true, owner: true })
 
     const records = await Effect.runPromise(
       read
-        .read({ ids: ['p1'], fields: ['id', 'owner'], principal: null })
+        .read({ ids: ['p1'], fields: selection.fields, principal: null })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
     expect(records[0]!.values.owner).toBeNull()
+    // The derived field is nullable, so the client decodes the null rather than
+    // failing; `nullable: true` on the relation is what makes that possible.
+    expect(
+      Schema.decodeUnknownSync(selection.schema as unknown as Schema.ConstraintDecoder<unknown>)(
+        records[0]!.values,
+      ),
+    ).toEqual({ id: 'p1', owner: null })
   })
 
   it('loads a many relation as an array of ref keys', async () => {

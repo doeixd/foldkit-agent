@@ -2,6 +2,10 @@
  * Runnable adapter demo: real SQL in, normalized Remote values out. No external
  * service — it seeds an in-memory `node:sqlite` database.
  *
+ * One `entity` declaration serves both the Drizzle source and the Remote
+ * `Selection`; the read returns ref keys on the wire, and the same Selection
+ * schema decodes them into refs, exactly as `Remote.select` does in an app.
+ *
  *   pnpm exec tsx packages/remote-drizzle/example/nested.ts
  */
 import { createRequire } from 'node:module'
@@ -9,7 +13,7 @@ import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-sqlite'
 import { sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { Effect, Schema } from 'effect'
-import { Query } from 'foldkit-remote'
+import { Query, Remote, Selection } from 'foldkit-remote'
 import { databaseLayer, entity, many, one, query, source } from '../src/index.js'
 
 const require_ = createRequire(import.meta.url)
@@ -32,6 +36,7 @@ const comments = sqliteTable('comments', {
   createdAt: text('created_at').notNull(),
 })
 
+// One declaration per entity: the binding is also the Remote EntityDescriptor.
 const User = entity('User', users)
 const Comment = entity('Comment', comments)
 const Project = entity('Project', projects, {
@@ -44,6 +49,17 @@ const Project = entity('Project', projects, {
     }),
   },
   computed: { commentCount: { relation: 'comments' } },
+})
+
+const Data = Remote.make({ entities: [User, Comment, Project] })
+
+// A Selection selects columns, a ref, an array of refs, and a computed count.
+const ProjectView = Selection.make(Project, {
+  id: true,
+  name: true,
+  owner: true,
+  comments: true,
+  commentCount: true,
 })
 
 const sqlite = new DatabaseSync(':memory:')
@@ -69,13 +85,18 @@ const ProjectsByOwner = query(Projects, {
 const projectSource = source(Project)
 
 const program = Effect.gen(function* () {
-  // A read: a ref, a child list, and a computed count in one round trip.
+  console.log('registered     ', [...Data.registry.entities.keys()].join(', '))
+
+  // A read: a ref, a child list, and a computed count in one round trip. The
+  // wire carries ref keys; the Selection schema decodes them to refs.
   const read = yield* projectSource.read({
     ids: ['p1'],
-    fields: ['id', 'name', 'owner', 'comments', 'commentCount'],
+    fields: ProjectView.fields,
     principal: null,
   })
-  console.log('read           ', JSON.stringify(read[0]?.values))
+  const wire = read[0]?.values ?? {}
+  console.log('wire           ', JSON.stringify(wire))
+  console.log('decoded        ', JSON.stringify(Schema.decodeUnknownSync(ProjectView.schema)(wire)))
 
   // A nested page: one bounded query, with a continuation signal.
   const page = yield* projectSource.read({

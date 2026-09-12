@@ -37,6 +37,19 @@ describe('RemoteDrizzle', () => {
     expect(Schema.decodeUnknownSync(UserBinding.schema)(row)).toEqual(row)
   })
 
+  it('uses a fields override instead of the derived map', () => {
+    const Slim = entity('User', users, {
+      fields: { id: Schema.String, name: Schema.String },
+    })
+
+    // The override replaces the map, so the dropped `email` column is not a field.
+    expect(Object.keys(Slim.fields)).toEqual(['id', 'name'])
+    expect(Schema.decodeUnknownSync(Slim.schema)({ id: 'a', name: 'A' })).toEqual({
+      id: 'a',
+      name: 'A',
+    })
+  })
+
   it('always projects the primary key, selected fields, and relation keys', () => {
     expect(Object.keys(selectColumns(UserBinding, ['name']))).toEqual(['id', 'name'])
     expect(Object.keys(selectColumns(ProjectBinding, ['id', 'owner']))).toEqual(['id', 'owner'])
