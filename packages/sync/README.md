@@ -99,7 +99,9 @@ mounted.model() // the Model after the last transition
 await mounted.dispose() // waits for in-flight persists; the replica stays open
 ```
 
-`mounted.model` and `mounted.dispatch` are the host an agent binds to. See
+`mounted.model`, `mounted.dispatch`, `mounted.subscribe`, and `mounted.observe`
+are the host an agent binds to; `observe` reports every application Message the
+runtime applies, which a capability with a `completion` contract needs. See
 [docs/sync-runtime-binding.md](../../docs/sync-runtime-binding.md) for what the
 mount guarantees and why no Foldkit change is required.
 

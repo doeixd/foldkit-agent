@@ -48,6 +48,14 @@ export interface Mounted<Model, Message> {
   readonly dispatch: (message: Message) => Exit.Exit<void, unknown>
   /** The Model after the last transition. */
   readonly model: () => Model
+  /** Notified after every transition; with `model` and `dispatch`, the host an agent binds to. */
+  readonly subscribe: (listener: () => void) => () => void
+  /**
+   * Every application Message the runtime applies, from any origin, so an
+   * agent contract that declares a `completion` can see the Message that
+   * finishes its work. The mount's private Messages are not reported.
+   */
+  readonly observe: (listener: (message: Message) => void) => () => void
   /** Waits for in-flight persists, then disposes the runtime. The replica stays open. */
   readonly dispose: () => Promise<void>
 }
@@ -70,9 +78,16 @@ export const mount = <
   Fields extends Schema.Struct.Fields,
   Ms extends readonly unknown[],
   Resources = never,
+  Principal = unknown,
 >(
   app: RunnableApplication<Model, F, Cases, Resources>,
-  sync: DefinedSync<Model, Fields, MessageOf<RunnableApplication<Model, F, Cases, Resources>>, Ms>,
+  sync: DefinedSync<
+    Model,
+    Fields,
+    MessageOf<RunnableApplication<Model, F, Cases, Resources>>,
+    Ms,
+    Principal
+  >,
   options: MountOptions<
     Model,
     MessageOf<RunnableApplication<Model, F, Cases, Resources>>,
@@ -95,6 +110,8 @@ export const mount = <
 
   const inFlight = new Set<Promise<void>>()
   let latest: Model = install(app.initial)
+  const modelListeners = new Set<() => void>()
+  const messageListeners = new Set<(message: Message) => void>()
 
   const update = (
     model: Model,
@@ -111,6 +128,7 @@ export const mount = <
         return { model: options.onPersistenceFailure?.(reverted, error) ?? reverted }
       }
       default: {
+        for (const listener of messageListeners) listener(message as Message)
         const result = app.update(model, message as Message) as Update.Return<
           Model,
           RuntimeMessage,
@@ -163,6 +181,7 @@ export const mount = <
       dependenciesSchema: Schema.Struct({}),
       modelToDependencies: (model: Model) => {
         latest = model
+        for (const listener of modelListeners) listener()
         return {}
       },
       dependenciesToStream: () => Stream.never,
@@ -195,6 +214,14 @@ export const mount = <
   return {
     dispatch: message => handle.ports.message.send(message),
     model: () => latest,
+    subscribe: listener => {
+      modelListeners.add(listener)
+      return () => modelListeners.delete(listener)
+    },
+    observe: listener => {
+      messageListeners.add(listener)
+      return () => messageListeners.delete(listener)
+    },
     dispose: async () => {
       await Promise.all([...inFlight])
       handle.dispose()

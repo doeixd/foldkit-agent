@@ -327,8 +327,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `onPersistenceFailure`; the shared slice is re-installed when an exchange or a
   rejection moves the replica; `dispose` waits for in-flight persists; the
   runtime's union is the application's plus three private variants, so Commands
-  from `update` need no re-wrapping. `mounted.model`/`mounted.dispatch` are the
-  host an agent binds to. `foldkit` becomes a peer dependency. This closes the
+  from `update` need no re-wrapping. `mounted.model`, `dispatch`, `subscribe`,
+  and `observe` are the host an agent binds to, `observe` reporting every
+  application Message the runtime applies. `foldkit` becomes a peer dependency. This closes the
   runtime seam (#60, section 5) without an upstream hook; `examples/sync` drops
   its hand-written wrapper.
 - **A `Contract` for `Module`.** `Sync.forApplication(App).make` attaches
