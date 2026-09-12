@@ -27,15 +27,13 @@ same Messages.
 | [`foldkit-agent-native`](./packages/agent-native) | The Agent Native adapter: compiles exposed capabilities into framework actions whose `run` only dispatches. |
 | [`foldkit-durable`](./packages/durable) | A durable, ordered operation log on `effect/unstable/sql`, with migrations, compaction, change streams, a durable effect ledger, and metrics. |
 | [`foldkit-sync`](./packages/sync) | A local-first replica: offline outbox, optimistic projection, reconciliation, presence, and a reconnecting WebSocket transport. |
+| [`foldkit-mixins`](./packages/mixins) | Typed slot contracts and inside-out Style/Behavior attachments for Foldkit views. |
+| [`foldkit-mixins-surface`](./packages/mixins-surface) | Bridges a Surface's projected Model and Message subset to a `SlotView`. |
+| [`foldkit-mixins-ui`](./packages/mixins-ui) | `@foldkit/ui` adapters that publish a component's attribute bundles as Slots. |
 
 `foldkit-surface`, `foldkit-remote`, `foldkit-remote-server`,
 `foldkit-remote-drizzle`, and the `foldkit-mixins` view packages are in-tree and
 `private`; they are not published yet. The rest are published.
-
-New to the state side? [Replicated state](./docs/replication.md) explains what
-`foldkit-durable` and `foldkit-sync` do. [Server-derived state](./docs/remote.md)
-covers the `foldkit-remote` Submodel and the Surface projection layer that
-Remote, Sync, and Agent all build on. Each package README has the full API.
 
 ## Install
 
@@ -55,15 +53,15 @@ yet; use them from this repository.
 
 ## How they fit together
 
-There are three independent extensions to the same state machine, over one shared
-observation boundary:
+The packages fall into one observation boundary and three extensions to the same
+state machine:
 
 - **Observation.** `foldkit-surface` projects the Model into a pure `Projection`
   and selects Message subsets. Remote, Sync, and Agent consume this instead of
   declaring their own Model and Message shapes.
 - **Server-derived state.** `foldkit-remote` keeps a normalized cache of server
   data as a Foldkit Submodel; the application's `update` reconciles reads,
-  mutations, and live patches. `foldkit-remote-server` and
+  mutations, and live changes. `foldkit-remote-server` and
   `foldkit-remote-drizzle` are its server half.
 - **Replicated state.** `foldkit-durable` orders and persists *the same Messages*
   on a server, and `foldkit-sync` keeps an offline-first replica on each client,
@@ -91,10 +89,21 @@ observation boundary:
 
 None reimplements `update`: the agent layer projects it, Remote reduces its facts
 through the application's `update`, and the replication layer replays the same
-Messages through a shared reducer. Each package has its own README; the
-[replication guide](./docs/replication.md), the
-[Remote guide](./packages/remote/README.md), and the `foldkit-agent`
-[design rationale](./packages/agent/DESIGN.md) go deeper.
+Messages through a shared reducer. Separately, `foldkit-mixins` is a view-layer
+axis — it composes styles and behaviors over plain Foldkit views, and
+`foldkit-mixins-surface` over a Surface projection, without owning a second
+runtime.
+
+## Guides
+
+- [Replicated state](./docs/replication.md) — what `foldkit-durable` and
+  `foldkit-sync` do, and when to reach for them.
+- [Server-derived state](./docs/remote.md) — the `foldkit-surface` boundary and
+  the `foldkit-remote` Submodel.
+- [`foldkit-agent` design rationale](./packages/agent/DESIGN.md).
+- [Revision plan](./REVISION_PLAN.md) — the full design and phase status.
+- Each package README documents its API; [`examples/`](./examples) has runnable
+  traces, and `pnpm demo` runs them.
 
 ## Repository layout
 
@@ -135,10 +144,13 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the checks before a commit, and
 
 ## Releasing
 
-`v0.1.0` is published. `pnpm release` builds, then publishes every non-private
-package. Publishing must use **pnpm**, not npm: the adapters declare
-`foldkit-agent` as a `workspace:^` peer dependency, which pnpm rewrites to a real
-range (`^0.1.0`) when it packs.
+The published packages are the `foldkit-agent` family at `0.1.0`,
+`foldkit-durable` at `0.1.1`, and `foldkit-sync` at `0.2.0`. The Surface, Remote,
+and Mixins packages are `private`, and `foldkit-agent-native` publishes with the
+next release. `pnpm release` builds, then publishes every non-`private` package.
+Publishing must use **pnpm**, not npm: the adapters declare `foldkit-agent` as a
+`workspace:^` peer dependency, which pnpm rewrites to a real range (`^0.1.0`)
+when it packs.
 
 Bump the versions, add a [CHANGELOG.md](./CHANGELOG.md) entry, run the four
 checks, then push a `vX.Y.Z` tag. The
