@@ -19,6 +19,7 @@
     { "path": "./examples/sync" },
     { "path": "./examples/mixins" },
     { "path": "./examples/remote" },
-    { "path": "./examples/kitchen-sink" }
+    { "path": "./examples/kitchen-sink" },
+    { "path": "./examples/todo-app" }
   ]
 }
