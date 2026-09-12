@@ -254,10 +254,12 @@ const selection = Selection.make(Project, {
 })
 ```
 
-The read runs one bounded query per parent (concurrency 10) and emits
-`{ refs, hasNext, hasPrevious }`. `first` and `last` page per parent; `after` and
-`before` cursors work when the read targets a single parent (a cursor across
-parents is ambiguous and fails). Changing the window refetches the relation, and
+The read pages every parent in one statement: children are ranked per parent
+in a window (`row_number() over (partition by parent order by ...)`) and the
+first `pageSize + 1` of each are kept, so the statement count does not grow
+with the number of parents. It emits `{ refs, hasNext, hasPrevious }`. `first`
+and `last` page per parent; `after` and `before` cursors work when the read
+targets a single parent (a cursor across parents is ambiguous and fails). Changing the window refetches the relation, and
 a cursor page applied through `Remote.update` merges onto the stored page (append
 for `after`, prepend for `before`), so "load more" accumulates.
 
@@ -369,15 +371,15 @@ joins, grouping and limits, but not Postgres NULL ordering.
 - Singular, to-many, and many-to-many relations selected as refs work (above). A
   to-many relation loads its children in one `IN (...)`; a many-to-many joins the
   through table to the target. A `Selection.connection` window loads one bounded
-  page per parent (`first`/`last`, plus `after`/`before` for a single parent). An
-  embedded target object is not supported, and `reader`, the injected-executor
-  path, does not load or compute.
+  page per parent in one ranked statement (`first`/`last`, plus `after`/`before`
+  for a single parent). An embedded target object is not supported, and `reader`,
+  the injected-executor path, does not load or compute.
 - Computed fields are counts only (total, not per-page). Other aggregates are not
   built.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
-- Nested pagination runs one query per parent. `bench/nested.bench.ts` measures
-  the cost; a window-function rewrite is deferred because it needs a subquery in
-  the query contract (see `docs/design/remote-drizzle-DESIGN.md`).
+- Nested pagination needs window functions and row-value `IN` in the database
+  (Postgres, SQLite 3.25+, MySQL 8+). `bench/nested.bench.ts` measures the
+  cost; in-process SQLite pages 1000 parents in 7 statements.
 
 ## License
 

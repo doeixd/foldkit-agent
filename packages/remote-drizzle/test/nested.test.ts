@@ -105,6 +105,38 @@ const readCards = async (count: number) => {
   }
 }
 
+const PagedCard = Selection.make(Project, {
+  name: true,
+  comments: Selection.connection(Comment, { first: 1 }, Selection.make(Comment, { body: true })),
+})
+
+const readPaged = async (count: number) => {
+  const { sqlite, database, statements } = setup(count)
+  try {
+    const server = RemoteServer.make({ entities: [source(Project), source(Comment)] })
+    const requests = Array.from({ length: count }, (_, i) =>
+      Remote.select({} as BoundRemote<unknown, RemoteModel>, PagedCard)(`p${i + 1}`),
+    ).flatMap(projection => projection.requirements)
+    const result = await Effect.runPromise(
+      RemoteServer.handlers(server, null)
+        .FoldkitRemoteRead({ version: REMOTE_PROTOCOL_VERSION, requests })
+        .pipe(Effect.provide(databaseLayer(database))),
+    )
+    const store = Remote.writeRead(emptyStore, requests, result)
+    const bound = {
+      store: { get: () => ({ ...store, entities: store }) },
+    } as unknown as BoundRemote<unknown, RemoteModel>
+    return {
+      statements: statements.length,
+      cards: Array.from({ length: count }, (_, i) =>
+        Remote.select(bound, PagedCard)(`p${i + 1}`).read(undefined),
+      ),
+    }
+  } finally {
+    sqlite.close()
+  }
+}
+
 describe('RemoteDrizzle nested graph over SQLite', () => {
   it('resolves a nested selection through real SQL and Remote.select reads it', async () => {
     const { cards, entities } = await readCards(1)
@@ -129,5 +161,23 @@ describe('RemoteDrizzle nested graph over SQLite', () => {
     expect(one.statements).toBe(5)
     expect(five.statements).toBe(one.statements)
     expect(five.cards.every(card => card._tag === 'Ready')).toBe(true)
+  })
+})
+
+describe('RemoteDrizzle windowed nested relation over SQLite', () => {
+  it('pages every parent in one ranked statement, however many parents', async () => {
+    const one = await readPaged(1)
+    const five = await readPaged(5)
+    // projects, one ranked comments statement, comment bodies
+    expect(one.statements).toBe(3)
+    expect(five.statements).toBe(one.statements)
+    expect(five.cards.map(card => card._tag)).toEqual(Array(5).fill('Ready'))
+    expect(five.cards[4]).toEqual({
+      _tag: 'Ready',
+      value: {
+        name: 'Project 5',
+        comments: { items: [{ body: 'a' }], hasNext: true, hasPrevious: false },
+      },
+    })
   })
 })

@@ -280,93 +280,94 @@ export const source = <P = unknown>(
               })
             }
             const empty = { refs: [] as ReadonlyArray<string>, hasNext: false, hasPrevious: false }
-            // The ORDER BY is the same for every parent; only the keyset differs.
             const traversalOrder = orderByTerms(order, shape.traversal)
-            const pages = yield* Effect.forEach(
-              parentKeys,
-              parentKey =>
-                Effect.gen(function* () {
-                  let cursorValues: ReadonlyArray<unknown> | undefined
-                  if (shape.cursor !== undefined) {
-                    const cursorRows = yield* selectRows(
-                      database,
-                      relation.entity.table,
-                      cursorSelection(order),
-                      { where: eq(targetId, cursorId(shape.cursor)), limit: 1 },
-                    )
-                    const cursorRow = cursorRows[0]
-                    if (cursorRow === undefined) {
-                      return yield* new RemoteServerError({
-                        message: `Relation "${field}" cursor no longer resolves`,
-                      })
-                    }
-                    cursorValues = order.map(term => cursorRow[term.column.name])
-                  }
 
-                  const keyset =
-                    cursorValues === undefined
-                      ? undefined
-                      : keysetWhere(order, cursorValues, shape.traversal)
-                  const parentWhere =
-                    relation.kind === 'many'
-                      ? eq(relation.foreignKey, parentKey)
-                      : eq(relation.localColumn, parentKey)
-                  const where = withFilters(parentWhere, relation.where, policyWhere, keyset)
+            let keyset: SQL | undefined
+            if (shape.cursor !== undefined) {
+              const cursorRows = yield* selectRows(
+                database,
+                relation.entity.table,
+                cursorSelection(order),
+                { where: eq(targetId, cursorId(shape.cursor)), limit: 1 },
+              )
+              const cursorRow = cursorRows[0]
+              if (cursorRow === undefined) {
+                return yield* new RemoteServerError({
+                  message: `Relation "${field}" cursor no longer resolves`,
+                })
+              }
+              keyset = keysetWhere(
+                order,
+                order.map(term => cursorRow[term.column.name]),
+                shape.traversal,
+              )
+            }
 
-                  const childRows =
-                    relation.kind === 'many'
-                      ? yield* selectRows(
-                          database,
-                          relation.entity.table,
-                          { child: targetId, parent: relation.foreignKey },
-                          {
-                            where,
-                            orderBy: traversalOrder,
-                            limit: shape.pageSize + 1,
-                          },
-                        )
-                      : yield* selectRows(
-                          database,
-                          relation.through,
-                          { child: targetId, parent: relation.localColumn },
-                          {
-                            where,
-                            innerJoin: {
-                              table: relation.entity.table,
-                              on: eq(relation.foreignColumn, targetId),
-                            },
-                            orderBy: traversalOrder,
-                            limit: shape.pageSize + 1,
-                          },
-                        )
+            const byParent = new Map<string, Array<Record<string, unknown>>>()
+            if (parentKeys.length > 0) {
+              const parentColumn =
+                relation.kind === 'many' ? relation.foreignKey : relation.localColumn
+              const where = withFilters(
+                inArray(parentColumn, parentKeys),
+                relation.where,
+                policyWhere,
+                keyset,
+              )
+              // One statement for every parent: rank each parent's children in
+              // a window and keep the first `pageSize + 1` of each, so the
+              // statement count does not grow with the number of parents.
+              const ranking = sql`row_number() over (partition by ${parentColumn} order by ${sql.join([...traversalOrder], sql`, `)})`
+              const ranked =
+                relation.kind === 'many'
+                  ? sql`(select p, k from (select ${parentColumn} as p, ${targetId} as k, ${ranking} as rn from ${relation.entity.table} where ${where}) as ranked where rn <= ${shape.pageSize + 1})`
+                  : sql`(select p, k from (select ${parentColumn} as p, ${targetId} as k, ${ranking} as rn from ${relation.through} inner join ${relation.entity.table} on ${relation.foreignColumn} = ${targetId} where ${where}) as ranked where rn <= ${shape.pageSize + 1})`
+              const childRows = yield* selectRows(
+                database,
+                relation.kind === 'many' ? relation.entity.table : relation.through,
+                { child: targetId, parent: parentColumn },
+                {
+                  where: sql`(${parentColumn}, ${targetId}) in ${ranked}`,
+                  ...(relation.kind === 'many'
+                    ? {}
+                    : {
+                        innerJoin: {
+                          table: relation.entity.table,
+                          on: eq(relation.foreignColumn, targetId),
+                        },
+                      }),
+                  orderBy: traversalOrder,
+                },
+              )
+              for (const child of childRows) {
+                const rows_ = byParent.get(String(child.parent)) ?? []
+                rows_.push(child)
+                byParent.set(String(child.parent), rows_)
+              }
+            }
 
-                  const natural =
-                    shape.traversal === 'backward' ? [...childRows].reverse() : childRows
-                  const page = buildPage({
-                    rows: natural,
-                    pageSize: shape.pageSize,
-                    traversal: shape.traversal,
-                    cursor: shape.cursor,
-                    cursorOf: row => String(row.child),
-                  })
-                  return [
-                    String(parentKey),
-                    {
-                      refs: page.rows.map(child =>
-                        Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
-                      ),
-                      hasNext: page.hasNext,
-                      hasPrevious: page.hasPrevious,
-                    },
-                  ] as const
-                }),
-              { concurrency: 10 },
-            )
-            const byParent = new Map(pages)
             for (const row of rows) {
               const key = row[field]
-              row[field] =
-                key === null || key === undefined ? empty : (byParent.get(String(key)) ?? empty)
+              const childRows =
+                key === null || key === undefined ? [] : (byParent.get(String(key)) ?? [])
+              if (childRows.length === 0) {
+                row[field] = empty
+                continue
+              }
+              const natural = shape.traversal === 'backward' ? [...childRows].reverse() : childRows
+              const page = buildPage({
+                rows: natural,
+                pageSize: shape.pageSize,
+                traversal: shape.traversal,
+                cursor: shape.cursor,
+                cursorOf: child => String(child.child),
+              })
+              row[field] = {
+                refs: page.rows.map(child =>
+                  Entity.refKey({ entity: relation.entity.name, id: String(child.child) }),
+                ),
+                hasNext: page.hasNext,
+                hasPrevious: page.hasPrevious,
+              }
             }
             continue
           }
