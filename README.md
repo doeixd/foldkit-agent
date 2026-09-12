@@ -8,13 +8,18 @@
 Foldkit keeps an application's behavior in one place: a Schema-typed **Model**, a
 **Message** union, and an **`update`** function. Everything here extends that one
 state machine rather than introducing a second place for application behavior to
-live — an agent contract projected from the same Model and Messages, and a
-durable log that replicates the same Messages.
+live — an observation boundary projected from the same Model, an agent contract,
+server-derived remote state as a Submodel, and a durable log that replicates the
+same Messages.
 
 ## Packages
 
 | Package | What it is |
 | --- | --- |
+| [`foldkit-surface`](./packages/surface) | The observation boundary: pure Model projections, reference-based field selection, and typed Message subsets. |
+| [`foldkit-remote`](./packages/remote) | Normalized server state as a Foldkit Submodel: entities, selections, queries, connections, mutations, and live patches. |
+| [`foldkit-remote-server`](./packages/remote-server) | Entity, query, mutation, and live sources, selection authorization, and `RemoteRpc` handler compilation. |
+| [`foldkit-remote-drizzle`](./packages/remote-drizzle) | Compiles Remote selections and queries to Drizzle's typed query graph. |
 | [`foldkit-agent`](./packages/agent) | The protocol-neutral agent contract: project a Model and Message union into a deliberate agent interface. [Design rationale](./packages/agent/DESIGN.md). |
 | [`foldkit-agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
 | [`foldkit-agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and Streamable HTTP. |
@@ -22,11 +27,16 @@ durable log that replicates the same Messages.
 | [`foldkit-durable`](./packages/durable) | A durable, ordered operation log on `effect/unstable/sql`, with migrations, compaction, change streams, a durable effect ledger, and metrics. |
 | [`foldkit-sync`](./packages/sync) | A local-first replica: offline outbox, optimistic projection, reconciliation, presence, and a reconnecting WebSocket transport. |
 
-`packages/agent-native` is a private prototype and is not published.
+`foldkit-surface`, `foldkit-remote`, `foldkit-remote-server`,
+`foldkit-remote-drizzle`, and the `foldkit-mixins` view packages are in-tree and
+`private`; they are not published yet. `packages/agent-native` is a private
+prototype. The rest are published.
 
 New to the state side? [Replicated state](./docs/replication.md) explains what
 `foldkit-durable` and `foldkit-sync` do, how they fit together, and when to reach
-for them.
+for them. [Server-derived state](./packages/remote/README.md) covers the
+`foldkit-remote` Submodel, and [`foldkit-surface`](./packages/surface/README.md)
+covers the projection layer that Remote, Sync, and Agent all build on.
 
 ## Install
 
@@ -40,48 +50,72 @@ pnpm add foldkit-durable foldkit-sync        # offline, multiplayer, remote-agen
 
 `foldkit` and `effect` are peer dependencies. Foldkit `0.158.2` peer-depends on
 `effect@4.0.0-rc.112`, so these packages target Effect 4. `foldkit-durable`
-requires Node 22 for `node:sqlite`.
+requires Node 22 for `node:sqlite`. The Surface and Remote packages are not on npm
+yet; use them from this repository.
 
 ## How they fit together
 
-There are two independent extensions to the same state machine:
+There are three independent extensions to the same state machine, over one shared
+observation boundary:
 
-- **Agents.** `foldkit-agent` projects *what an agent may see and do* from the
-  Model and Message union; the adapters turn that contract into tools.
+- **Observation.** `foldkit-surface` projects the Model into a pure `Projection`
+  and selects Message subsets. Remote, Sync, and Agent consume this instead of
+  declaring their own Model and Message shapes.
+- **Server-derived state.** `foldkit-remote` keeps a normalized cache of server
+  data as a Foldkit Submodel; the application's `update` reconciles reads,
+  mutations, and live patches. `foldkit-remote-server` and
+  `foldkit-remote-drizzle` are its server half.
 - **Replicated state.** `foldkit-durable` orders and persists *the same Messages*
   on a server, and `foldkit-sync` keeps an offline-first replica on each client,
   so devices converge.
+- **Agents.** `foldkit-agent` projects *what an agent may see and do* from the
+  Model and Message union; the adapters turn that contract into tools.
 
 ```text
-                  Foldkit application
-          Model · Message · update · Commands
-                      │             │
-        project/expose│             │replicate
-                      ▼             ▼
-               foldkit-agent   foldkit-durable
-                      │             │
-          ┌───────────┼──────┐      └── foldkit-sync
-          ▼           ▼      ▼          (local replica)
-        webmcp       mcp     a2a
+                         Foldkit application
+                 Model · Message · update · Commands
+                                │
+                   observe/project│
+                                ▼
+                         foldkit-surface
+                 Projection · field refs · subsets
+                ┌───────────────┼───────────────┐
+                ▼               ▼               ▼
+         foldkit-agent    foldkit-remote   foldkit-durable
+                │         (normalized       (ordered log)
+    ┌───────────┼──────┐   server cache)        │
+    ▼           ▼      ▼        │           foldkit-sync
+  webmcp       mcp     a2a   remote-server   (local replica)
+                              remote-drizzle
 ```
 
-Neither reimplements `update`: the agent layer projects it, and the replication
-layer replays the same Messages through a shared reducer. Each package has its
-own README; the [replication guide](./docs/replication.md) and the `foldkit-agent`
+None reimplements `update`: the agent layer projects it, Remote reduces its facts
+through the application's `update`, and the replication layer replays the same
+Messages through a shared reducer. Each package has its own README; the
+[replication guide](./docs/replication.md), the
+[Remote guide](./packages/remote/README.md), and the `foldkit-agent`
 [design rationale](./packages/agent/DESIGN.md) go deeper.
 
 ## Repository layout
 
 ```text
-packages/agent          foldkit-agent
-packages/agent-webmcp   foldkit-agent-webmcp
-packages/agent-mcp      foldkit-agent-mcp
-packages/agent-a2a      foldkit-agent-a2a
-packages/agent-native   foldkit-agent-native (prototype, private)
-packages/durable        foldkit-durable
-packages/sync           foldkit-sync
-examples/todo           a worked example, end to end
-examples/sync           durable messages and ordered replication
+packages/surface          foldkit-surface (unpublished)
+packages/remote           foldkit-remote (unpublished)
+packages/remote-server    foldkit-remote-server (unpublished)
+packages/remote-drizzle   foldkit-remote-drizzle (unpublished)
+packages/agent            foldkit-agent
+packages/agent-webmcp     foldkit-agent-webmcp
+packages/agent-mcp        foldkit-agent-mcp
+packages/agent-a2a        foldkit-agent-a2a
+packages/agent-native     foldkit-agent-native (prototype, private)
+packages/durable          foldkit-durable
+packages/sync             foldkit-sync
+packages/mixins           foldkit-mixins (unpublished)
+packages/mixins-surface   foldkit-mixins-surface (unpublished)
+packages/mixins-ui        foldkit-mixins-ui (unpublished)
+examples/todo             a worked example, end to end
+examples/sync             durable messages and ordered replication
+examples/mixins           view mixins, end to end
 ```
 
 ## Development
@@ -91,7 +125,7 @@ pnpm install
 pnpm test        # vitest
 pnpm typecheck   # tsc -b
 pnpm build       # tsdown
-pnpm demo        # run the todo and sync examples
+pnpm demo        # run the worked examples
 pnpm pack:check  # verify every package packs
 ```
 

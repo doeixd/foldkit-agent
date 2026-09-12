@@ -1,15 +1,21 @@
-# foldkit-remote
+# `foldkit-remote`
 
 Normalized application-facing server state for Foldkit. Entities, field
 selections, queries, connections, mutations, and live patches reconcile into one
-normalized store that is part of the Model — there is no hidden mutable cache.
+store that is part of the Model. There is no hidden mutable cache: the same
+`update` that moves the application moves remote data.
 
-The pure core (store, planner, connections, live classification, optimistic
-layers) performs no I/O. `Remote.*` helpers that read or write go through the
-`RemoteClient` Effect service, which the application wires to Effect RPC or any
-transport.
+`foldkit-remote` owns semantic data modeling; Effect owns the infrastructure
+below it. The wire is Effect RPC (`RemoteRpc`), so the transport is whatever
+Effect layer the application chooses — HTTP, WebSocket, worker, in-process.
+The server half is
+[`foldkit-remote-server`](https://github.com/doeixd/foldkit-plus/tree/main/packages/remote-server).
+The full design rationale is in
+[Revision Plan §8](https://github.com/doeixd/foldkit-plus/blob/main/REVISION_PLAN.md#8-remote).
 
-## Define entities, selections, and operations
+## Quick start
+
+### Entities, selections, and operations
 
 ```ts
 import { Schema } from 'effect'
@@ -46,11 +52,14 @@ const RenameProject = Mutation.make('RenameProject', {
 })
 ```
 
-Relations are reference codecs, so a recursive relation needs no inline target
-schema. `Selection.make` infers the picked Struct; an unknown field is a compile
-error.
+A relation is a reference codec (`Entity.ref(User)`), never an inline target
+schema, so a recursive relation such as `Node.parent: Entity.refTo('Node')` needs
+no inlining and the entity type stays finite. `Selection.make` infers the picked
+Struct; an unknown field is a compile error. Nesting a selection or a
+`Selection.connection(Entity, window)` adds the relation and its pagination
+window to the requirement.
 
-## Declare the domain and embed its submodel
+### Declare the domain and embed its submodel
 
 ```ts
 const Data = Remote.make({
@@ -80,10 +89,12 @@ const App = Surface.application({
 const AppRemote = Remote.at(Data, App.model.remote)
 ```
 
-`Data.update` is the one reducer for every producer: a read batch, a mutation
-result, a live event, a connection merge, or an optimistic layer.
+`Data.update` is the one reducer for every producer of new facts: a read batch, a
+mutation result, a live event, a connection merge, or an optimistic layer. The
+application wraps `RemoteMessage`s in its own Message union rather than adding
+`ReceivedBatch` and friends to it.
 
-## Read in a Surface
+### Read in a Surface
 
 ```ts
 const ProjectPage = Surface.define(App, 'ProjectPage', {
@@ -96,13 +107,24 @@ const ProjectPage = Surface.define(App, 'ProjectPage', {
 })
 ```
 
-The projection reads `RemoteData<ProjectSummary>` purely: `Initial` until the
-selected fields are present, `Failed` if the server data does not decode,
-`NotFound` for a tombstone, `Ready`/`Refreshing` otherwise. `Remote.select` is
-constrained to the domain's registered entity names, so selecting an entity
-`Data` never declared is a compile error.
+`Remote.select` returns a `Projection<AppModel, RemoteData<ProjectSummary>>` that
+reads the store purely:
 
-## Observe and mutate
+- `Initial` — some selected field is not present yet,
+- `Ready` / `Refreshing` — present; `Refreshing` is a state a caller may set while
+  revalidating,
+- `Failed` — the assembled value did not decode against the Selection,
+- `NotFound` — the entity is a tombstone.
+
+`RemoteData.match` is exhaustive; `RemoteData.map`, and `RemoteData.schema` for
+embedding the state in a hand-written Model, are also exported.
+
+`Remote.select` is constrained to the domain's registered entity names, so a
+selection for an entity `Data` never declared does not compile.
+
+## Observation
+
+Reading is pure; fetching is a Foldkit Subscription derived from the Surface.
 
 ```ts
 const subscriptions = (model: Model) => [
@@ -117,20 +139,62 @@ const subscriptions = (model: Model) => [
 
 `Remote.observe` plans the Surface's missing fields against the store and fetches
 only those; a fully-known Surface emits nothing. A read failure and a live stream
-break both arrive as `RemoteMessage`s, so one handler covers success and failure.
+break both arrive as `RemoteMessage`s (`ReadFailed`), so one handler covers
+success and failure. `Remote.live` resumes from `RemoteModel.live`, so the
+application tracks no cursor.
+
+Lower-level, pure planning is available when a Surface is not the right unit:
+
+```ts
+Remote.planProjection(store, projection, freshness?)  // -> Requirement[]
+Remote.observeProjection(AppRemote, model, projection, freshness?)
+Remote.planSurface(AppRemote, model, ProjectPage, params, freshness?)
+```
+
+`Requirement` is plain data — entity, id, fields, and per-relation windows — so a
+plan can be inspected, serialized, diffed, or shown in DevTools.
+
+`Remote.prefetch` runs the same plan through `RemoteClient` and returns the new
+store; use it for SSR, route/hover prefetch, and tests. It never runs during
+render.
+
+```ts
+const store = await Effect.runPromise(
+  Remote.prefetch(AppRemote, model, Projection.struct({ project }), { freshness: 30_000 }).pipe(
+    Effect.provide(clientLayer),
+  ),
+)
+```
+
+`freshness` (milliseconds) refetches present fields older than the window. The
+planner stays pure and time-injected; the caller reads the clock.
+
+## Mutations
 
 ```ts
 // In update, issued as a Command:
 Remote.mutateInto(AppRemote, model, RenameProject, { id, name }, requestId)
-// => Effect<{ output: { id: string }; model: Model }, RemoteMutationError, RemoteClient>
+// Effect<{ output: { id: string }; model: Model }, RemoteMutationError, RemoteClient>
 ```
 
-`Remote.mutate` returns the decoded `output` **and** the result's normalized
-`entities`, so a caller that manages its own Messages can reduce them with
-`Remote.update`. `Remote.mutateInto` does the `MutationStarted` →
-request → `MutationSucceeded` round trip and returns the new Model.
+`Remote.mutate` is the lower-level form. It decodes the typed `Output` **and**
+returns the result's normalized `entities`, so a caller that manages its own
+Messages can reduce them through `Remote.update`:
 
-## Optimistic layers
+```ts
+Remote.mutate(RenameProject, { id, name }, requestId)
+// Effect<{ output: Output; entities: readonly NormalizedPatch[] }, RemoteMutationError, RemoteClient>
+```
+
+A `MutationSucceeded` message reconciles the patches at most once per
+`requestId`, so a transport retry cannot apply the same change twice; an unknown
+or already-applied result is a no-op.
+
+### Optimistic updates
+
+Optimistic changes are ordered layers over the base store, not inverse patches:
+the visible store is recomputed, and settling removes the layer, so overlapping
+layers rebase for free.
 
 ```ts
 Data.update(model.remote, {
@@ -139,9 +203,33 @@ Data.update(model.remote, {
 })
 ```
 
-Settling is remove-the-layer, so overlapping optimistic changes rebase instead of
-needing inverse patches. `MutationSucceeded`/`MutationFailed` remove the layer and
-`MutationSucceeded` writes the server's patches at most once per `requestId`.
+`MutationSucceeded` writes the server's patches and removes the layer;
+`MutationFailed` removes the layer, revealing the base.
+
+## Connections
+
+A connection stores entity references with explicit known boundaries, not a flat
+array plus `hasNext`, so an unloaded middle page is a gap rather than an implied
+adjacency. Pages, live inserts, and optimistic inserts are all evidence about the
+same structure and merge through one pure reducer:
+
+```ts
+Remote.update(remote, { _tag: 'ConnectionMerged', connection: 'ProjectsByOwner(...)', page })
+```
+
+`items`, `hasNext`, `hasPrevious`, and `isGapped` read the server-known region;
+`visibleItems` places optimistic overlays outside it. `ConnectionInvalidated`
+marks a connection stale and `ConnectionRefreshed` clears it once a fresh page is
+adopted.
+
+## Live data
+
+`Remote.live` consumes an Effect streaming RPC. Events carry a monotonic cursor
+per stream: duplicates are ignored, and an event ahead of the cursor is a gap —
+it is not applied, and the stream is recorded in `RemoteModel.gaps` so the host
+can resync rather than silently miss facts. An `EntityPatched` updates the store;
+`EntityDeleted` writes a tombstone; `ConnectionInsert`/`ConnectionRemove`/
+`ConnectionInvalidate` change connection membership and ordering.
 
 ## Persistence
 
@@ -150,39 +238,46 @@ RemotePersistence.save(store, { key: 'remote-cache' })
 RemotePersistence.restore({ key: 'remote-cache' })
 ```
 
-Both require Effect's `KeyValueStore`. The cache is server-derived and
-disposable: a version mismatch or malformed snapshot is discarded and refetched.
+Both require Effect's `KeyValueStore`, so the backend (memory, filesystem, Web
+Storage, SQL) is the application's choice. The cache is server-derived and
+disposable: a version mismatch or malformed snapshot is discarded and the
+planner refetches.
 
-## The server
+## What it owns
 
-```ts
-const Server = RemoteServer.make({
-  entities: [
-    RemoteServer.entity(Project, {
-      authorize: (principal, fields) => fields.filter(field => principal.canRead(Project, field)),
-      read: ({ ids, fields, principal }) => loadProjects(ids, fields, principal),
-    }),
-  ],
-  mutations: [
-    RemoteServer.mutation(RenameProject, ({ input, principal }) =>
-      renameProject(input, principal).pipe(Effect.map(output => ({ output, entities: [...] }))),
-    ),
-  ],
-  queries: [
-    RemoteServer.query(ProjectsByOwner, ({ input, window }) => projectsPage(input, window)),
-  ],
-  live: [
-    RemoteServer.live(Project, { subscribe: ({ after }) => projectEvents(after) }),
-  ],
-})
+- **Entity identity and references.** `Entity.make`, typed `EntityRef`s, and
+  reference codecs; `Entity.patch` types a patch against the entity's fields.
+- **Field selections.** `Selection.make` derives a Struct from the picked fields
+  and rejects unknown ones; nested selections and connection windows compose.
+- **The normalized store.** Values, per-field presence, staleness, and tombstones
+  are tracked separately, so `undefined`, `null`, absent, stale, and not-found
+  are distinct. Presence is never inferred from `value === undefined`.
+- **The requirement planner.** `Remote.plan*`/`plan` diff requirements against the
+  store and return only missing or stale fields, deterministically.
+- **The Remote submodel.** `Remote.make` returns `Model`, `initial`, `Message`,
+  `update`, and `rpc`; `Remote.update` is the single reducer over reads,
+  mutation results, live events, connections, and optimistic layers.
+- **Mutation reconciliation.** Idempotent per `requestId`, with a bounded
+  settled-request ledger.
+- **Connections.** Segmented ordered data with explicit boundaries and overlay
+  placement.
+- **Live classification.** Per-stream cursor ordering, duplicate suppression, and
+  gap detection.
+- **The transport seam.** `RemoteClient`, an Effect service with `read`, `query`,
+  `mutate`, and `live`; the wire schemas and `RemoteRpc` group.
+- **Disposable cache persistence.** Snapshot encode/decode over `KeyValueStore`.
 
-const handlers = RemoteServer.handlers(Server, principal)
-// FoldkitRemoteRead, FoldkitRemoteMutate, FoldkitRemoteQuery, FoldkitRemoteLive
-```
+## Limits
 
-Selection authorization is mandatory and separate from authentication: an empty
-field list means the principal sees nothing. Sources keep runtime dependencies in
-the Effect environment instead of capturing a database.
-
-The wire is Effect RPC (`RemoteRpc`); choose the transport with Effect's own
-client and server protocol layers.
+- The transport is not part of the package. Effect RPC is the wire; the
+  application supplies the client and server protocol layers.
+- Live connection events are modeled on the client, but the wire `LivePatch`
+  currently carries entity patches only. A server live handler is entity-focused;
+  connection streaming over the wire is future work.
+- Request-level in-flight dedupe is not modeled. `Remote.plan` returns missing
+  fields, and the Subscription re-runs when the plan changes; there is no
+  "request already in flight" set.
+- `Query` descriptors are declared and used by `foldkit-remote-drizzle`, but
+  there is no `Remote` client entry point that consumes a `QueryRef` yet;
+  `RemoteClient.query` takes the wire `QueryRequest`.
+- `RemoteData` is a closed union.
