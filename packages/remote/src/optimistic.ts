@@ -6,7 +6,7 @@
  */
 import { type Connection, type Edge, edge, items } from './connection.js'
 import { reconcileMutation, type MutationState, type NormalizedPatch } from './mutation.js'
-import { entityKey, writeEntity, type EntityStore } from './store.js'
+import { entityKey, isTombstone, writeEntity, type EntityStore } from './store.js'
 
 export interface EntityLayer {
   readonly id: string
@@ -165,6 +165,26 @@ export const visibleStore = (base: EntityStore, optimistic: Optimistic): EntityS
     base,
   )
 
+/**
+ * A fresh page is newer than any settled overlay it covers: an edge the page
+ * carries no longer needs an insert overlay, and a `remove` overlay hiding it
+ * is stale (the server says it is back). A pending request's overlays are
+ * left alone; they settle with the request.
+ */
+export const pruneOverlays = (
+  optimistic: Optimistic,
+  connection: string,
+  covered: ReadonlySet<string>,
+  pending: ReadonlySet<string>,
+): Optimistic => ({
+  ...optimistic,
+  overlays: optimistic.overlays.flatMap(overlay => {
+    if (overlay.connection !== connection || pending.has(overlay.id)) return [overlay]
+    const edges = overlay.edges.filter(edge => !covered.has(edge.key))
+    return edges.length === 0 ? [] : [{ ...overlay, edges }]
+  }),
+})
+
 /** Everything a request owns: its layer and its overlays. */
 const release = (optimistic: Optimistic, requestId: string): Optimistic =>
   removeOverlay(removeLayer(optimistic, requestId), requestId)
@@ -209,14 +229,16 @@ export const settleFailure = (optimistic: Optimistic, requestId: string): Optimi
  * Visible edges for one connection: applicable overlays are placed outside the
  * server-known segments and de-duplicated by edge identity (across overlays too),
  * so a pending insert never corrupts server-known ordering; a `remove` overlay
- * hides its edges wherever they are. A later prepend lands before an earlier
- * one, a later append after, so pending inserts read in the order they were
- * made. Boundaries still come from the connection's segments.
+ * hides its edges wherever they are, and so does a tombstone on the edge's
+ * target when `store` is given. A later prepend lands before an earlier one, a
+ * later append after, so pending inserts read in the order they were made.
+ * Boundaries still come from the connection's segments.
  */
 export const visibleItems = (
   connection: Connection,
   connectionId: string,
   overlays: ReadonlyArray<ConnectionOverlay>,
+  store?: EntityStore,
 ): ReadonlyArray<Edge> => {
   const applicable = overlays.filter(overlay => overlay.connection === connectionId)
   const hidden = new Set(
@@ -224,7 +246,10 @@ export const visibleItems = (
       .filter(overlay => overlay.position === 'remove')
       .flatMap(overlay => overlay.edges.map(edge => edge.key)),
   )
-  const known = items(connection).filter(edge => !hidden.has(edge.key))
+  const gone = (edge: Edge): boolean =>
+    hidden.has(edge.key) ||
+    (store !== undefined && isTombstone(store, entityKey(edge.ref.entity, edge.ref.id)))
+  const known = items(connection).filter(edge => !gone(edge))
   const seen = new Set(known.map(edge => edge.key))
 
   const take = (position: 'prepend' | 'append'): ReadonlyArray<Edge> => {
@@ -232,7 +257,7 @@ export const visibleItems = (
     const ordered = applicable.filter(value => value.position === position)
     for (const overlay of position === 'prepend' ? [...ordered].reverse() : ordered) {
       for (const edge of overlay.edges) {
-        if (seen.has(edge.key) || hidden.has(edge.key)) continue
+        if (seen.has(edge.key) || gone(edge)) continue
         seen.add(edge.key)
         edges.push(edge)
       }

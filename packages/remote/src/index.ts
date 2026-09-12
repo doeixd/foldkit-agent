@@ -16,12 +16,14 @@ import {
   type RelationRequirement,
   type Surface,
 } from 'foldkit-surface'
-import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
+import { emptyConnection, merge, type Connection, type Edge, type Segment } from './connection.js'
 import {
   Optimistic,
   emptyOptimistic,
+  pruneOverlays,
   settleFailure,
   settleSuccess,
+  visibleItems,
   type ConnectionChange,
   type OptimisticOperation,
 } from './optimistic.js'
@@ -761,6 +763,12 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
       return {
         ...model,
         connections: { ...model.connections, [message.connection]: merge(current, message.page) },
+        optimistic: pruneOverlays(
+          model.optimistic,
+          message.connection,
+          new Set(message.page.edges.map(edge => edge.key)),
+          model.mutations.pending,
+        ),
       }
     }
     case 'ConnectionInvalidated':
@@ -1439,6 +1447,19 @@ export const Remote = {
       end: result.end,
     },
   }),
+
+  /**
+   * The edges a connection shows: its server-known region with pending and
+   * confirmed overlays placed around it, minus removed edges and edges whose
+   * target is a tombstone.
+   */
+  visibleItems: (model: RemoteModel, connection: string): ReadonlyArray<Edge> =>
+    visibleItems(
+      model.connections[connection] ?? emptyConnection,
+      connection,
+      model.optimistic.overlays,
+      model.entities,
+    ),
 
   /** A pure, serializable view of the whole cache. */
   inspect: inspectRemote,

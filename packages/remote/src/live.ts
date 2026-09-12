@@ -190,9 +190,16 @@ export const applyConnectionEvent = (
       }
     }
     case 'ConnectionRemove':
+      // Strip the edge from pending inserts and hide it wherever else it is
+      // (a server-known segment included) until a fresh page says otherwise.
       return {
         state: advance(state, event.cursor),
-        optimistic: removeEdgeOverlays(optimistic, event.connection, event.edge.key),
+        optimistic: addOverlay(removeEdgeOverlays(optimistic, event.connection, event.edge.key), {
+          id: `live:${event.cursor}`,
+          connection: event.connection,
+          edges: [event.edge],
+          position: 'remove',
+        }),
         outcome,
       }
     case 'ConnectionInvalidate':
