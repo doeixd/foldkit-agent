@@ -130,6 +130,12 @@ export const hasField = (store: EntityStore, key: EntityKey, field: string): boo
   )
 }
 
+/** A present field whose value may be outdated; absent fields are not stale. */
+export const isFieldStale = (store: EntityStore, key: EntityKey, field: string): boolean => {
+  const value = store[key]
+  return value !== undefined && !value.tombstone && value.stale.has(field)
+}
+
 /**
  * Reads a present field, stale or not. Absence and a tombstone both yield
  * `Option.none()`; a present `undefined`/`null` yields `Option.some`.

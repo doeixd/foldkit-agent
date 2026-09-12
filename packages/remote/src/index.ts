@@ -35,13 +35,16 @@ import {
 import {
   entityKey,
   emptyStore,
+  isFieldStale,
   isTombstone,
+  markStale,
   readField,
   writeEntity,
   type EntityEntry,
   type EntityStore,
 } from './store.js'
-import { plan, windowKey, type PlanFreshness } from './plan.js'
+import { plan, windowKey, type PlanOptions } from './plan.js'
+import { RemotePolicy } from './policy.js'
 import {
   MutationRequest,
   MutationResult,
@@ -65,6 +68,7 @@ type AnySchema = Schema.Schema<unknown>
 
 export * from './store.js'
 export * from './plan.js'
+export * from './policy.js'
 export * from './connection.js'
 export * from './query.js'
 export * from './mutation.js'
@@ -453,6 +457,8 @@ export type RemoteMessage =
       readonly requests: readonly Requirement[]
       readonly error: RemoteError
     }
+  /** A refetch of present fields began; they read as `Refreshing` until it lands. */
+  | { readonly _tag: 'RefreshStarted'; readonly requests: readonly Requirement[] }
   | { readonly _tag: 'MutationStarted'; readonly requestId: string }
   | {
       readonly _tag: 'MutationSucceeded'
@@ -486,6 +492,7 @@ const remoteMessageSchema = Schema.Union([
     requests: Schema.Array(ReadRequest),
     error: remoteErrorSchema,
   }),
+  Schema.Struct({ _tag: Schema.Literal('RefreshStarted'), requests: Schema.Array(ReadRequest) }),
   Schema.Struct({ _tag: Schema.Literal('MutationStarted'), requestId: Schema.String }),
   Schema.Struct({
     _tag: Schema.Literal('MutationSucceeded'),
@@ -547,6 +554,15 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
       }
     case 'ReadFailed':
       return model
+    case 'RefreshStarted':
+      return {
+        ...model,
+        entities: message.requests.reduce(
+          (store, request) =>
+            markStale(store, entityKey(request.entity, request.id), request.fields),
+          model.entities,
+        ),
+      }
     case 'MutationStarted':
       return { ...model, mutations: beginMutation(model.mutations, message.requestId) }
     case 'MutationSucceeded': {
@@ -693,6 +709,14 @@ export class RemoteClient extends Context.Service<
     }) => Stream.Stream<LiveEvent, RemoteLiveError>
   }
 >()('foldkit-remote/RemoteClient') {}
+
+/** How `Remote.observe` and `Remote.prefetch` treat fields the store already holds. */
+export interface ObserveOptions {
+  /** Default `RemotePolicy.cacheFirst`. */
+  readonly policy?: RemotePolicy | undefined
+  /** The clock a refreshing policy reads; default `Date.now`. */
+  readonly now?: (() => number) | undefined
+}
 
 interface WireRefPage {
   readonly refs: ReadonlyArray<string>
@@ -1001,7 +1025,8 @@ export const Remote = {
    * A Projection node that reads a `RemoteData` value out of the store. The id
    * is supplied by the caller, usually from a Surface's params. The assembled
    * value is decoded against the Selection, so malformed server data surfaces
-   * as `Failed` instead of being asserted into `Value`.
+   * as `Failed` instead of being asserted into `Value`. A present value with a
+   * stale field reads as `Refreshing`: an observer is refetching it.
    */
   select:
     <AppModel, Store extends RemoteModel, Names extends string, Value, Name extends Names>(
@@ -1024,15 +1049,19 @@ export const Remote = {
         const key = entityKey(selection.entity, id)
         if (isTombstone(store, key)) return { _tag: 'NotFound' }
         const values: Record<string, unknown> = {}
+        let refreshing = false
         for (const field of selection.fields) {
           const value = readField(store, key, field)
           if (Option.isNone(value)) return { _tag: 'Initial' }
           values[field] = value.value
+          refreshing ||= isFieldStale(store, key, field)
         }
         const decoded = Schema.decodeUnknownResult(selection.schema)(values)
         return Result.isFailure(decoded)
           ? { _tag: 'Failed', error: { _tag: 'DecodeError', message: decoded.failure.message } }
-          : { _tag: 'Ready', value: decoded.success }
+          : refreshing
+            ? { _tag: 'Refreshing', value: decoded.success }
+            : { _tag: 'Ready', value: decoded.success }
       },
     }),
 
@@ -1040,17 +1069,16 @@ export const Remote = {
   planProjection: <Root, Value>(
     store: EntityStore,
     projection: Projection<Root, Value>,
-    freshness?: PlanFreshness,
-  ): ReadonlyArray<Requirement> => plan(store, projection.requirements, freshness),
+    options?: PlanOptions,
+  ): ReadonlyArray<Requirement> => plan(store, projection.requirements, options),
 
   /** The pure plan for a projection against a Model, reading its remote store. */ observeProjection:
     <AppModel, Store extends RemoteModel, Value>(
       bound: BoundRemote<AppModel, Store>,
       model: AppModel,
       projection: Projection<AppModel, Value>,
-      freshness?: PlanFreshness,
-    ): ReadonlyArray<Requirement> =>
-      plan(storeOf(bound, model), projection.requirements, freshness),
+      options?: PlanOptions,
+    ): ReadonlyArray<Requirement> => plan(storeOf(bound, model), projection.requirements, options),
 
   /** The pure plan for a Surface's projection. */
   planSurface: <AppModel, Store extends RemoteModel, Model, Message, Params>(
@@ -1058,28 +1086,25 @@ export const Remote = {
     model: AppModel,
     surface: Surface<AppModel, Model, Message, Params>,
     params: Params,
-    freshness?: PlanFreshness,
+    options?: PlanOptions,
   ): ReadonlyArray<Requirement> =>
-    plan(storeOf(bound, model), surface.projection(params).requirements, freshness),
+    plan(storeOf(bound, model), surface.projection(params).requirements, options),
 
   /**
    * Executes the plan against the `RemoteClient` and returns a new store. Used
    * for SSR route prefetch, hover prefetch, and tests. Never called during render.
-   * `freshness` (milliseconds) refetches present fields older than that. The
-   * caller reads the wall clock; the planner itself stays pure and time-injected.
+   * `policy` decides what a present field means (default cache-first); `now`
+   * is the clock it reads, so the planner itself stays pure and time-injected.
    */
   prefetch: Effect.fn('Remote.prefetch')(function* <AppModel, Store extends RemoteModel, Value>(
     bound: BoundRemote<AppModel, Store>,
     model: AppModel,
     projection: Projection<AppModel, Value>,
-    options: { readonly freshness?: number } = {},
+    options: ObserveOptions = {},
   ) {
     const store = storeOf(bound, model)
-    const freshness: PlanFreshness | undefined =
-      options.freshness === undefined
-        ? undefined
-        : { now: Date.now(), freshness: options.freshness }
-    const missing = plan(store, projection.requirements, freshness)
+    const { policy = RemotePolicy.cacheFirst, now = Date.now } = options
+    const missing = plan(store, projection.requirements, RemotePolicy.toPlan(policy, now()))
     if (missing.length === 0) return store
     yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
     const client = yield* RemoteClient
@@ -1188,7 +1213,9 @@ export const Remote = {
    * A Foldkit Subscription entry that plans a Surface's missing fields from the
    * Model and fetches them through `RemoteClient`, emitting a `RemoteMessage`
    * per outcome. Wrap it in an application Message (`toMessage`) and reduce it
-   * with the domain's `update`.
+   * with the domain's `update`. Under a refreshing `policy` the entry first
+   * emits `RefreshStarted`, so the fields being refetched read as `Refreshing`
+   * while the request is pending.
    */
   observe: <
     AppModel,
@@ -1203,41 +1230,54 @@ export const Remote = {
     surface: Surface<AppModel, Model, SurfaceMessage, Params>,
     params: Params,
     toMessage: (message: RemoteMessage) => Message,
+    options: ObserveOptions = {},
   ): EntryWithoutKeepAlive<
     AppModel,
     Message,
     { readonly requirements: ReadonlyArray<Requirement> },
     RemoteClient
-  > => ({
-    dependenciesSchema: Schema.Struct({
-      requirements: Schema.Array(ReadRequest),
-    }),
-    modelToDependencies: model => ({
-      requirements: plan(storeOf(bound, model), surface.projection(params).requirements),
-    }),
-    dependenciesToStream: ({ requirements }) =>
-      requirements.length === 0
-        ? Stream.empty
-        : Stream.fromEffect(
-            Effect.gen(function* () {
-              const client = yield* RemoteClient
-              const now = Date.now()
-              const result = yield* Effect.result(client.read({ requests: requirements }))
-              return Result.isFailure(result)
-                ? toMessage({
-                    _tag: 'ReadFailed',
-                    requests: requirements,
-                    error: remoteError(result.failure),
-                  })
-                : toMessage({
-                    _tag: 'ReadReceived',
-                    requests: requirements,
-                    result: result.success,
-                    now,
-                  })
-            }),
-          ),
-  }),
+  > => {
+    const { policy = RemotePolicy.cacheFirst, now = Date.now } = options
+    const read = (requirements: ReadonlyArray<Requirement>) =>
+      Effect.gen(function* () {
+        const client = yield* RemoteClient
+        const at = now()
+        const result = yield* Effect.result(client.read({ requests: requirements }))
+        return Result.isFailure(result)
+          ? toMessage({
+              _tag: 'ReadFailed',
+              requests: requirements,
+              error: remoteError(result.failure),
+            })
+          : toMessage({
+              _tag: 'ReadReceived',
+              requests: requirements,
+              result: result.success,
+              now: at,
+            })
+      })
+    return {
+      dependenciesSchema: Schema.Struct({
+        requirements: Schema.Array(ReadRequest),
+      }),
+      modelToDependencies: model => ({
+        requirements: plan(
+          storeOf(bound, model),
+          surface.projection(params).requirements,
+          RemotePolicy.toPlan(policy, now()),
+        ),
+      }),
+      dependenciesToStream: ({ requirements }) =>
+        requirements.length === 0
+          ? Stream.empty
+          : RemotePolicy.refreshes(policy)
+            ? Stream.concat(
+                Stream.succeed(toMessage({ _tag: 'RefreshStarted', requests: requirements })),
+                Stream.fromEffect(read(requirements)),
+              )
+            : Stream.fromEffect(read(requirements)),
+    }
+  },
 
   /**
    * A Foldkit Subscription entry that consumes the live stream for a Surface's

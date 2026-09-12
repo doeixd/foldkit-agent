@@ -4,7 +4,7 @@
  * A `Requirement` is plain data: which entity fields a Remote projection needs.
  * `plan` diffs requirements against the store and returns only the missing
  * fields, grouped and deterministically ordered. Time enters through
- * `PlanFreshness`, never from ambient state.
+ * `PlanFreshness`, never from ambient state; `force` plans every field.
  */
 import type { Requirement } from 'foldkit-surface'
 import { entityKey, missingFields, type EntityStore } from './store.js'
@@ -28,11 +28,18 @@ export interface PlanFreshness {
   readonly freshness: number
 }
 
+export interface PlanOptions {
+  readonly freshness?: PlanFreshness | undefined
+  /** Plan every requested field, present or not, tombstoned or not. */
+  readonly force?: boolean | undefined
+}
+
 export const plan = (
   store: EntityStore,
   requirements: readonly Requirement[],
-  freshness?: PlanFreshness,
+  options: PlanOptions = {},
 ): ReadonlyArray<Requirement> => {
+  const { freshness, force = false } = options
   const grouped = new Map<
     string,
     {
@@ -79,7 +86,8 @@ export const plan = (
     const windowKeys = Object.fromEntries(
       [...group.windows].map(([field, window]) => [field, windowKey(window)]),
     )
-    const missing = expired ? group.fields : missingFields(store, key, group.fields, windowKeys)
+    const missing =
+      force || expired ? group.fields : missingFields(store, key, group.fields, windowKeys)
     if (missing.length === 0) continue
     // Only a field being fetched carries its window.
     const missingSet = new Set(missing)
