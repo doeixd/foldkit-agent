@@ -19,5 +19,8 @@
     "example/**/*.ts",
     "tsdown.config.ts"
   ],
-  "references": [{ "path": "../remote" }, { "path": "../remote-server" }]
+  "references": [
+    { "path": "../remote/tsconfig.build.json" },
+    { "path": "../remote-server/tsconfig.build.json" }
+  ]
 }

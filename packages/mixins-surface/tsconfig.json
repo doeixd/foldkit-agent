@@ -13,5 +13,9 @@
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
-  "references": [{ "path": "../mixins" }, { "path": "../mixins-ui" }, { "path": "../surface" }]
+  "references": [
+    { "path": "../mixins/tsconfig.build.json" },
+    { "path": "../mixins-ui/tsconfig.build.json" },
+    { "path": "../surface/tsconfig.build.json" }
+  ]
 }
