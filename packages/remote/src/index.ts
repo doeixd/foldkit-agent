@@ -395,10 +395,8 @@ export const RemoteData = {
 }
 
 /**
- * The Remote scope's slot in the application Model. `Remote.make` returns a
- * schema and an `update` for this shape, so the normalized cache is an ordinary
- * Foldkit Submodel: reads, mutation results, live events, and optimistic layers
- * all reconcile through `Remote.update`.
+ * The normalized cache as a Foldkit Submodel. `Remote.make` returns a schema and
+ * an `update` for this shape; `Remote.update` reconciles every producer.
  */
 export interface RemoteModel {
   /** Entity values, presence, staleness, tombstones, and applied windows. */
@@ -437,11 +435,7 @@ const remoteModelSchema = (): Schema.Schema<RemoteModel> =>
     gaps: runtimeSchema,
   }) as unknown as Schema.Schema<RemoteModel>
 
-/**
- * The Remote submodel's Messages. The four producers of new facts — a read
- * batch, a mutation result, a live event, and an optimistic layer — all reduce
- * to `RemoteModel` through `Remote.update`.
- */
+/** The submodel's Messages; each reduces to `RemoteModel` through `Remote.update`. */
 export type RemoteMessage =
   | {
       readonly _tag: 'ReadReceived'
@@ -468,6 +462,7 @@ export type RemoteMessage =
       readonly policy?: LivePolicy
       readonly now: number
     }
+  | { readonly _tag: 'GapCleared'; readonly stream: string }
   | { readonly _tag: 'ConnectionMerged'; readonly connection: string; readonly page: Segment }
   | { readonly _tag: 'ConnectionInvalidated'; readonly connection: string }
   | { readonly _tag: 'ConnectionRefreshed'; readonly connection: string }
@@ -504,6 +499,7 @@ const remoteMessageSchema = Schema.Union([
     policy: Schema.optional(Schema.Unknown),
     now: Schema.Number,
   }),
+  Schema.Struct({ _tag: Schema.Literal('GapCleared'), stream: Schema.String }),
   Schema.Struct({
     _tag: Schema.Literal('ConnectionMerged'),
     connection: Schema.String,
@@ -526,6 +522,11 @@ const setConnectionStale = (
 
 const markGap = (model: RemoteModel, stream: string): RemoteModel =>
   model.gaps.has(stream) ? model : { ...model, gaps: new Set([...model.gaps, stream]) }
+
+const clearGap = (model: RemoteModel, stream: string): RemoteModel =>
+  model.gaps.has(stream)
+    ? { ...model, gaps: new Set([...model.gaps].filter(entry => entry !== stream)) }
+    : model
 
 /**
  * The pure reducer all four producers share. A live event that arrives ahead of
@@ -571,21 +572,29 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
         const applied = applyEntityEvent(state, model.entities, message.event, message.now)
         return applied.outcome === 'gap'
           ? markGap(model, message.stream)
-          : {
-              ...model,
-              entities: applied.store,
-              live: { ...model.live, [message.stream]: applied.state },
-            }
+          : clearGap(
+              {
+                ...model,
+                entities: applied.store,
+                live: { ...model.live, [message.stream]: applied.state },
+              },
+              message.stream,
+            )
       }
       const applied = applyConnectionEvent(state, model.optimistic, message.event, message.policy)
       return applied.outcome === 'gap'
         ? markGap(model, message.stream)
-        : {
-            ...model,
-            optimistic: applied.optimistic,
-            live: { ...model.live, [message.stream]: applied.state },
-          }
+        : clearGap(
+            {
+              ...model,
+              optimistic: applied.optimistic,
+              live: { ...model.live, [message.stream]: applied.state },
+            },
+            message.stream,
+          )
     }
+    case 'GapCleared':
+      return clearGap(model, message.stream)
     case 'ConnectionMerged': {
       const current = model.connections[message.connection] ?? emptyConnection
       return {
@@ -633,6 +642,12 @@ export interface RemoteDescriptor<
   readonly Message: Schema.Schema<RemoteMessage>
   readonly update: (model: RemoteModel, message: RemoteMessage) => RemoteModel
   readonly rpc: typeof RemoteRpc
+  /** Name-keyed lookups built from the declared entities, queries, and mutations. */
+  readonly registry: {
+    readonly entities: ReadonlyMap<string, EntityDescriptor<any, any>>
+    readonly queries: ReadonlyMap<string, QueryDescriptor<any, any, any>>
+    readonly mutations: ReadonlyMap<string, MutationDescriptor<any, any, any>>
+  }
 }
 
 declare const boundRemoteNames: unique symbol
@@ -799,7 +814,7 @@ const inspectEntry = (key: string, entry: EntityEntry): RemoteInspection['entiti
   stale: [...entry.stale],
   tombstone: entry.tombstone,
   updatedAt: entry.updatedAt,
-  windows: entry.windows,
+  windows: { ...entry.windows },
 })
 
 /** A pure, serializable view of the whole cache. */
@@ -855,9 +870,8 @@ const mutateRemote = Effect.fn('Remote.mutate')(function* <Name extends string, 
 
 export const Remote = {
   /**
-   * Declares a Remote domain: the entities, queries, and mutations the
-   * application can observe, plus the submodel (`Model`, `initial`, `Message`,
-   * `update`, `rpc`) the app embeds and reduces.
+   * Declares a Remote domain: its entities, queries, and mutations, plus the
+   * submodel the application embeds and reduces.
    */
   make: <
     const Entities extends readonly EntityDescriptor<any, any>[],
@@ -881,6 +895,11 @@ export const Remote = {
     Message: remoteMessageSchema,
     update: updateRemote,
     rpc: RemoteRpc,
+    registry: {
+      entities: new Map(config.entities.map(entity => [entity.name, entity])),
+      queries: new Map((config.queries ?? []).map(query => [query.name, query])),
+      mutations: new Map((config.mutations ?? []).map(mutation => [mutation.name, mutation])),
+    },
   }),
 
   /**
@@ -999,15 +1018,14 @@ export const Remote = {
   writeRead,
 
   /**
-   * Runs a `Query` through `RemoteClient`, encoding its input. Pair the result
-   * with `Remote.queryMessage` to merge the page into the RemoteModel.
+   * Runs a `Query` through `RemoteClient`, encoding its input from the ref.
+   * Pair the result with `Remote.queryMessage` to merge the page into the Model.
    */
-  query: Effect.fn('Remote.query')(function* <Name extends string, Input, Result>(
-    descriptor: QueryDescriptor<Name, Input, Result>,
+  query: Effect.fn('Remote.query')(function* <Name extends string, Input>(
     ref: QueryRef<Name, Input>,
   ) {
     const client = yield* RemoteClient
-    const input = yield* Schema.encodeUnknownEffect(descriptor.Input)(ref.input).pipe(
+    const input = yield* Schema.encodeUnknownEffect(ref.Input)(ref.input).pipe(
       Effect.catchTag('SchemaError', error =>
         Effect.fail(new RemoteQueryError({ message: error.message })),
       ),

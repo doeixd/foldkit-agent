@@ -231,7 +231,7 @@ through `RemoteClient`, and `Remote.queryMessage` turns the page into a
 
 ```ts
 const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId }))
-const page = yield* Remote.query(ProjectsByOwner, ref)
+const page = yield* Remote.query(ref)
 yield* Effect.sync(() =>
   dispatch({ _tag: 'GotRemote', message: Remote.queryMessage(ref, page) }),
 )
@@ -252,7 +252,8 @@ are pure, so DevTools never reach into the private layout.
 `Remote.live` consumes an Effect streaming RPC. Events carry a monotonic cursor
 per stream: duplicates are ignored, and an event ahead of the cursor is a gap —
 it is not applied, and the stream is recorded in `RemoteModel.gaps` so the host
-can resync rather than silently miss facts. An `EntityPatched` updates the store;
+can resync rather than silently miss facts. The gap clears when an in-order event
+applies, or on a `GapCleared` message. An `EntityPatched` updates the store;
 `EntityDeleted` writes a tombstone; `ConnectionInsert`/`ConnectionRemove`/
 `ConnectionInvalidate` change connection membership and ordering.
 

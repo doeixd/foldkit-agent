@@ -146,9 +146,7 @@ describe('Remote.query', () => {
     })
 
     const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId: 'u1', sort: 'newest' }))
-    const result = await Effect.runPromise(
-      Remote.query(ProjectsByOwner, ref).pipe(Effect.provide(client)),
-    )
+    const result = await Effect.runPromise(Remote.query(ref).pipe(Effect.provide(client)))
     expect(requests).toEqual([
       { query: 'ProjectsByOwner', input: { ownerId: 'u1', sort: 'newest' }, window: { first: 25 } },
     ])

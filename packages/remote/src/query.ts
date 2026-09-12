@@ -29,6 +29,8 @@ export interface QueryWindow {
 export interface QueryRef<Name extends string, Input> {
   readonly query: Name
   readonly input: Input
+  /** The input codec, so a `QueryRef` can encode itself without its descriptor. */
+  readonly Input: Schema.Codec<Input>
   readonly window: QueryWindow
   /** Connection identity: descriptor + canonical input, excluding the window. */
   readonly identity: string
@@ -76,6 +78,7 @@ export const Query = {
       ref: input => ({
         query: name,
         input,
+        Input: config.Input,
         window: {},
         identity: `${name}\u0000${stable(encode(input))}`,
       }),

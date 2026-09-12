@@ -54,6 +54,11 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Queries and introspection.** `Remote.query`/`Remote.queryMessage` consume a
   `QueryRef` end to end, and `Remote.inspect`/`Remote.inspectEntity` expose a pure,
   serializable cache view for DevTools.
+- **Gap lifecycle.** A live stream's gap clears when an in-order event applies or
+  a `GapCleared` message arrives, rather than sticking forever.
+- **Self-describing refs and a registry.** `QueryRef` carries its input codec, so
+  `Remote.query(ref)` needs no descriptor; `Remote.make` builds a name-keyed
+  `registry` from the declared entities, queries, and mutations.
 
 ### `foldkit-remote-server` (private)
 

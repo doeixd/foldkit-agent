@@ -148,6 +148,26 @@ describe('Remote.update', () => {
     expect(ahead.gaps.has('s1')).toBe(true)
     expect(ahead.live.s1!.cursor).toBe(1)
     expect(readField(ahead.entities, entityKey('User', 'u1'), 'name')).toEqual(Option.some('ada'))
+
+    // The next in-order event applies and the gap heals.
+    const healed = updateRemote(ahead, {
+      _tag: 'LiveReceived',
+      stream: 's1',
+      now: 0,
+      event: {
+        _tag: 'EntityPatched',
+        ref: { entity: 'User', id: 'u1' },
+        values: { name: 'grace' },
+        changed: ['name'],
+        cursor: 2,
+      },
+    })
+    expect(healed.gaps.has('s1')).toBe(false)
+    expect(healed.live.s1!.cursor).toBe(2)
+
+    // A gap can also be cleared explicitly, for a host that resubscribed.
+    const regapped = updateRemote(ahead, { _tag: 'GapCleared', stream: 's1' })
+    expect(regapped.gaps.has('s1')).toBe(false)
   })
 
   it('inspects the cache purely', () => {
@@ -196,6 +216,9 @@ describe('Remote domain submodel', () => {
     expect(Data.update).toBe(updateRemote)
     expect(Data.rpc).toBeDefined()
     expect(Data.entities).toHaveLength(1)
+    expect(Data.registry.entities.get('User')?.name).toBe('User')
+    expect(Data.registry.mutations.get('RenameUser')?.name).toBe('RenameUser')
+    expect(Data.registry.queries.size).toBe(0)
   })
 
   it('mutateInto reconciles patches and returns the typed output', async () => {
