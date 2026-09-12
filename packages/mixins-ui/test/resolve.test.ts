@@ -44,4 +44,11 @@ describe('resolveFor', () => {
     const resolved = resolveUi(RootSlots, [], { input: undefined, h })({ root: base })
     expect(resolved.root).toEqual(base)
   })
+
+  it('preserves a non-slot key on the render payload', () => {
+    const base = { root: [] as ReadonlyArray<SlotAttributes<TestMessage>[number]>, isVisible: true }
+    const resolved = resolveUi(RootSlots, [], { input: undefined, h })(base)
+    expect(resolved.isVisible).toBe(true)
+    expect(resolved.root).toEqual([])
+  })
 })

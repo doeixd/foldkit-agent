@@ -109,6 +109,24 @@ describe('Style rule compiler', () => {
     ).toBe('style:conditional-rules-unsupported')
   })
 
+  it('does not evaluate an input predicate until render', () => {
+    const calls: Array<number> = []
+    const Conditional = Style.forSlots(RuleSlots)({
+      root: Style.whenInput<{ readonly n: number }>(input => {
+        calls.push(input.n)
+        return input.n > 0
+      }, Style.class('positive')),
+    })
+    expect(calls).toEqual([])
+
+    const active = SlotView.buildersFor(RuleSlots, [Conditional.mixin], { input: { n: 1 }, h })
+    expect(classValue(active.root.attrs())).toBe('positive')
+    expect(calls).toEqual([1])
+
+    const inactive = SlotView.buildersFor(RuleSlots, [Conditional.mixin], { input: { n: 0 }, h })
+    expect(classValue(inactive.root.attrs())).toBeUndefined()
+  })
+
   it('compiles deterministic keyframes and puts them in globalCss', () => {
     const Fade = Style.keyframes({ from: { opacity: '0' }, to: { opacity: '1' } })
     expect(Fade.name).toMatch(/^kf-[a-z0-9]+$/)
