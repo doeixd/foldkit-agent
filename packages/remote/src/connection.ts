@@ -165,7 +165,19 @@ export const merge = (current: Connection, page: Segment): Connection => {
       }
     }
   }
-  return { ...current, segments: dedupeConnection(segments) }
+  return { ...current, segments: orderSegments(dedupeConnection(segments)) }
+}
+
+/**
+ * Disjoint segments have no cursor linking them, so their relative order is
+ * whatever it was; the two exceptions are known: a segment starting at the
+ * terminal boundary is first, one ending at it is last.
+ */
+const orderSegments = (segments: readonly Segment[]): Segment[] => {
+  const first = segments.filter(value => value.start._tag === 'Terminal')
+  const last = segments.filter(value => value.end._tag === 'Terminal' && !first.includes(value))
+  const middle = segments.filter(value => !first.includes(value) && !last.includes(value))
+  return [...first, ...middle, ...last]
 }
 
 /** Visible edges, segment by segment. */

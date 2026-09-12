@@ -316,3 +316,23 @@ describe('RemoteServer protocol version', () => {
     expect(result.failure).toMatchObject({ _tag: 'RemoteProtocolError', received: 1 })
   })
 })
+
+describe('RemoteServer nested fan-out', () => {
+  it('chunks a nested level larger than maxIdsPerEntity instead of refusing it', async () => {
+    const result = await read('admin', [card], { maxIdsPerEntity: 1 })
+    expect(result.entities.filter(entity => entity.entity === 'Comment').map(e => e.id)).toEqual([
+      'c1',
+      'c2',
+    ])
+    expect(reads.filter(entry => entry.entity === 'Comment').map(entry => entry.ids)).toEqual([
+      ['c1'],
+      ['c2'],
+    ])
+  })
+
+  it('still refuses a top-level batch over the limit', async () => {
+    await expect(
+      read('admin', [card, { ...card, id: 'p0' }], { maxIdsPerEntity: 1 }),
+    ).rejects.toThrow(/Too many "Project" ids/)
+  })
+})

@@ -456,7 +456,10 @@ export const RemoteServer = {
         for (const [name, group] of groupByEntity(pending)) {
           const source = server.entities.get(name)
           if (source === undefined) continue
-          if (group.ids.length > (options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)) {
+          const maxIds = options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY
+          // The limit guards the client's batch; a nested level's fan-out is
+          // the server's own doing, so it is chunked rather than refused.
+          if (depth === 0 && group.ids.length > maxIds) {
             return yield* new RemoteReadError({
               message: `Too many "${name}" ids in one read batch`,
             })
@@ -475,18 +478,23 @@ export const RemoteServer = {
           const windows = Object.fromEntries(
             [...group.windows].filter(([field]) => allowedSet.has(field)),
           )
-          const records = yield* source
-            .read({
-              ids: group.ids,
-              fields: allowed,
-              principal,
-              ...(Object.keys(windows).length === 0 ? {} : { windows }),
-            })
-            .pipe(
-              Effect.catchTag('RemoteServerError', error =>
-                Effect.fail(new RemoteReadError({ message: error.message })),
-              ),
+          const records: EntityRecord[] = []
+          for (let start = 0; start < group.ids.length; start += maxIds) {
+            records.push(
+              ...(yield* source
+                .read({
+                  ids: group.ids.slice(start, start + maxIds),
+                  fields: allowed,
+                  principal,
+                  ...(Object.keys(windows).length === 0 ? {} : { windows }),
+                })
+                .pipe(
+                  Effect.catchTag('RemoteServerError', error =>
+                    Effect.fail(new RemoteReadError({ message: error.message })),
+                  ),
+                )),
             )
+          }
 
           for (const record of records) {
             // Null-prototype so a crafted field name (`__proto__`) cannot reach
