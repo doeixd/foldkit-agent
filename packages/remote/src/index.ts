@@ -6,14 +6,15 @@
  * helpers that read or mutate go through the `RemoteClient` Effect service.
  */
 import { Context, Effect, Layer, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
+import type { Duration } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
-import type {
-  Contract,
-  ModelRef,
-  Projection,
-  RelationRequirement,
+import {
   Requirement,
-  Surface,
+  type Contract,
+  type ModelRef,
+  type Projection,
+  type RelationRequirement,
+  type Surface,
 } from 'foldkit-surface'
 import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
 import {
@@ -53,6 +54,8 @@ import {
 import { plan, windowKey, type PlanOptions } from './plan.js'
 import { RemotePolicy } from './policy.js'
 import { RelationAnnotation, isRefPage, refsIn, relationShape } from './relation.js'
+import { coalesceReads, type CoalesceOptions } from './coalesce.js'
+import { gc, type RetentionRoots } from './retain.js'
 import {
   MutationRequest,
   MutationResult,
@@ -80,6 +83,8 @@ export * from './store.js'
 export * from './plan.js'
 export * from './policy.js'
 export * from './relation.js'
+export * from './coalesce.js'
+export * from './retain.js'
 export * from './connection.js'
 export * from './query.js'
 export * from './mutation.js'
@@ -568,6 +573,8 @@ export type RemoteMessage =
     }
   /** A refetch of present fields began; they read as `Refreshing` until it lands. */
   | { readonly _tag: 'RefreshStarted'; readonly requests: readonly Requirement[] }
+  /** The active Surfaces' roots changed; everything they do not reach is collected. */
+  | { readonly _tag: 'RetentionChanged'; readonly roots: RetentionRoots }
   | { readonly _tag: 'MutationStarted'; readonly requestId: string }
   | {
       readonly _tag: 'MutationSucceeded'
@@ -589,6 +596,11 @@ export type RemoteMessage =
   | { readonly _tag: 'OptimisticAdded'; readonly layer: EntityLayer }
   | { readonly _tag: 'OptimisticRemoved'; readonly id: string }
 
+const retentionRootsSchema = Schema.Struct({
+  requirements: Schema.Array(ReadRequest),
+  connections: Schema.Array(Schema.String),
+})
+
 const remoteMessageSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal('ReadReceived'),
@@ -602,6 +614,7 @@ const remoteMessageSchema = Schema.Union([
     error: remoteErrorSchema,
   }),
   Schema.Struct({ _tag: Schema.Literal('RefreshStarted'), requests: Schema.Array(ReadRequest) }),
+  Schema.Struct({ _tag: Schema.Literal('RetentionChanged'), roots: retentionRootsSchema }),
   Schema.Struct({ _tag: Schema.Literal('MutationStarted'), requestId: Schema.String }),
   Schema.Struct({
     _tag: Schema.Literal('MutationSucceeded'),
@@ -663,6 +676,8 @@ export const updateRemote = (model: RemoteModel, message: RemoteMessage): Remote
       }
     case 'ReadFailed':
       return model
+    case 'RetentionChanged':
+      return { ...model, ...gc(model, message.roots) }
     case 'RefreshStarted':
       return {
         ...model,
@@ -821,6 +836,26 @@ export class RemoteClient extends Context.Service<
     }) => Stream.Stream<LiveEvent, RemoteLiveError | RemoteProtocolError>
   }
 >()('foldkit-remote/RemoteClient') {}
+
+export interface RetainOptions {
+  /** Query connection identities (`QueryRef.identity`) the application shows. */
+  readonly connections?: ReadonlyArray<string> | undefined
+  /** How long the roots must be stable before collecting; default none. */
+  readonly grace?: Duration.Input | undefined
+}
+
+const coalescedLayer = (
+  layer: Layer.Layer<RemoteClient>,
+  options: CoalesceOptions = {},
+): Layer.Layer<RemoteClient> =>
+  Layer.effect(
+    RemoteClient,
+    Effect.gen(function* () {
+      const client = yield* RemoteClient
+      const read = yield* coalesceReads(client.read, options)
+      return { ...client, read }
+    }),
+  ).pipe(Layer.provide(layer))
 
 /** How `Remote.observe` and `Remote.prefetch` treat fields the store already holds. */
 export interface ObserveOptions {
@@ -1292,16 +1327,59 @@ export const Remote = {
    * application provides the transport's RPC layer instead of writing the
    * `LiveChange`-to-`LiveEvent` mapping by hand.
    */
-  clientLayer: (client: RemoteRpcClient): Layer.Layer<RemoteClient> =>
-    Layer.succeed(RemoteClient, {
-      read: batch => client.FoldkitRemoteRead(batch),
-      query: request => client.FoldkitRemoteQuery(request),
-      mutate: request => client.FoldkitRemoteMutate(request),
-      live: ({ requirements, after }) =>
-        client
-          .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
-          .pipe(Stream.map(liveEventOf)),
-    }),
+  clientLayer: (
+    client: RemoteRpcClient,
+    options: CoalesceOptions = {},
+  ): Layer.Layer<RemoteClient> =>
+    coalescedLayer(
+      Layer.succeed(RemoteClient, {
+        read: batch => client.FoldkitRemoteRead(batch),
+        query: request => client.FoldkitRemoteQuery(request),
+        mutate: request => client.FoldkitRemoteMutate(request),
+        live: ({ requirements, after }) =>
+          client
+            .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
+            .pipe(Stream.map(liveEventOf)),
+      }),
+      options,
+    ),
+
+  /**
+   * Wraps a `RemoteClient` layer so its reads coalesce: requirements issued
+   * together become one batch, and a requirement already in flight is joined.
+   * `Remote.clientLayer` applies this; use it on a hand-written client.
+   */
+  coalesced: coalescedLayer,
+
+  /**
+   * A Foldkit Subscription entry that keeps the cache to what the active
+   * Surfaces reach. `projections` are the ones the application observes (the
+   * same it passes to `Remote.observe`), `connections` the query connections
+   * it shows; anything else is collected once the roots have been stable for
+   * `grace`, so a route transition that comes straight back does not thrash.
+   */
+  retain: <AppModel, Store extends RemoteModel, Message>(
+    bound: BoundRemote<AppModel, Store>,
+    projections: ReadonlyArray<{ readonly requirements: readonly Requirement[] }>,
+    toMessage: (message: RemoteMessage) => Message,
+    options: RetainOptions = {},
+  ): EntryWithoutKeepAlive<AppModel, Message, RetentionRoots, never> => {
+    const roots: RetentionRoots = {
+      requirements: Requirement.merge(projections.flatMap(projection => projection.requirements)),
+      connections: [...new Set(options.connections ?? [])].sort(),
+    }
+    void bound
+    return {
+      dependenciesSchema: retentionRootsSchema,
+      modelToDependencies: () => roots,
+      dependenciesToStream: current =>
+        Stream.fromEffect(
+          Effect.succeed(toMessage({ _tag: 'RetentionChanged', roots: current })).pipe(
+            Effect.delay(options.grace ?? 0),
+          ),
+        ),
+    }
+  },
 
   /**
    * Runs a `Query` through `RemoteClient`, encoding its input from the ref.
