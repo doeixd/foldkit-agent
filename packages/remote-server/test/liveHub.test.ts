@@ -263,6 +263,30 @@ describe('RemoteServer.liveHub guards', () => {
     expect(events).toEqual([{ _tag: 'EntityDeleted', cursor: 1, entity: 'User', id: 'gone' }])
   })
 
+  it('a record the source returns for another id reaches nobody', async () => {
+    const wrongId = [
+      RemoteServer.entity<string>(User, {
+        read: ({ fields }) =>
+          Effect.succeed([
+            { id: 'u2', values: Object.fromEntries(fields.map(field => [field, 'x'])) },
+          ]),
+      }),
+    ]
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(wrongId)
+        const fiber = yield* Effect.forkChild(
+          subscribe(hub, 'admin', [{ entity: 'User', id: 'u1', fields: ['name'] }], 0, 1),
+        )
+        yield* settle
+        yield* hub.changed({ entity: 'User', id: 'u1' }, ['name'])
+        yield* hub.deleted({ entity: 'User', id: 'u1' })
+        return [...(yield* Fiber.join(fiber))]
+      }),
+    )
+    expect(events.map(event => event._tag)).toEqual(['EntityDeleted'])
+  })
+
   it('a change of no fields does no source work', async () => {
     reads.length = 0
     await Effect.runPromise(
@@ -439,5 +463,36 @@ describe('RemoteServer.liveHub windows', () => {
     )
     expect(windowed).toEqual([{ comments: { first: 2 } }])
     expect(events[0]).toMatchObject({ values: { comments: 'page', title: 'page' } })
+  })
+
+  it('subscribers paging a field differently get separate reads, each with its window', async () => {
+    windowed.length = 0
+    const sources = [...paged.entities.values()]
+    const requirement = (window: { first: number } | undefined) => ({
+      entity: 'Post',
+      id: 'p1',
+      fields: ['comments'],
+      ...(window === undefined ? {} : { windows: { comments: window } }),
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const hub = yield* RemoteServer.liveHub(sources)
+        const listen = (window: { first: number } | undefined) =>
+          Effect.forkChild(
+            hub
+              .subscribe({ requirements: [requirement(window)], after: 0, principal: 'u' })
+              .pipe(Stream.take(1), Stream.runCollect),
+          )
+        const fibers = [
+          yield* listen({ first: 2 }),
+          yield* listen({ first: 5 }),
+          yield* listen(undefined),
+        ]
+        yield* settle
+        yield* hub.changed({ entity: 'Post', id: 'p1' }, ['comments'])
+        for (const fiber of fibers) yield* Fiber.join(fiber)
+      }),
+    )
+    expect(windowed).toEqual([{ comments: { first: 2 } }, { comments: { first: 5 } }, undefined])
   })
 })

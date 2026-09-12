@@ -476,6 +476,19 @@ describe('RemoteServer', () => {
     ).toEqual([undefined])
   })
 
+  it('never reads an inherited property as a window', async () => {
+    expect(
+      await readWithWindows([
+        {
+          entity: 'User',
+          id: 'u1',
+          fields: ['toString', 'posts'],
+          windows: { posts: { first: 1 } },
+        },
+      ]),
+    ).toEqual([{ posts: { first: 1 } }])
+  })
+
   it('never asks the source for a field the Entity does not declare', async () => {
     const seen: Array<{ fields: ReadonlyArray<string>; windows: unknown }> = []
     const authorized: Array<ReadonlyArray<string>> = []
