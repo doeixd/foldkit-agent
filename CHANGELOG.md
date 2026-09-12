@@ -270,18 +270,21 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 - **Surface-based contract.** The standalone `pick`/`Projection` (#59 spike) is
   gone, superseded by the shared Surface `ModelRef`/`Projection`.
-  `Sync.forApplication(App, { documentId, shared, durable })` derives the shared
-  projection, the durable subset, the initial snapshot, and replay from a
+  `Sync.forApplication(App).define({ documentId, shared, durable })` derives the
+  shared projection, the durable subset, the initial snapshot, and replay from a
   `Surface.application`, a `Surface.pick`/`Surface.compose` projection, and a
-  `Surface.messages` subset; `Sync.make(App, name, { documentId, initial, shared,
-  durable, replay })` takes an explicit projection, constructors, and a custom
-  `replay`. Both compile to the low-level `defineSync` and return a read-only
-  `surface`; `TodoSync.journalContract()` derives the durable operation/snapshot
-  codecs, empty snapshot, and reducer. Additive — `defineSync` remains the
-  protocol primitive. `Sync.project` now also carries the projection's dependency
-  paths.
-- **Consistent config and subset ownership.** `Sync.make`'s config uses
-  `shared`/`durable`, matching `Sync.forApplication`, and `forApplication`
+  `Surface.messages` subset; `define({ ..., replay })` replaces the derived replay
+  with a custom reducer over the shared slice. It compiles to the low-level
+  `defineSync` and returns a read-only `surface`; `TodoSync.journalContract()`
+  derives the durable operation/snapshot codecs, empty snapshot, and reducer.
+  Additive — `defineSync` remains the protocol primitive. `Sync.project` now also
+  carries the projection's dependency paths.
+- **One entry point, shaped like Agent's.** `Sync.forApplication(App)` specializes
+  the constructors to an application and `.define(config)` produces the
+  contract, matching `Agent.forApplication(App).define(config)` (#60). The
+  earlier `Sync.forApplication(App, config)` and `Sync.make(App, name, config)`
+  forms are gone; `Sync.make`'s explicit `initial` and bare constructor array
+  came from the application and a `Surface.messages` subset anyway. `define`
   refuses a durable subset whose owner token belongs to a different application.
 - **Derived replay is guarded.** `Sync.forApplication`'s replay refuses a durable
   Message whose `update` returns a Command or changes a Model field outside the
@@ -295,10 +298,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   the replay's message and cause) when replay throws, so a Message no replica
   could apply is never persisted. The submit-time result seeds the optimistic
   projection, so a read after a submit no longer replays the whole outbox.
-- **Replay documented at the definition.** `SyncConfig.replay` states that a
-  durable Message's Commands are dropped during replay and optimistic projection
-  (only state changes apply) and that each replay starts from the initial Model,
-  so cost tracks the Model rather than the shared slice.
+- **Replay documented at the definition.** `DefineConfig.replay` states that a
+  custom replay is a pure reducer over the shared subset, that only durable
+  Messages reach it, that it runs during admission, replay, and optimistic
+  projection, and that it is not guarded.
 - **An exchange loop.** `Replica.start` exchanges once and then after every
   `submit`, until the replica closes or the fiber is interrupted; a transport
   failure is recorded and retried on the next wake, so the application does not

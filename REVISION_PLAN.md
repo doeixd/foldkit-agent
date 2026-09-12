@@ -120,7 +120,7 @@ pnpm bench           # sync bench + durable storage script (not a gate)
 | `Agent.resource({ schema, read })` | `packages/agent` | `Agent.resource({ projection })` |
 | `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Sync.project` |
 | `pick(Model, [keys])` | `packages/sync` (added recently) | Superseded by Surface `pick`/`ModelRef` |
-| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.make` compiles to it |
+| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.forApplication(App).define` compiles to it |
 | `examples/sync/src/runtime.ts` mount wrapper | example | Generalized under a `Sync.mount`/`Sync.browser` adapter (needs a decision, §10.6) |
 
 ---
@@ -380,7 +380,7 @@ is scoped to it:
 ```ts
 const ProjectPage = Surface.define(App, "ProjectPage", { ... })
 const TodoAgent   = Agent.define(App, "TodoAgent", { ... })
-const TodoSync    = Sync.make(App, "TodoSync", { ... })
+const TodoSync    = Sync.forApplication(App).define({ ... })
 const Data        = Remote.make({ entities: [...], queries: [...], mutations: [...] })
 ```
 
@@ -1521,11 +1521,11 @@ Sync keeps the offline replica, replay, reconciliation, and presence. It stops
 hand-rolling a projection.
 
 ```ts
-const TodoSync = Sync.make(App, "Todos", {
+const TodoSync = Sync.forApplication(App).define({
   documentId: documentId("todos"),
-  model: Sync.project({ todos: App.model.todos }),  // writable projection from ModelRefs
-  messages: [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo],
-  replay: updateShared,
+  shared: Surface.pick(App.fields.todos),  // writable projection from ModelRefs
+  durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo]),
+  // replay is derived from `update`; pass `replay` to override it
 })
 // TodoSync.surface : observes/writes Model.todos, accepts those Messages
 ```
@@ -1537,7 +1537,8 @@ const TodoSync = Sync.make(App, "Todos", {
   publicly; only Sync regains write authority.
 - `replay` is inferred against the declared Message subset, not the whole union.
 - The low-level `defineSync({ message, shared, empty, durable, replay })` remains the
-  protocol primitive and escape hatch; `Sync.make` compiles down to it.
+  protocol primitive and escape hatch; `Sync.forApplication(App).define` compiles
+  down to it.
 - `foldkit-durable` stays independent; Sync produces the replay contract via
   `TodoSync.journalContract()` → `{ operation:{encode,decode},
   snapshot:{encode,decode}, empty, reduce }`.
@@ -1602,11 +1603,10 @@ const TodoAgent = Agent.define(App, "TodoAgent", {
   capabilities: [Agent.capability(Message.CreatedTodo, { description: "Create a todo" })],
 })
 
-const TodoSync = Sync.make(App, "TodoSync", {
+const TodoSync = Sync.forApplication(App).define({
   documentId: documentId("todos"),
-  model: Sync.project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo, Message.RenamedTodo],
-  replay: updateShared,
+  shared: Surface.pick(App.fields.todos),
+  durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo]),
 })
 
 const journal = yield* makeJournal({

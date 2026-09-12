@@ -9,11 +9,10 @@
 export { indexedDb, type Storage } from './indexedDb.js'
 export {
   forApplication,
-  make,
+  type ApplicationSync,
+  type DefineConfig,
   type DefinedSync,
-  type ForApplicationConfig,
   type MsgOf,
-  type SyncConfig,
 } from './make.js'
 export { project, type WritableProjection } from './project.js'
 export {

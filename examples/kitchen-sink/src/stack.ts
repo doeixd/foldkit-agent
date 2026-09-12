@@ -201,7 +201,7 @@ const NoteChanges = Surface.messages(App, [
 export const KitchenSync: SyncContract<
   Message,
   { readonly notes: ReadonlyArray<typeof Note.Type> }
-> = forApplication(App, {
+> = forApplication(App).define({
   documentId: toSyncDocumentId('kitchen'),
   shared: Notes,
   durable: NoteChanges,

@@ -33,7 +33,7 @@ const update = (model: Model, message: Message): Update.Return<Model, Message> =
 const App = Surface.application({ Model: ModelSchema, Message, initial, update })
 const Todos = Surface.pick(App.fields.todos)
 const Changes = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
-const TodoSync = forApplication(App, {
+const TodoSync = forApplication(App).define({
   documentId: documentId('todos'),
   shared: Todos,
   durable: Changes,
@@ -114,7 +114,7 @@ describe('Sync.forApplication', () => {
       initial,
       update: faultyUpdate,
     })
-    const sync = forApplication(Faulty, {
+    const sync = forApplication(Faulty).define({
       documentId: documentId('todos'),
       shared: Surface.pick(Faulty.fields.todos),
       durable: Surface.messages(Faulty, [Message.CreatedTodo, Message.RenamedTodo]),
@@ -169,12 +169,59 @@ describe('Sync.forApplication', () => {
     const OtherChanges = Surface.messages(OtherApp, [OtherMessage.Ping])
 
     expect(() =>
-      forApplication(App, {
+      forApplication(App).define({
         documentId: documentId('todos'),
         shared: Todos,
         // Structurally similar, but the owner token is a different application.
         durable: OtherChanges as never,
       }),
     ).toThrow(/different application/)
+  })
+
+  describe('with a custom replay', () => {
+    const Custom = forApplication(App).define({
+      documentId: documentId('todos'),
+      name: 'CustomTodos',
+      shared: Todos,
+      durable: Changes,
+      // Deliberately differs from `update` (upper-cases the title) so a test can
+      // tell which reducer ran.
+      replay: (value, message) =>
+        message._tag === 'CreatedTodo'
+          ? { todos: [...value.todos, { id: message.id, title: message.title.toUpperCase() }] }
+          : {
+              todos: value.todos.map(todo =>
+                todo.id === message.id ? { ...todo, title: message.title.toUpperCase() } : todo,
+              ),
+            },
+    })
+
+    it('replays through the custom reducer, not update', async () => {
+      const replica = await Effect.runPromise(Custom.openReplica(replicaId('a'), memoryStorage()))
+      await submit(replica, Message.CreatedTodo({ id: 'a', title: 'a' }))
+      expect(shared(replica)).toEqual({ todos: [{ id: 'a', title: 'A' }] })
+      expect(Surface.inspect(Custom.surface, undefined).name).toBe('CustomTodos')
+    })
+
+    it('compiles the journal contract over the shared snapshot', () => {
+      const contract = Custom.journalContract()
+      expect(contract.empty()).toEqual({ todos: [] })
+
+      const operation = Custom.codec.normalizeOperation({
+        protocolVersion: 1,
+        schemaVersion: 1,
+        documentId: documentId('todos'),
+        replicaId: 'a',
+        localSequence: 1,
+        opId: 'a:1',
+        baseCursor: 0,
+        message: Message.CreatedTodo({ id: 'a', title: 'a' }),
+      })
+
+      const snapshot = contract.reduce(contract.empty(), operation)
+      expect(snapshot).toEqual({ todos: [{ id: 'a', title: 'A' }] })
+      expect(contract.snapshot.decode(contract.snapshot.encode(snapshot))).toEqual(snapshot)
+      expect(contract.operation.decode(contract.operation.encode(operation))).toEqual(operation)
+    })
   })
 })

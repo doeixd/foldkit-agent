@@ -20,7 +20,7 @@ const TodoChanges = Surface.messages(App, [
  * declarations: the inferred type contains `Schema.Schema.Type<MessageUnion<...>>`,
  * which expands a Foldkit-private alias that declaration emit cannot name.
  */
-export const Sync: SyncContract<Message, Shared> = forApplication(App, {
+export const Sync: SyncContract<Message, Shared> = forApplication(App).define({
   documentId: documentId('todos'),
   shared: Todos,
   durable: TodoChanges,

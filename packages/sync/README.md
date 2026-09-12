@@ -45,7 +45,7 @@ const App = Surface.application({
 const Todos = Surface.pick(App.fields.todos)
 const TodoChanges = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
 
-const TodoSync = forApplication(App, {
+const TodoSync = forApplication(App).define({
   documentId: documentId('todos'),
   shared: Todos, // the shared codec, read, and write
   durable: TodoChanges, // the durable subset
@@ -62,7 +62,8 @@ live effect cannot be replayed) or changes a field outside the projection (the
 change would be silently lost), naming the Message and the fields. A Message that
 needs an effect stays local and emits a durable fact once the effect settles:
 `RequestedChargeCard` runs the Command; `CardCharged` is what replicates.
-`Sync.make` below takes a custom `replay` when an application needs one.
+Pass `replay` to `define` when an application needs a custom reducer over the
+shared slice; a custom replay is not guarded.
 
 On the server, the same contract produces the journal's codecs and reducer, so
 neither is written twice:
@@ -80,7 +81,7 @@ const journal = yield* makeJournal({
 
 ### Lower level
 
-`Sync.forApplication` and `Sync.make` compile down to `defineSync`, the protocol
+`Sync.forApplication(App).define` compiles down to `defineSync`, the protocol
 primitive. Use `defineSync` directly when there is no Foldkit application to
 derive the contract from — a non-Foldkit client, or a hand-written projection.
 
@@ -106,8 +107,8 @@ const shared = Effect.runSync(replica.shared)
 
 ## What it owns
 
-- The Foldkit-facing contract (`Sync.forApplication`, or `Sync.make` with a custom
-  `replay`): derives the shared projection, the durable Message subset, the
+- The Foldkit-facing contract (`Sync.forApplication(App).define`, optionally with
+  a custom `replay`): derives the shared projection, the durable Message subset, the
   initial snapshot, and the journal contract from the application, so none is
   declared twice. `Surface.pick`/`Sync.project` build the writable projection;
   `TodoSync.journalContract()` builds the durable codecs and reducer.
