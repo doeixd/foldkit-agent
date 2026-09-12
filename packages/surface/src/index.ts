@@ -261,7 +261,9 @@ function mergeDependencies(dependencies: DependencyTree): DependencyTree {
  * A required slice of a remote entity, contributed by a remote `Projection`
  * node. This is dependency metadata, so it lives in Surface; Remote consumes it.
  * `windows` carries a pagination window per relation field (Remote's
- * `QueryWindow` is not visible here, so the shape is declared locally).
+ * `QueryWindow` is not visible here, so the shape is declared locally), and
+ * `relations` carries the slice required of each relation's target, so one
+ * requirement describes a whole selection graph.
  */
 export interface Window {
   readonly first?: number | undefined
@@ -270,54 +272,86 @@ export interface Window {
   readonly before?: string | undefined
 }
 
-export interface Requirement {
+/** The slice required of a relation's target; its ids come from the refs. */
+export interface RelationRequirement {
   readonly entity: string
-  readonly id: string
   readonly fields: readonly string[]
   readonly windows?: Readonly<Record<string, Window>> | undefined
+  readonly relations?: Readonly<Record<string, RelationRequirement>> | undefined
+}
+
+export interface Requirement extends RelationRequirement {
+  readonly id: string
+}
+
+/** Unions two relation slices for the same target: fields, windows, and nested relations. */
+function mergeRelation(
+  current: RelationRequirement,
+  next: RelationRequirement,
+): RelationRequirement {
+  const fields = [...current.fields]
+  const seen = new Set(fields)
+  for (const field of next.fields) {
+    if (seen.has(field)) continue
+    seen.add(field)
+    fields.push(field)
+  }
+  const windows = { ...current.windows, ...next.windows }
+  const relations = mergeRelations(current.relations, next.relations)
+  return {
+    entity: current.entity,
+    fields,
+    ...(Object.keys(windows).length === 0 ? {} : { windows }),
+    ...(relations === undefined ? {} : { relations }),
+  }
+}
+
+/** Unions two relation maps field by field; a field in both merges recursively. */
+function mergeRelations(
+  current: Readonly<Record<string, RelationRequirement>> | undefined,
+  next: Readonly<Record<string, RelationRequirement>> | undefined,
+): Readonly<Record<string, RelationRequirement>> | undefined {
+  if (current === undefined) return next
+  if (next === undefined) return current
+  const merged: Record<string, RelationRequirement> = { ...current }
+  for (const [field, relation] of Object.entries(next)) {
+    const existing = merged[field]
+    merged[field] = existing === undefined ? relation : mergeRelation(existing, relation)
+  }
+  return merged
 }
 
 /** Unions requirements for the same entity + id, dropping duplicate fields. */
 function mergeRequirements(requirements: readonly Requirement[]): readonly Requirement[] {
-  const grouped = new Map<
-    string,
-    {
-      entity: string
-      id: string
-      fields: string[]
-      seen: Set<string>
-      windows: Map<string, Window>
-    }
-  >()
+  const grouped = new Map<string, RelationRequirement & { readonly id: string }>()
   for (const requirement of requirements) {
     const key = `${requirement.entity}\u0000${requirement.id}`
-    let group = grouped.get(key)
-    if (group === undefined) {
-      group = {
-        entity: requirement.entity,
-        id: requirement.id,
-        fields: [],
-        seen: new Set(),
-        windows: new Map(),
-      }
-      grouped.set(key, group)
-    }
-    for (const field of requirement.fields) {
-      if (group.seen.has(field)) continue
-      group.seen.add(field)
-      group.fields.push(field)
-    }
+    const group = grouped.get(key)
     // Later windows win; a duplicate is a caller bug, not a merge policy.
-    for (const [field, window] of Object.entries(requirement.windows ?? {})) {
-      group.windows.set(field, window)
-    }
+    grouped.set(
+      key,
+      group === undefined
+        ? {
+            entity: requirement.entity,
+            id: requirement.id,
+            fields: [...new Set(requirement.fields)],
+            ...(requirement.windows === undefined ? {} : { windows: requirement.windows }),
+            ...(requirement.relations === undefined ? {} : { relations: requirement.relations }),
+          }
+        : { ...mergeRelation(group, requirement), id: group.id },
+    )
   }
-  return [...grouped.values()].map(group => ({
-    entity: group.entity,
-    id: group.id,
-    fields: group.fields,
-    ...(group.windows.size === 0 ? {} : { windows: Object.fromEntries(group.windows) }),
-  }))
+  return [...grouped.values()]
+}
+
+/**
+ * Requirement helpers, for the packages that plan and serve requirements.
+ * `merge` unions same-entity+id requirements; `mergeRelations` unions two
+ * relation maps.
+ */
+export const Requirement = {
+  merge: mergeRequirements,
+  mergeRelations,
 }
 
 export interface Projection<Root, Value> {

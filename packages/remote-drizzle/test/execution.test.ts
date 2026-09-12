@@ -1,7 +1,7 @@
 import { eq, type SQL } from 'drizzle-orm'
 import { pgTable, PgDialect, text } from 'drizzle-orm/pg-core'
 import { Effect, Schema } from 'effect'
-import { Selection } from 'foldkit-remote'
+import { Selection, REMOTE_PROTOCOL_VERSION } from 'foldkit-remote'
 import { RemoteServer } from 'foldkit-remote-server'
 import { describe, expect, it } from 'vitest'
 import {
@@ -103,7 +103,10 @@ describe('RemoteDrizzle execution', () => {
 
     const result = await Effect.runPromise(
       RemoteServer.handlers(server, null)
-        .FoldkitRemoteRead({ requests: [{ entity: 'User', id: 'a', fields: ['name'] }] })
+        .FoldkitRemoteRead({
+          version: REMOTE_PROTOCOL_VERSION,
+          requests: [{ entity: 'User', id: 'a', fields: ['name'] }],
+        })
         .pipe(Effect.provideService(DrizzleDatabase, database)),
     )
 
@@ -148,7 +151,10 @@ describe('RemoteDrizzle execution', () => {
     const result = await Effect.runPromise(
       Effect.result(
         RemoteServer.handlers(server, null)
-          .FoldkitRemoteRead({ requests: [{ entity: 'User', id: 'a', fields: ['name'] }] })
+          .FoldkitRemoteRead({
+            version: REMOTE_PROTOCOL_VERSION,
+            requests: [{ entity: 'User', id: 'a', fields: ['name'] }],
+          })
           .pipe(Effect.provideService(DrizzleDatabase, failing)),
       ),
     )

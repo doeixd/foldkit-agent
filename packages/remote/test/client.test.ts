@@ -1,6 +1,12 @@
 import { Effect, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Remote, RemoteClient, liveEventOf, type RemoteRpcClient } from '../src/index.js'
+import {
+  Remote,
+  RemoteClient,
+  liveEventOf,
+  type RemoteRpcClient,
+  REMOTE_PROTOCOL_VERSION,
+} from '../src/index.js'
 
 const batch = {
   entities: [{ entity: 'User', id: 'u1', values: { name: 'ada' } }],
@@ -32,6 +38,7 @@ describe('Remote.clientLayer', () => {
       Effect.gen(function* () {
         const client = yield* RemoteClient
         const read = yield* client.read({
+          version: REMOTE_PROTOCOL_VERSION,
           requests: [{ entity: 'User', id: 'u1', fields: ['name'] }],
         })
         const events = yield* client

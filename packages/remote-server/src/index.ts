@@ -7,10 +7,13 @@
  */
 import { Effect, Schema, Stream } from 'effect'
 import {
+  REMOTE_PROTOCOL_VERSION,
   RemoteLiveError,
   RemoteMutationError,
+  RemoteProtocolError,
   RemoteQueryError,
   RemoteReadError,
+  refsIn,
   type Boundary,
   type EntityDescriptor,
   type LiveChange,
@@ -19,9 +22,11 @@ import {
   type QueryDescriptor,
   type QueryWindow,
   type ReadRequest,
+  type RelationRequirement,
   type RemoteDescriptor,
   type RemoteRpcClient,
 } from 'foldkit-remote'
+import { Requirement } from 'foldkit-surface'
 
 export class RemoteServerError extends Schema.TaggedError<RemoteServerError>()(
   'RemoteServerError',
@@ -110,8 +115,59 @@ export interface ServerDefinition<P, R = never> {
 /** A read batch may not carry more than this many distinct ids per entity. */
 const DEFAULT_MAX_IDS_PER_ENTITY = 1000
 
+/** A nested selection may not reach further than this many relation levels. */
+const DEFAULT_MAX_DEPTH = 8
+
 export interface HandlerOptions {
   readonly maxIdsPerEntity?: number | undefined
+  readonly maxDepth?: number | undefined
+}
+
+type Request = Schema.Schema.Type<typeof ReadRequest>
+
+const protocolMismatch = (received: number): RemoteProtocolError | undefined =>
+  received === REMOTE_PROTOCOL_VERSION
+    ? undefined
+    : new RemoteProtocolError({
+        message: `Remote protocol version ${received} is not ${REMOTE_PROTOCOL_VERSION}`,
+        expected: REMOTE_PROTOCOL_VERSION,
+        received,
+      })
+
+interface EntityGroup {
+  readonly ids: string[]
+  readonly seenIds: Set<string>
+  readonly fields: Set<string>
+  readonly windows: Map<string, QueryWindow>
+  relations: Readonly<Record<string, RelationRequirement>> | undefined
+}
+
+/** One level's requests grouped per entity: ids and fields unioned, relations merged. */
+const groupByEntity = (requests: ReadonlyArray<Request>): Map<string, EntityGroup> => {
+  const grouped = new Map<string, EntityGroup>()
+  for (const request of requests) {
+    let group = grouped.get(request.entity)
+    if (group === undefined) {
+      group = {
+        ids: [],
+        seenIds: new Set(),
+        fields: new Set(),
+        windows: new Map(),
+        relations: undefined,
+      }
+      grouped.set(request.entity, group)
+    }
+    if (!group.seenIds.has(request.id)) {
+      group.seenIds.add(request.id)
+      group.ids.push(request.id)
+    }
+    for (const field of request.fields) group.fields.add(field)
+    for (const [field, window] of Object.entries(request.windows ?? {})) {
+      group.windows.set(field, window)
+    }
+    group.relations = Requirement.mergeRelations(group.relations, request.relations)
+  }
+  return grouped
 }
 
 export const RemoteServer = {
@@ -217,79 +273,99 @@ export const RemoteServer = {
     options: HandlerOptions = {},
   ): RemoteRpcClient<R> => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
-      const grouped = new Map<
-        string,
-        {
-          ids: string[]
-          seenIds: Set<string>
-          fields: Set<string>
-          windows: Map<string, QueryWindow>
-        }
-      >()
-      for (const request of payload.requests) {
-        let group = grouped.get(request.entity)
-        if (group === undefined) {
-          group = { ids: [], seenIds: new Set(), fields: new Set(), windows: new Map() }
-          grouped.set(request.entity, group)
-        }
-        if (!group.seenIds.has(request.id)) {
-          group.seenIds.add(request.id)
-          group.ids.push(request.id)
-        }
-        for (const field of request.fields) group.fields.add(field)
-        for (const [field, window] of Object.entries(request.windows ?? {})) {
-          group.windows.set(field, window)
-        }
-      }
+      const mismatch = protocolMismatch(payload.version)
+      if (mismatch !== undefined) return yield* mismatch
 
       const entities: Array<{
         readonly entity: string
         readonly id: string
         readonly values: Record<string, unknown>
       }> = []
+      // What this batch has already read per entity:id, so a target several
+      // relations share is fetched once and a cyclic selection stays finite.
+      const fetched = new Map<string, Set<string>>()
+      const maxDepth = options.maxDepth ?? DEFAULT_MAX_DEPTH
 
-      for (const [name, group] of grouped) {
-        const source = server.entities.get(name)
-        if (source === undefined) continue
-        if (group.ids.length > (options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)) {
-          return yield* new RemoteReadError({ message: `Too many "${name}" ids in one read batch` })
-        }
-        const requested = [...group.fields]
-        const permitted =
-          source.authorize === undefined ? requested : source.authorize(principal, requested)
-        // Never read or return a field the client did not request, even if a
-        // permissive `authorize` allows more.
-        const permittedSet = new Set(permitted)
-        const allowed = requested.filter(field => permittedSet.has(field))
-        if (allowed.length === 0) continue
-
-        // Only a field being read carries its window.
-        const allowedSet = new Set(allowed)
-        const windows = Object.fromEntries(
-          [...group.windows].filter(([field]) => allowedSet.has(field)),
-        )
-        const records = yield* source
-          .read({
-            ids: group.ids,
-            fields: allowed,
-            principal,
-            ...(Object.keys(windows).length === 0 ? {} : { windows }),
+      // Level by level: a level's relation refs become the next level's requests.
+      let pending: ReadonlyArray<Request> = payload.requests
+      for (let depth = 0; pending.length > 0; depth++) {
+        if (depth > maxDepth) {
+          return yield* new RemoteReadError({
+            message: `Nested selection deeper than ${maxDepth} relation levels`,
           })
-          .pipe(
-            Effect.catchTag('RemoteServerError', error =>
-              Effect.fail(new RemoteReadError({ message: error.message })),
-            ),
-          )
-
-        for (const record of records) {
-          // Null-prototype so a crafted field name (`__proto__`) cannot reach
-          // the prototype, and `Object.hasOwn` so inherited names are ignored.
-          const values: Record<string, unknown> = Object.create(null)
-          for (const field of allowed) {
-            if (Object.hasOwn(record.values, field)) values[field] = record.values[field]
-          }
-          entities.push({ entity: name, id: record.id, values })
         }
+        const next: Request[] = []
+
+        for (const [name, group] of groupByEntity(pending)) {
+          const source = server.entities.get(name)
+          if (source === undefined) continue
+          if (group.ids.length > (options.maxIdsPerEntity ?? DEFAULT_MAX_IDS_PER_ENTITY)) {
+            return yield* new RemoteReadError({
+              message: `Too many "${name}" ids in one read batch`,
+            })
+          }
+          const requested = [...group.fields]
+          const permitted =
+            source.authorize === undefined ? requested : source.authorize(principal, requested)
+          // Never read or return a field the client did not request, even if a
+          // permissive `authorize` allows more.
+          const permittedSet = new Set(permitted)
+          const allowed = requested.filter(field => permittedSet.has(field))
+          if (allowed.length === 0) continue
+
+          // Only a field being read carries its window.
+          const allowedSet = new Set(allowed)
+          const windows = Object.fromEntries(
+            [...group.windows].filter(([field]) => allowedSet.has(field)),
+          )
+          const records = yield* source
+            .read({
+              ids: group.ids,
+              fields: allowed,
+              principal,
+              ...(Object.keys(windows).length === 0 ? {} : { windows }),
+            })
+            .pipe(
+              Effect.catchTag('RemoteServerError', error =>
+                Effect.fail(new RemoteReadError({ message: error.message })),
+              ),
+            )
+
+          for (const record of records) {
+            // Null-prototype so a crafted field name (`__proto__`) cannot reach
+            // the prototype, and `Object.hasOwn` so inherited names are ignored.
+            const values: Record<string, unknown> = Object.create(null)
+            for (const field of allowed) {
+              if (Object.hasOwn(record.values, field)) values[field] = record.values[field]
+            }
+            entities.push({ entity: name, id: record.id, values })
+
+            const key = `${name}:${record.id}`
+            const known = fetched.get(key) ?? new Set<string>()
+            for (const field of allowed) known.add(field)
+            fetched.set(key, known)
+
+            // Follow each allowed relation's refs into the next level, asking
+            // only for fields this batch has not read of that target yet.
+            for (const [field, relation] of Object.entries(group.relations ?? {})) {
+              if (!allowedSet.has(field) || !Object.hasOwn(values, field)) continue
+              for (const ref of refsIn(values[field])) {
+                if (ref.entity !== relation.entity) continue
+                const read = fetched.get(`${relation.entity}:${ref.id}`)
+                const fields = relation.fields.filter(name => read?.has(name) !== true)
+                if (fields.length === 0) continue
+                next.push({
+                  entity: relation.entity,
+                  id: ref.id,
+                  fields,
+                  ...(relation.windows === undefined ? {} : { windows: relation.windows }),
+                  ...(relation.relations === undefined ? {} : { relations: relation.relations }),
+                })
+              }
+            }
+          }
+        }
+        pending = next
       }
 
       return { entities }
@@ -357,6 +433,8 @@ export const RemoteServer = {
     }),
 
     FoldkitRemoteLive: payload => {
+      const mismatch = protocolMismatch(payload.version)
+      if (mismatch !== undefined) return Stream.fail(mismatch)
       const entities = [...new Set(payload.requirements.map(request => request.entity))]
       const streams = entities.flatMap(entity => {
         const source = server.live.get(entity)

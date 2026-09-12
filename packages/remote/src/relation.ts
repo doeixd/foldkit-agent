@@ -1,0 +1,95 @@
+/**
+ * Relation values on the wire and in the store: a ref key (`"Entity:id"`), a
+ * nullable ref key, an array of ref keys, or a page of ref keys. The planner
+ * follows them into the store; the server follows them into the next read.
+ */
+import type { Schema } from 'effect'
+
+export interface RefParts {
+  readonly entity: string
+  readonly id: string
+}
+
+/** Marks the codec `Entity.ref`/`Entity.refPage` produce, so a Selection can tell the field's shape. */
+export const RelationAnnotation = 'foldkitRemoteRelation'
+
+export type RelationKind = 'one' | 'many' | 'page'
+
+export interface RelationShape {
+  readonly kind: RelationKind
+  readonly nullable: boolean
+}
+
+const refParts = (encoded: string): RefParts => {
+  const separator = encoded.indexOf(':')
+  return separator === -1
+    ? { entity: encoded, id: '' }
+    : { entity: encoded.slice(0, separator), id: encoded.slice(separator + 1) }
+}
+
+/**
+ * The refs a relation value carries, in order. Anything that is not a ref key,
+ * an array of them, or a page of them contributes nothing.
+ */
+export const refsIn = (value: unknown): ReadonlyArray<RefParts> => {
+  if (typeof value === 'string') return [refParts(value)]
+  if (Array.isArray(value)) return value.filter(item => typeof item === 'string').map(refParts)
+  if (value !== null && typeof value === 'object') {
+    const refs = (value as { readonly refs?: unknown }).refs
+    if (Array.isArray(refs)) return refs.filter(item => typeof item === 'string').map(refParts)
+  }
+  return []
+}
+
+/** A page of refs as the wire and the store hold it. */
+export const isRefPage = (
+  value: unknown,
+): value is {
+  readonly refs: ReadonlyArray<string>
+  readonly hasNext: boolean
+  readonly hasPrevious: boolean
+} => {
+  if (value === null || typeof value !== 'object') return false
+  const page = value as Record<string, unknown>
+  return (
+    Array.isArray(page.refs) &&
+    page.refs.every(ref => typeof ref === 'string') &&
+    typeof page.hasNext === 'boolean' &&
+    typeof page.hasPrevious === 'boolean'
+  )
+}
+
+interface AstLike {
+  readonly _tag: string
+  readonly annotations?: Readonly<Record<string, unknown>> | undefined
+  readonly types?: ReadonlyArray<AstLike> | undefined
+  readonly rest?: ReadonlyArray<AstLike> | undefined
+}
+
+/**
+ * The relation shape an entity field schema declares: a ref (`one`), a nullable
+ * ref, an array of refs (`many`), or a page of refs (`page`). `undefined` for a
+ * scalar field, which cannot take a nested selection.
+ */
+export const relationShape = (schema: Schema.Top): RelationShape | undefined =>
+  shapeOf(schema.ast as unknown as AstLike, false)
+
+const shapeOf = (ast: AstLike, nullable: boolean): RelationShape | undefined => {
+  const annotated = ast.annotations?.[RelationAnnotation]
+  if (annotated === 'one' || annotated === 'page') return { kind: annotated, nullable }
+  if (ast._tag === 'Arrays') {
+    const item = ast.rest?.[0]
+    return item !== undefined && shapeOf(item, false)?.kind === 'one'
+      ? { kind: 'many', nullable }
+      : undefined
+  }
+  if (ast._tag === 'Union') {
+    const members = ast.types ?? []
+    const optional = members.some(member => member._tag === 'Null' || member._tag === 'Undefined')
+    for (const member of members) {
+      const shape = shapeOf(member, optional)
+      if (shape !== undefined) return shape
+    }
+  }
+  return undefined
+}

@@ -1,11 +1,14 @@
 import { Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
 import { describe, expect, it } from 'vitest'
-import { ReadBatch, ReadBatchResult, RemoteRpc } from '../src/index.js'
+import { REMOTE_PROTOCOL_VERSION, ReadBatch, ReadBatchResult, RemoteRpc } from '../src/index.js'
 
 describe('Remote wire', () => {
   it('round-trips the read batch schemas', () => {
-    const batch = { requests: [{ entity: 'User', id: 'u1', fields: ['id', 'name'] }] }
+    const batch = {
+      version: REMOTE_PROTOCOL_VERSION,
+      requests: [{ entity: 'User', id: 'u1', fields: ['id', 'name'] }],
+    }
     expect(Schema.decodeUnknownSync(ReadBatch)(batch)).toEqual(batch)
     expect(Schema.encodeSync(ReadBatch)(batch)).toEqual(batch)
 
@@ -15,6 +18,7 @@ describe('Remote wire', () => {
 
   it('round-trips a relation window on a read request', () => {
     const batch = {
+      version: REMOTE_PROTOCOL_VERSION,
       requests: [
         {
           entity: 'Project',
@@ -54,6 +58,7 @@ describe('Remote wire', () => {
     const program = Effect.gen(function* () {
       const client = yield* RpcTest.makeClient(RemoteRpc)
       const read = yield* client.FoldkitRemoteRead({
+        version: REMOTE_PROTOCOL_VERSION,
         requests: [
           { entity: 'User', id: 'u1', fields: ['id', 'name'] },
           { entity: 'User', id: 'u1', fields: ['name'] },

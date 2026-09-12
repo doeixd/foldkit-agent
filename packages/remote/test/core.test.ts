@@ -67,11 +67,11 @@ describe('Remote core', () => {
     expect(Numeric.ref(7).id).toBe('7')
   })
 
-  it('preserves nested selection key order and schema', () => {
+  it('preserves nested selection key order, schema, and relation requirement', () => {
     const Owner = Entity.make('Owner', Schema.Struct({ id: Schema.String, name: Schema.String }))
     const Project = Entity.make(
       'Project',
-      Schema.Struct({ id: Schema.String, name: Schema.String, owner: Owner.schema }),
+      Schema.Struct({ id: Schema.String, name: Schema.String, owner: Entity.ref(Owner) }),
     )
     const selection = Selection.make(Project, {
       name: true,
@@ -79,6 +79,7 @@ describe('Remote core', () => {
     })
 
     expect(selection.fields).toEqual(['name', 'owner'])
+    expect(selection.relations).toEqual({ owner: { entity: 'Owner', fields: ['id', 'name'] } })
     const decoded = Schema.decodeUnknownSync(
       selection.schema as unknown as Schema.ConstraintDecoder<unknown>,
     )({

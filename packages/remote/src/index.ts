@@ -7,7 +7,14 @@
  */
 import { Context, Effect, Layer, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
-import type { Contract, ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
+import type {
+  Contract,
+  ModelRef,
+  Projection,
+  RelationRequirement,
+  Requirement,
+  Surface,
+} from 'foldkit-surface'
 import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
 import {
   addLayer,
@@ -45,6 +52,7 @@ import {
 } from './store.js'
 import { plan, windowKey, type PlanOptions } from './plan.js'
 import { RemotePolicy } from './policy.js'
+import { RelationAnnotation, isRefPage, refsIn, relationShape } from './relation.js'
 import {
   MutationRequest,
   MutationResult,
@@ -54,8 +62,10 @@ import {
   ReadBatch,
   ReadBatchResult,
   ReadRequest,
+  REMOTE_PROTOCOL_VERSION,
   RemoteLiveError,
   RemoteMutationError,
+  RemoteProtocolError,
   RemoteQueryError,
   RemoteReadError,
   RemoteRpc,
@@ -69,6 +79,7 @@ type AnySchema = Schema.Schema<unknown>
 export * from './store.js'
 export * from './plan.js'
 export * from './policy.js'
+export * from './relation.js'
 export * from './connection.js'
 export * from './query.js'
 export * from './mutation.js'
@@ -126,12 +137,17 @@ const refCodec = <Name extends string, F extends Schema.Struct.Fields>(): Schema
   EntityRef<Name, F>,
   string
 > =>
-  Schema.Struct({ entity: Schema.String, id: Schema.String }).pipe(
-    Schema.encodeTo(Schema.String, {
-      decode: SchemaGetter.transform(decodeRef),
-      encode: SchemaGetter.transform(encodeRef),
-    }),
-  ) as unknown as Schema.Codec<EntityRef<Name, F>, string>
+  Schema.Struct({ entity: Schema.String, id: Schema.String })
+    .pipe(
+      Schema.encodeTo(Schema.String, {
+        decode: SchemaGetter.transform(decodeRef),
+        encode: SchemaGetter.transform(encodeRef),
+      }),
+    )
+    .annotate({ [RelationAnnotation]: 'one' }) as unknown as Schema.Codec<
+    EntityRef<Name, F>,
+    string
+  >
 
 export interface EntityPatch<Name extends string, F extends Schema.Struct.Fields> {
   readonly entity: Name
@@ -165,7 +181,7 @@ const refPageCodec = <Name extends string, F extends Schema.Struct.Fields>(): Sc
     refs: Schema.Array(refCodec<Name, F>()),
     hasNext: Schema.Boolean,
     hasPrevious: Schema.Boolean,
-  }) as unknown as Schema.Codec<
+  }).annotate({ [RelationAnnotation]: 'page' }) as unknown as Schema.Codec<
     RefPage<Name, F>,
     {
       readonly refs: ReadonlyArray<string>
@@ -228,36 +244,89 @@ export const Entity = {
 // Selection
 // ===========================================================================
 
-export interface Selection<Value, Name extends string = string> {
+/** One page of a paginated relation with each target assembled through a nested selection. */
+export interface Page<Item> {
+  readonly items: ReadonlyArray<Item>
+  readonly hasNext: boolean
+  readonly hasPrevious: boolean
+}
+
+/**
+ * The fields a projection reads of one entity, plus the slice it reads of each
+ * relation's target. `Shape` tells a parent selection whether this one is a
+ * paginated relation (`connection`) or a plain entity slice (`entity`).
+ */
+export interface Selection<
+  Value,
+  Name extends string = string,
+  Shape extends 'entity' | 'connection' = 'entity' | 'connection',
+> {
   readonly entity: Name
   readonly fields: readonly string[]
   /** A pure codec: entity fields carry no decoding or encoding services. */
   readonly schema: Schema.Codec<Value, unknown, never, never>
   /** Pagination windows for nested relation fields, keyed by field name. */
   readonly connections?: Readonly<Record<string, QueryWindow>> | undefined
+  /** The slice required of each nested relation's target, keyed by field name. */
+  readonly relations?: Readonly<Record<string, RelationRequirement>> | undefined
   /** Present when this selection is itself a paginated relation. */
   readonly window?: QueryWindow | undefined
+  /** Phantom: see `Shape`. */
+  readonly shape?: Shape
 }
 
 type SelectionOf<F extends Schema.Struct.Fields> = {
-  readonly [K in keyof F]?: true | Selection<unknown>
+  readonly [K in keyof F]?: true | Selection<unknown, string, 'entity' | 'connection'>
 }
+
+/** A nested selection's value takes the shape of the field it selects through. */
+type NestedValue<Field, Sel> =
+  Sel extends Selection<infer V, string, 'connection'>
+    ? V
+    : Sel extends Selection<infer V, string, 'entity'>
+      ? Field extends ReadonlyArray<EntityRef<any, any>>
+        ? ReadonlyArray<V>
+        : Field extends RefPage<any, any>
+          ? Page<V>
+          : null extends Field
+            ? V | null
+            : V
+      : never
 
 type SelectionValue<F extends Schema.Struct.Fields, Sel> = {
   readonly [K in keyof Sel & keyof F]: Sel[K] extends true
     ? Schema.Schema.Type<F[K]>
-    : Sel[K] extends Selection<infer V>
-      ? V
-      : never
+    : NestedValue<Schema.Schema.Type<F[K]>, Sel[K]>
 }
 
+const pageSchema = (item: AnySchema): AnySchema =>
+  Schema.Struct({
+    items: Schema.Array(item),
+    hasNext: Schema.Boolean,
+    hasPrevious: Schema.Boolean,
+  }) as unknown as AnySchema
+
+/** The requirement a nested selection contributes for its relation's target. */
+const relationOf = (selection: Selection<unknown>): RelationRequirement => ({
+  entity: selection.entity,
+  fields: selection.fields,
+  ...(selection.connections === undefined ? {} : { windows: selection.connections }),
+  ...(selection.relations === undefined ? {} : { relations: selection.relations }),
+})
+
 export const Selection = {
+  /**
+   * The fields to read of `entity`. A nested `Selection` on a relation field
+   * reads through the ref (or refs, or page of refs) the field holds into the
+   * target's fields; a scalar field cannot take one.
+   */
   make: <Name extends string, F extends Schema.Struct.Fields, const Sel extends SelectionOf<F>>(
     entity: EntityDescriptor<Name, F>,
     selection: Sel,
-  ): Selection<SelectionValue<F, Sel>, Name> => {
+  ): Selection<SelectionValue<F, Sel>, Name, 'entity'> => {
     const picked: Record<string, AnySchema> = {}
     const connections: Record<string, QueryWindow> = {}
+    const relations: Record<string, RelationRequirement> = {}
     for (const key of Object.keys(selection)) {
       const choice = (selection as Record<string, unknown>)[key]
       if (choice === true) {
@@ -265,8 +334,29 @@ export const Selection = {
         continue
       }
       const nested = choice as Selection<unknown>
-      picked[key] = nested.schema as AnySchema
-      if (nested.window !== undefined) connections[key] = nested.window
+      if (nested.window !== undefined) {
+        // A connection: the nested selection already carries its page codec.
+        connections[key] = nested.window
+        picked[key] = nested.schema as AnySchema
+        if (nested.fields.length > 0) relations[key] = relationOf(nested)
+        continue
+      }
+      const shape = relationShape(entity.fields[key] as Schema.Top)
+      if (shape === undefined) {
+        throw new Error(
+          `Selection.make: "${key}" on "${entity.name}" is not a relation field, so it cannot take a nested selection`,
+        )
+      }
+      const item = nested.schema as AnySchema
+      picked[key] =
+        shape.kind === 'many'
+          ? (Schema.Array(item) as unknown as AnySchema)
+          : shape.kind === 'page'
+            ? pageSchema(item)
+            : shape.nullable
+              ? (Schema.NullOr(item) as unknown as AnySchema)
+              : item
+      relations[key] = relationOf(nested)
     }
     return {
       entity: entity.name,
@@ -278,24 +368,43 @@ export const Selection = {
         never
       >,
       ...(Object.keys(connections).length === 0 ? {} : { connections }),
+      ...(Object.keys(relations).length === 0 ? {} : { relations }),
     }
   },
 
-  /** A paginated relation: one page of refs to `entity`, with a window. */
-  connection: <Name extends string, F extends Schema.Struct.Fields>(
+  /**
+   * A paginated relation: one page of refs to `entity` with a window, or, with
+   * a nested selection, one page of targets assembled through it.
+   */
+  connection: (<Name extends string, F extends Schema.Struct.Fields, Item = never>(
     entity: EntityDescriptor<Name, F>,
     window: QueryWindow,
-  ): Selection<RefPage<Name, F>, Name> => ({
+    selection?: Selection<Item, Name, 'entity'>,
+  ): Selection<RefPage<Name, F> | Page<Item>, Name, 'connection'> => ({
     entity: entity.name,
-    fields: [],
-    schema: Entity.refPage(entity) as unknown as Schema.Codec<
-      RefPage<Name, F>,
+    fields: selection?.fields ?? [],
+    schema: (selection === undefined
+      ? Entity.refPage(entity)
+      : pageSchema(selection.schema as AnySchema)) as unknown as Schema.Codec<
+      RefPage<Name, F> | Page<Item>,
       unknown,
       never,
       never
     >,
     window,
-  }),
+    ...(selection?.connections === undefined ? {} : { connections: selection.connections }),
+    ...(selection?.relations === undefined ? {} : { relations: selection.relations }),
+  })) as {
+    <Name extends string, F extends Schema.Struct.Fields>(
+      entity: EntityDescriptor<Name, F>,
+      window: QueryWindow,
+    ): Selection<RefPage<Name, F>, Name, 'connection'>
+    <Name extends string, F extends Schema.Struct.Fields, Item>(
+      entity: EntityDescriptor<Name, F>,
+      window: QueryWindow,
+      selection: Selection<Item, Name, 'entity'>,
+    ): Selection<Page<Item>, Name, 'connection'>
+  },
 }
 
 // ===========================================================================
@@ -696,7 +805,10 @@ export class RemoteClient extends Context.Service<
   {
     readonly read: (
       batch: Schema.Schema.Type<typeof ReadBatch>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError>
+    ) => Effect.Effect<
+      Schema.Schema.Type<typeof ReadBatchResult>,
+      RemoteReadError | RemoteProtocolError
+    >
     readonly query: (
       request: Schema.Schema.Type<typeof QueryRequest>,
     ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
@@ -706,7 +818,7 @@ export class RemoteClient extends Context.Service<
     readonly live: (request: {
       readonly requirements: ReadonlyArray<Requirement>
       readonly after: LiveCursor
-    }) => Stream.Stream<LiveEvent, RemoteLiveError>
+    }) => Stream.Stream<LiveEvent, RemoteLiveError | RemoteProtocolError>
   }
 >()('foldkit-remote/RemoteClient') {}
 
@@ -722,17 +834,6 @@ interface WireRefPage {
   readonly refs: ReadonlyArray<string>
   readonly hasNext: boolean
   readonly hasPrevious: boolean
-}
-
-const isWireRefPage = (value: unknown): value is WireRefPage => {
-  if (value === null || typeof value !== 'object') return false
-  const page = value as Record<string, unknown>
-  return (
-    Array.isArray(page.refs) &&
-    page.refs.every(ref => typeof ref === 'string') &&
-    typeof page.hasNext === 'boolean' &&
-    typeof page.hasPrevious === 'boolean'
-  )
 }
 
 /** Appends (after) or prepends (before) an incoming page onto the stored one. */
@@ -793,7 +894,7 @@ const writeRead = (
         for (const [field, direction] of entry.merge) {
           const incoming = values[field]
           const existing = previous.values[field]
-          if (isWireRefPage(incoming) && isWireRefPage(existing)) {
+          if (isRefPage(incoming) && isRefPage(existing)) {
             merged[field] = mergeWireRefPages(existing, incoming, direction)
           }
         }
@@ -802,6 +903,79 @@ const writeRead = (
     }
     return writeEntity(current, key, values, now, entry?.windows)
   }, store)
+}
+
+interface Assembled {
+  readonly values: unknown
+  readonly refreshing: boolean
+}
+
+/**
+ * Reads an entity's selected fields out of the store, following each nested
+ * relation into its targets. `undefined` means some field, at any depth, is
+ * not present yet. A tombstoned target reads as `null` (or is dropped from a
+ * list), so the Selection's codec decides whether that is a failure.
+ */
+const assemble = (
+  store: EntityStore,
+  key: string,
+  requirement: RelationRequirement,
+): Assembled | undefined => {
+  const values: Record<string, unknown> = {}
+  let refreshing = false
+  for (const field of requirement.fields) {
+    const value = readField(store, key, field)
+    if (Option.isNone(value)) return undefined
+    refreshing ||= isFieldStale(store, key, field)
+    const relation = requirement.relations?.[field]
+    if (relation === undefined) {
+      values[field] = value.value
+      continue
+    }
+    const nested = assembleRelation(store, value.value, relation)
+    if (nested === undefined) return undefined
+    values[field] = nested.values
+    refreshing ||= nested.refreshing
+  }
+  return { values, refreshing }
+}
+
+const assembleTarget = (
+  store: EntityStore,
+  ref: { readonly entity: string; readonly id: string },
+  relation: RelationRequirement,
+): Assembled | 'absent' | undefined => {
+  const key = entityKey(ref.entity, ref.id)
+  return isTombstone(store, key) ? 'absent' : assemble(store, key, relation)
+}
+
+/** Assembles the targets a relation value refers to, in the value's own shape. */
+const assembleRelation = (
+  store: EntityStore,
+  value: unknown,
+  relation: RelationRequirement,
+): Assembled | undefined => {
+  if (value === null || value === undefined) return { values: null, refreshing: false }
+  const refs = refsIn(value)
+  const targets: unknown[] = []
+  let refreshing = false
+  for (const ref of refs) {
+    const target = assembleTarget(store, ref, relation)
+    if (target === undefined) return undefined
+    if (target === 'absent') continue
+    targets.push(target.values)
+    refreshing ||= target.refreshing
+  }
+  if (typeof value === 'string') {
+    return { values: targets.length === 0 ? null : targets[0], refreshing }
+  }
+  if (isRefPage(value)) {
+    return {
+      values: { items: targets, hasNext: value.hasNext, hasPrevious: value.hasPrevious },
+      refreshing,
+    }
+  }
+  return { values: targets, refreshing }
 }
 
 const remoteError = (error: { readonly _tag: string; readonly message: string }): RemoteError => ({
@@ -879,7 +1053,11 @@ export const inspectEntity = (
 export interface RemoteRpcClient<R = never> {
   readonly FoldkitRemoteRead: (
     payload: Schema.Schema.Type<typeof ReadBatch>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError, R>
+  ) => Effect.Effect<
+    Schema.Schema.Type<typeof ReadBatchResult>,
+    RemoteReadError | RemoteProtocolError,
+    R
+  >
   readonly FoldkitRemoteQuery: (
     payload: Schema.Schema.Type<typeof QueryRequest>,
   ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
@@ -888,7 +1066,11 @@ export interface RemoteRpcClient<R = never> {
   ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError, R>
   readonly FoldkitRemoteLive: (
     payload: Schema.Schema.Type<typeof LiveRequirement>,
-  ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError, R>
+  ) => Stream.Stream<
+    Schema.Schema.Type<typeof LiveChange>,
+    RemoteLiveError | RemoteProtocolError,
+    R
+  >
 }
 
 /** Reconstructs the client's `LiveEvent` from the wire's flattened `LiveChange`. */
@@ -1036,30 +1218,17 @@ export const Remote = {
     (id: string): Projection<AppModel, RemoteData<Value>> => ({
       Model: remoteDataSchema(selection.schema),
       dependencies: [],
-      requirements: [
-        {
-          entity: selection.entity,
-          id,
-          fields: selection.fields,
-          ...(selection.connections === undefined ? {} : { windows: selection.connections }),
-        },
-      ],
+      requirements: [{ ...relationOf(selection), id }],
       read: (root: AppModel): RemoteData<Value> => {
         const store = storeOf(bound, root)
         const key = entityKey(selection.entity, id)
         if (isTombstone(store, key)) return { _tag: 'NotFound' }
-        const values: Record<string, unknown> = {}
-        let refreshing = false
-        for (const field of selection.fields) {
-          const value = readField(store, key, field)
-          if (Option.isNone(value)) return { _tag: 'Initial' }
-          values[field] = value.value
-          refreshing ||= isFieldStale(store, key, field)
-        }
-        const decoded = Schema.decodeUnknownResult(selection.schema)(values)
+        const assembled = assemble(store, key, relationOf(selection))
+        if (assembled === undefined) return { _tag: 'Initial' }
+        const decoded = Schema.decodeUnknownResult(selection.schema)(assembled.values)
         return Result.isFailure(decoded)
           ? { _tag: 'Failed', error: { _tag: 'DecodeError', message: decoded.failure.message } }
-          : refreshing
+          : assembled.refreshing
             ? { _tag: 'Refreshing', value: decoded.success }
             : { _tag: 'Ready', value: decoded.success }
       },
@@ -1108,7 +1277,7 @@ export const Remote = {
     if (missing.length === 0) return store
     yield* Effect.annotateCurrentSpan('requirementCount', missing.length)
     const client = yield* RemoteClient
-    const result = yield* client.read({ requests: missing })
+    const result = yield* client.read({ version: REMOTE_PROTOCOL_VERSION, requests: missing })
     return writeRead(store, missing, result)
   }),
 
@@ -1129,7 +1298,9 @@ export const Remote = {
       query: request => client.FoldkitRemoteQuery(request),
       mutate: request => client.FoldkitRemoteMutate(request),
       live: ({ requirements, after }) =>
-        client.FoldkitRemoteLive({ requirements, after }).pipe(Stream.map(liveEventOf)),
+        client
+          .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
+          .pipe(Stream.map(liveEventOf)),
     }),
 
   /**
@@ -1242,7 +1413,9 @@ export const Remote = {
       Effect.gen(function* () {
         const client = yield* RemoteClient
         const at = now()
-        const result = yield* Effect.result(client.read({ requests: requirements }))
+        const result = yield* Effect.result(
+          client.read({ version: REMOTE_PROTOCOL_VERSION, requests: requirements }),
+        )
         return Result.isFailure(result)
           ? toMessage({
               _tag: 'ReadFailed',
@@ -1334,7 +1507,7 @@ export const Remote = {
               }),
             ),
             Stream.catchIf(
-              (_error): _error is RemoteLiveError => true,
+              (_error): _error is RemoteLiveError | RemoteProtocolError => true,
               error =>
                 Stream.succeed(
                   toMessage({

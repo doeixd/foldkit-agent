@@ -5,6 +5,14 @@
  */
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/unstable/rpc'
+import type { RelationRequirement } from 'foldkit-surface'
+
+/**
+ * The read/live protocol version. A batch names the version it speaks and the
+ * server refuses a mismatch with `RemoteProtocolError`, so a shape change never
+ * drifts silently: bump it whenever `ReadRequest` or `LiveRequirement` change.
+ */
+export const REMOTE_PROTOCOL_VERSION = 2
 
 export class RemoteReadError extends Schema.TaggedError<RemoteReadError>()('RemoteReadError', {
   message: Schema.String,
@@ -19,6 +27,12 @@ export class RemoteLiveError extends Schema.TaggedError<RemoteLiveError>()('Remo
   message: Schema.String,
 }) {}
 
+/** The peer speaks another protocol version; nothing was read. */
+export class RemoteProtocolError extends Schema.TaggedError<RemoteProtocolError>()(
+  'RemoteProtocolError',
+  { message: Schema.String, expected: Schema.Number, received: Schema.Number },
+) {}
+
 export const WindowSchema = Schema.Struct({
   first: Schema.optional(Schema.Number),
   last: Schema.optional(Schema.Number),
@@ -26,15 +40,36 @@ export const WindowSchema = Schema.Struct({
   before: Schema.optional(Schema.String),
 })
 
+/** The slice required of a relation's target; the ids come from the parent's refs. */
+export const RelationRequest: Schema.Codec<RelationRequirement, RelationRequirement> =
+  Schema.Struct({
+    entity: Schema.String,
+    fields: Schema.Array(Schema.String),
+    windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
+    relations: Schema.optional(
+      Schema.Record(
+        Schema.String,
+        Schema.suspend(
+          (): Schema.Codec<RelationRequirement, RelationRequirement> => RelationRequest,
+        ),
+      ),
+    ),
+  })
+
 export const ReadRequest = Schema.Struct({
   entity: Schema.String,
   id: Schema.String,
   fields: Schema.Array(Schema.String),
   /** Pagination window per relation field. */
   windows: Schema.optional(Schema.Record(Schema.String, WindowSchema)),
+  /** The slice required of each relation field's target, resolved in the same read. */
+  relations: Schema.optional(Schema.Record(Schema.String, RelationRequest)),
 })
 
-export const ReadBatch = Schema.Struct({ requests: Schema.Array(ReadRequest) })
+export const ReadBatch = Schema.Struct({
+  version: Schema.Number,
+  requests: Schema.Array(ReadRequest),
+})
 
 export const NormalizedEntity = Schema.Struct({
   entity: Schema.String,
@@ -57,6 +92,7 @@ export const MutationResult = Schema.Struct({
 })
 
 export const LiveRequirement = Schema.Struct({
+  version: Schema.Number,
   requirements: Schema.Array(ReadRequest),
   /** Resume cursor; events at or before it are duplicates. */
   after: Schema.Number,
@@ -110,7 +146,7 @@ export const LiveChange = Schema.Union([
 export const Read = Rpc.make('FoldkitRemoteRead', {
   payload: ReadBatch,
   success: ReadBatchResult,
-  error: RemoteReadError,
+  error: Schema.Union([RemoteReadError, RemoteProtocolError]),
 })
 
 export const Mutate = Rpc.make('FoldkitRemoteMutate', {
@@ -122,7 +158,7 @@ export const Mutate = Rpc.make('FoldkitRemoteMutate', {
 export const Live = Rpc.make('FoldkitRemoteLive', {
   payload: LiveRequirement,
   success: LiveChange,
-  error: RemoteLiveError,
+  error: Schema.Union([RemoteLiveError, RemoteProtocolError]),
   stream: true,
 })
 
