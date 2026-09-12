@@ -244,6 +244,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   false })` fails fast with `EffectFailedError` instead of retrying a failed
   record, and `authorize` may return an `Effect` (it runs inside the append
   transaction, so it has no service requirement).
+- **Canonical hash migration.** `SCHEMA_VERSION` 3 recomputes retained
+  operations' `payload_hash` from canonical JSON, so a payload compacted after
+  the upgrade compares canonically rather than rejecting a reordered retry. A
+  payload already compacted before schema 3 keeps its legacy hash.
 
 ### `foldkit-sync`
 

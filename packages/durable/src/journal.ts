@@ -40,7 +40,7 @@ import {
   UnsupportedJournalVersionError,
 } from './errors.js'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 /** Counters an application can scrape; the default registry already collects them. */
 export const journalMetrics = {
@@ -233,6 +233,19 @@ const canonicalJson = (value: unknown): string | undefined => {
   return stable === undefined ? undefined : JSON.stringify(stable)
 }
 
+/**
+ * The canonical hash of a stored payload, for the schema-3 migration. A payload
+ * that cannot be parsed keeps its legacy hash; a compacted payload has none to
+ * read, so its pre-canonical hash cannot be corrected.
+ */
+const canonicalHash = (input: string): string => {
+  try {
+    return hashPayload(canonicalJson(JSON.parse(input)) ?? input)
+  } catch {
+    return hashPayload(input)
+  }
+}
+
 const journalError = (message: string, cause: unknown): JournalError =>
   new JournalError({ message, cause })
 
@@ -362,7 +375,8 @@ const migrate = (
           yield* sql`ALTER TABLE operations ADD COLUMN payload_hash TEXT`
           // Backfill identities for operations retained from before this column
           // existed, so a later retransmission can still prove its payload. SHA-256
-          // is not available in SQL, so the rows are hashed in JavaScript.
+          // is not available in SQL, so the rows are hashed in JavaScript. The
+          // schema-3 step below recomputes these canonically.
           const retained = yield* sql<{
             readonly key: string
             readonly op_id: string
@@ -372,6 +386,23 @@ const migrate = (
             retained,
             row =>
               sql`UPDATE operations SET payload_hash = ${hashPayload(String(row.input))} WHERE key = ${row.key} AND op_id = ${row.op_id}`,
+            { discard: true },
+          )
+        }
+        if (current < 3) {
+          // Hashes written before canonical encoding would make a compacted row
+          // reject a retry with a different key order. Recompute every retained
+          // payload's hash canonically; an already-compacted row keeps its legacy
+          // hash because its payload is gone.
+          const retained = yield* sql<{
+            readonly key: string
+            readonly op_id: string
+            readonly input: string
+          }>`SELECT key, op_id, input FROM operations WHERE input IS NOT NULL`
+          yield* Effect.forEach(
+            retained,
+            row =>
+              sql`UPDATE operations SET payload_hash = ${canonicalHash(String(row.input))} WHERE key = ${row.key} AND op_id = ${row.op_id}`,
             { discard: true },
           )
         }

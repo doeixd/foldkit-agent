@@ -237,6 +237,10 @@ a rotated journal silently turn an old retry into a new commit.
   service. `authorize` may return an `Effect`, but it runs there too, so it has
   no service requirement and must stay local to the snapshot. An encoded
   operation must be JSON-compatible.
+- Schema 3 recomputes retained operations' `payload_hash` from canonical JSON, so
+  a payload compacted after the upgrade compares canonically. A payload already
+  compacted before it keeps its pre-canonical hash — its content is gone and
+  cannot be re-hashed — so only that legacy row can reject a reordered retry.
 - The `[key, op_id]` and `[key, sequence]` uniqueness is enforced by the table
   schema; a server-authoritative deployment is still a single writer per database
   file. Use one `Journal` handle per file.

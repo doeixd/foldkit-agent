@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -396,12 +397,16 @@ describe('a durable journal', () => {
 
       const migrated = new DatabaseSync(path)
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 2 })
-        // The payload identity is backfilled for rows retained from before the
-        // column existed, so a later retransmission can still prove its payload.
+        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 3 })
+        // The payload identity is recomputed canonically, so a later retransmission
+        // with a different key order still proves its payload.
         expect(
           migrated.prepare('SELECT payload_hash FROM operations WHERE op_id = ?').get('a:1'),
-        ).toMatchObject({ payload_hash: expect.any(String) })
+        ).toMatchObject({
+          payload_hash: createHash('sha256')
+            .update('{"id":"a","kind":"add","opId":"a:1"}')
+            .digest('hex'),
+        })
       } finally {
         migrated.close()
       }
@@ -438,7 +443,7 @@ describe('a durable journal', () => {
 
       const migrated = new DatabaseSync(path)
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 2 })
+        expect(migrated.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 3 })
       } finally {
         migrated.close()
       }
@@ -465,7 +470,7 @@ describe('a durable journal', () => {
         CREATE TABLE effects (
           key TEXT PRIMARY KEY, status TEXT NOT NULL, result TEXT, error TEXT
         );
-        PRAGMA user_version = 3;
+        PRAGMA user_version = 4;
       `)
       newer.close()
 
@@ -476,12 +481,12 @@ describe('a durable journal', () => {
       )
       expect(result).toMatchObject({
         _tag: 'Failure',
-        failure: { _tag: 'UnsupportedJournalVersionError', found: 3, supported: 2 },
+        failure: { _tag: 'UnsupportedJournalVersionError', found: 4, supported: 3 },
       })
 
       const after = new DatabaseSync(path)
       try {
-        expect(after.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 3 })
+        expect(after.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 4 })
       } finally {
         after.close()
       }
