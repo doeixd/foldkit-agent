@@ -9,6 +9,13 @@ reads, keyset queries, `one`/`many`/`manyToMany` loading with ordering and
 filtering, mutation normalization, a driver-agnostic `DrizzleDatabase` service,
 and client-selected nested pagination (`Selection.connection`, `RefPage`).
 
+**Update.** Since this was drafted, `remote` gained the full submodel this
+document treats as B4: a typed connection store, optimistic layers, live and
+mutation state, and a `RemoteMessage` reducer (`fec7929`, `c966d00`). Step 8 is
+therefore landed in core, and `foldkit-remote-drizzle` integrates with it —
+`updateRemote`'s `ReadReceived` case calls the `writeRead` this work introduced.
+Only the pieces this document already marks "measured/deferred" remain.
+
 This document gives, for each decision, the current behaviour, what it costs,
 the options, their implications, and a recommendation. A summary table and a
 suggested sequence are at the end.
@@ -308,8 +315,8 @@ dialects in one client is a bug factory.
 3. **Nullable ordering fix** — done (`6aca3b7`): NULL-aware keyset branches
    shared by `query` and relations.
 4. **D1 client accumulation** — page merge landed (`afc3d2c`): `writeRead`
-   appends/prepends a cursor page. A full segmented `Connection` value/store (B4)
-   remains and should be designed with top-level queries.
+   appends/prepends a cursor page. The full segmented `Connection` value/store
+   (B4) landed in `remote` core (`fec7929`, `c966d00`).
 5. **D3 (A2 row-level relation `where`)** — done (`d43c182`): a principal-scoped
    filter per collection relation on `source`.
 6. **D4** — counts landed (`b7d7f39`); generalize beyond counts only if an app
@@ -323,7 +330,7 @@ dialects in one client is a bug factory.
 | Decision | Recommended option | Effort | Blast radius | Risk if deferred |
 | --- | --- | --- | --- | --- |
 | D1 cursor | A2 single-parent, C1 id cursor | M | adapter + server | Resolved server-side (`ce7dec6`); batched relations are first/last only |
-| D1 accumulation | B2/B3-lite (`afc3d2c`), B4 long-term | L | client model | Partial: no segmented `Connection`/GC |
+| D1 accumulation | B2/B3-lite (`afc3d2c`); B4 in `remote` core (`fec7929`) | L | client model | Resolved |
 | D2 window change | A2 record applied window | M | store + persistence + read path | Resolved (`8bdebdd`) |
 | D3 relation authz | A1/A5 field gating; A2 landed (`d43c182`) | S–M | adapter (A2) | Target ids revealed unless fields are gated |
 | D4 computed | A1 defer, A2 counts later | S–M | adapter | Counts landed (`b7d7f39`); other aggregates absent |
@@ -337,8 +344,9 @@ dialects in one client is a bug factory.
   single parent; A3 (a per-parent window protocol) remains available if a batched
   per-parent cursor is ever needed.
 - Should `observe`'s Message carry the plan's requests so `writeRead` can record
-  windows, or should the app recompute them?
+  windows, or should the app recompute them? **Resolved:** `RemoteMessage.
+  ReadReceived` carries `requests`.
 - Is `RemoteModel.connections` one slot for nested and top-level connections, or
-  two? (Decides B3 vs B4.)
+  two? **Resolved:** one store keyed by connection identity (`fec7929`).
 - Are target ids confidential in the intended deployments? (Decides whether D3
   needs A2/A4 at all.)
