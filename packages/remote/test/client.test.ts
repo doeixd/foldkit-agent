@@ -1,6 +1,6 @@
 import { Effect, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Remote, RemoteClient, type RemoteRpcClient } from '../src/index.js'
+import { Remote, RemoteClient, liveEventOf, type RemoteRpcClient } from '../src/index.js'
 
 const batch = {
   entities: [{ entity: 'User', id: 'u1', values: { name: 'ada' } }],
@@ -51,5 +51,51 @@ describe('Remote.clientLayer', () => {
         cursor: 1,
       },
     ])
+  })
+})
+
+describe('liveEventOf', () => {
+  it('reconstructs every wire variant as its LiveEvent', () => {
+    expect(liveEventOf({ _tag: 'EntityDeleted', cursor: 2, entity: 'User', id: 'u1' })).toEqual({
+      _tag: 'EntityDeleted',
+      ref: { entity: 'User', id: 'u1' },
+      cursor: 2,
+    })
+
+    expect(
+      liveEventOf({
+        _tag: 'ConnectionInsert',
+        cursor: 3,
+        connection: 'c1',
+        position: 'prepend',
+        edge: { entity: 'User', id: 'u1', key: 'k' },
+      }),
+    ).toEqual({
+      _tag: 'ConnectionInsert',
+      connection: 'c1',
+      position: 'prepend',
+      edge: { key: 'k', ref: { entity: 'User', id: 'u1' } },
+      cursor: 3,
+    })
+
+    expect(
+      liveEventOf({
+        _tag: 'ConnectionRemove',
+        cursor: 4,
+        connection: 'c1',
+        edge: { entity: 'User', id: 'u1', key: 'k' },
+      }),
+    ).toEqual({
+      _tag: 'ConnectionRemove',
+      connection: 'c1',
+      edge: { key: 'k', ref: { entity: 'User', id: 'u1' } },
+      cursor: 4,
+    })
+
+    expect(liveEventOf({ _tag: 'ConnectionInvalidate', cursor: 5, connection: 'c1' })).toEqual({
+      _tag: 'ConnectionInvalidate',
+      connection: 'c1',
+      cursor: 5,
+    })
   })
 })
