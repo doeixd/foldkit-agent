@@ -23,7 +23,7 @@ const TodoAgent = Agent.forApplication<Principal>()(App)
  * Nothing here reimplements application behaviour. Every capability is an
  * existing Message that `update` already knows how to handle.
  */
-export const AppAgent = TodoAgent.define({
+export const AppAgent = TodoAgent.make({
   // What an agent may see. `lastError` is deliberately not projected.
   context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
 

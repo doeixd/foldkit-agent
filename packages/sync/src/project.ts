@@ -2,7 +2,7 @@
  * A writable projection of an application Model built from Surface `ModelRef`s:
  * the shared Schema, how to read the shared fields, and how to write them back
  * leaving local fields untouched. This is the Surface-based replacement for the
- * removed `pick` spike; `Sync.forApplication(App).define` compiles it to `defineSync`'s
+ * removed `pick` spike; `Sync.forApplication(App).make` compiles it to `defineSync`'s
  * `shared`/`empty`.
  */
 import { Schema } from 'effect'

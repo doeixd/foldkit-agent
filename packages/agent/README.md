@@ -73,7 +73,7 @@ const App = Surface.application({
 
 const TodoAgent = Agent.forApplication(App)
 
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   // What an agent may see: a Surface projection, so sync and the agent can share
   // the same value. `lastError` is deliberately not selected.
   context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
@@ -123,7 +123,7 @@ principal must be given a `principal` provider of the matching type.
 | `Agent.exposeSubset(subset, variants)` | The same, restricted to a `Surface.messages` subset. |
 | `Agent.variant(config)` | A mapped variant whose callbacks are inferred from its `input`. |
 | `Agent.resource(name, options)` | A named read-only projection of Model state. |
-| `Agent.define({ context, messages, resources })` | The protocol-neutral contract; `context` is any Surface projection. |
+| `Agent.make({ context, messages, resources })` | The protocol-neutral contract; `context` is any Surface projection. |
 | `Agent.forApplication(App)` / `Agent.forApplication<Principal>()(App)` | The above, with `Model` inferred from a `Surface.application`; the curried form supplies a `Principal`. |
 | `Agent.forModel<Model>()` | The same, when only a Model (no application) is available. |
 | `Agent.bind({ definition, host })` | Binds the contract to a live Runtime. |

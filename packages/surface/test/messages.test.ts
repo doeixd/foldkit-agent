@@ -21,7 +21,7 @@ describe('Surface.messages', () => {
   })
 
   it('rejects a variant from another application with an identical Message union', () => {
-    const Other = Surface.make({
+    const Other = Surface.application({
       Model: App.Model,
       Message: defineMessageUnion({
         CreatedTodo: { id: Schema.String, title: Schema.String },
@@ -55,7 +55,7 @@ describe('Surface.messages', () => {
   })
 
   it('rejects subsets from different applications with an identical union', () => {
-    const Other = Surface.make({
+    const Other = Surface.application({
       Model: App.Model,
       Message: defineMessageUnion({
         CreatedTodo: { id: Schema.String, title: Schema.String },

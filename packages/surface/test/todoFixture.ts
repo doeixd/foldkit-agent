@@ -15,10 +15,10 @@ export const Message = defineMessageUnion({
   SelectedTodo: { id: Schema.String },
 })
 
-export const App = Surface.make({ Model, Message })
+export const App = Surface.application({ Model, Message })
 
 /** The Surface half of the canonical example in REVISION_PLAN.md §11. */
-export const TodoList = Surface.define(App, 'TodoList', {
+export const TodoList = Surface.make(App, 'TodoList', {
   model: ({ model }) => Projection.struct({ todos: model.todos, selection: model.selectedTodoId }),
   messages: [Message.CreatedTodo, Message.RenamedTodo],
 })

@@ -534,7 +534,7 @@ describe('a server agent', () => {
   it('commits a dispatch as an operation a replica converges on', async () => {
     server.append(operation('seed', 1, created('a')), principal)
     const agent = Agent.bind({
-      definition: SyncAgent.define({
+      definition: SyncAgent.make({
         messages: SyncAgent.expose(Message, { RenamedTodo: rename }),
       }),
       host: serverAgentHost({ journal: server, principal }),
@@ -556,7 +556,7 @@ describe('a server agent', () => {
 
   it('refuses a capability the principal may not invoke, appending nothing', async () => {
     const agent = Agent.bind({
-      definition: SyncAgent.define({
+      definition: SyncAgent.make({
         messages: SyncAgent.expose(Message, {
           RenamedTodo: {
             ...rename,
@@ -616,7 +616,7 @@ describe('a server agent', () => {
     try {
       guarded.appendAsServer(created('a'), principal, 'seed')
       const agent = Agent.bind({
-        definition: SyncAgent.define({
+        definition: SyncAgent.make({
           messages: SyncAgent.expose(Message, { RenamedTodo: rename }),
         }),
         host: serverAgentHost({ journal: guarded, principal }),

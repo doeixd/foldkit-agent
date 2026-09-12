@@ -289,7 +289,7 @@ const RenameUser = Mutation.make('RenameUser', {
 const Data = Remote.make({ entities: [User], mutations: [RenameUser] })
 const Model = Schema.Struct({ remote: Data.Model })
 const Message = defineMessageUnion({ Ping: {} })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 const AppRemote = Remote.at(Data, App.model.remote)
 
 const FakeClient = Layer.succeed(RemoteClient, {

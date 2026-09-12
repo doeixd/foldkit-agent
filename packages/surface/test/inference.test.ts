@@ -11,7 +11,7 @@ const Model = Schema.Struct({
   todos: Schema.Array(Schema.Struct({ id: Schema.String, title: Schema.String })),
 })
 const Message = defineMessageUnion({ Ping: {} })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 
 const example = {
   session: { user: { name: 'ada' } },
@@ -130,8 +130,8 @@ describe('Surface runtime', () => {
 
   it('rejects duplicate Surface names in a registry', () => {
     const model = () => Projection.struct({ name: App.model.session.user.name })
-    const a = Surface.define(App, 'Card', { model, messages: [Message.Ping] })
-    const b = Surface.define(App, 'Card', { model, messages: [Message.Ping] })
+    const a = Surface.make(App, 'Card', { model, messages: [Message.Ping] })
+    const b = Surface.make(App, 'Card', { model, messages: [Message.Ping] })
 
     expect(() => Surface.registry(App, [a, b])).toThrow('Duplicate Surface name: Card')
     expect(Surface.registry(App, [a]).surfaces).toEqual([a])
@@ -151,6 +151,6 @@ describe('Surface runtime', () => {
 
   it('rejects a Model field whose name collides with a ModelRef member', () => {
     const Bad = Schema.Struct({ at: Schema.String })
-    expect(() => Surface.make({ Model: Bad, Message })).toThrow('reserved by ModelRef')
+    expect(() => Surface.application({ Model: Bad, Message })).toThrow('reserved by ModelRef')
   })
 })

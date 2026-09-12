@@ -10,7 +10,7 @@ export { indexedDb, type Storage } from './indexedDb.js'
 export {
   forApplication,
   type ApplicationSync,
-  type DefineConfig,
+  type MakeOptions,
   type DefinedSync,
   type MsgOf,
 } from './make.js'

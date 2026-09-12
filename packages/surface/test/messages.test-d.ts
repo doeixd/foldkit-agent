@@ -21,7 +21,7 @@ const describe = (message: Change): string => {
 void describe
 
 const OtherMessage = defineMessageUnion({ Ping: {} })
-const Other = Surface.make({ Model: App.Model, Message: OtherMessage })
+const Other = Surface.application({ Model: App.Model, Message: OtherMessage })
 // @ts-expect-error `Ping` is not a variant of App's Message union
 Surface.messages(App, [Other.Message.Ping])
 
@@ -45,7 +45,7 @@ type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 
 const Transforming = defineMessageUnion({ Set: { value: Schema.NumberFromString } })
-const TransformingApp = Surface.make({ Model: App.Model, Message: Transforming })
+const TransformingApp = Surface.application({ Model: App.Model, Message: Transforming })
 const SetOnly = Surface.messages(TransformingApp, [Transforming.Set])
 const _encoded: Equal<
   (typeof SetOnly.schema)['Encoded'],

@@ -15,13 +15,13 @@ export const Message = defineMessageUnion({
   ClearedSecret: {},
 })
 
-export const App = Surface.make({ Model, Message })
+export const App = Surface.application({ Model, Message })
 
 /** The Message subset the `TodoList` Surface exposes. */
 export type TodoMessage = typeof Message.SelectedTodo.Type | typeof Message.ArchivedTodo.Type
 
 /** A Surface that projects two fields and exposes two of the three Messages. */
-export const TodoList = Surface.define(App, 'TodoList', {
+export const TodoList = Surface.make(App, 'TodoList', {
   model: ({ model }) => Projection.struct({ todos: model.todos, selectedId: model.selectedId }),
   messages: [Message.SelectedTodo, Message.ArchivedTodo],
 })

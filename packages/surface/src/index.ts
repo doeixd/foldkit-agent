@@ -750,14 +750,6 @@ type MergeConstructors<Subs extends readonly MessageSubset<any, any, any, any, a
     : []
 
 export const Surface = {
-  make: <
-    F extends Schema.Struct.Fields,
-    Cases extends Record<string, Schema.Struct.Fields>,
-  >(config: {
-    readonly Model: Schema.Struct<F>
-    readonly Message: MessageUnion<Cases>
-  }): AppScope<Schema.Struct.Type<F>, F, Cases> => makeScope(config),
-
   application,
 
   /**
@@ -942,7 +934,7 @@ export const Surface = {
     }
   },
 
-  define: <
+  make: <
     Root,
     F extends Schema.Struct.Fields,
     Cases extends Record<string, Schema.Struct.Fields>,

@@ -9,7 +9,7 @@ const AgentContext = Schema.Struct({
   todos: Schema.Array(Todo),
 })
 
-const AppAgent = Agent.define({
+const AppAgent = Agent.make({
   context: Projection.fromReader(AgentContext, (model: Model) => ({
     selectedTodoId: model.selectedTodoId,
     todos: model.todos,
@@ -69,7 +69,7 @@ describe('introspection', () => {
   })
 
   it('reports which capabilities run an authorization hook', () => {
-    const guarded = Agent.define({
+    const guarded = Agent.make({
       messages: Agent.expose(Message, {
         RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
         RequestedDeleteTodo: {
@@ -97,7 +97,7 @@ describe('introspection', () => {
   })
 
   it('omits the context schema when no context is projected', () => {
-    const contextless = Agent.define({
+    const contextless = Agent.make({
       messages: Agent.expose(Message, {
         RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
       }),
@@ -113,7 +113,7 @@ describe('introspection', () => {
       read: (model: Model) => model.todos,
     })
     expect(() =>
-      Agent.define({
+      Agent.make({
         messages: Agent.expose(Message, {
           RequestedCreateTodo: { description: 'Create a todo' },
         }),

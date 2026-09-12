@@ -10,7 +10,7 @@ const update = (model: Model, _message: Message) => ({ model })
 const App = Surface.application({ Model, Message: MessageUnion, initial: emptyModel, update })
 
 const TodoAgent = Agent.forApplication(App)
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   context: Surface.pick(App.fields.todos),
   messages: TodoAgent.expose(MessageUnion, { RequestedDeleteTodo: 'Delete' }),
 })
@@ -22,7 +22,7 @@ const _todos: ReadonlyArray<{
 }> = definition.context!.read(emptyModel).todos
 
 const Other = Schema.Struct({ count: Schema.Number })
-TodoAgent.define({
+TodoAgent.make({
   // @ts-expect-error the context projection must focus the application's Model
   context: Projection.of(Other)({ count: true }),
   messages: TodoAgent.expose(MessageUnion, {}),

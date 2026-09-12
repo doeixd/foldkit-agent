@@ -33,7 +33,7 @@ const update = (model: Model, message: Message): Update.Return<Model, Message> =
 const App = Surface.application({ Model: ModelSchema, Message, initial, update })
 const Todos = Surface.pick(App.fields.todos)
 const Changes = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
-const TodoSync = forApplication(App).define({
+const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   durable: Changes,
@@ -114,7 +114,7 @@ describe('Sync.forApplication', () => {
       initial,
       update: faultyUpdate,
     })
-    const sync = forApplication(Faulty).define({
+    const sync = forApplication(Faulty).make({
       documentId: documentId('todos'),
       shared: Surface.pick(Faulty.fields.todos),
       durable: Surface.messages(Faulty, [Message.CreatedTodo, Message.RenamedTodo]),
@@ -169,7 +169,7 @@ describe('Sync.forApplication', () => {
     const OtherChanges = Surface.messages(OtherApp, [OtherMessage.Ping])
 
     expect(() =>
-      forApplication(App).define({
+      forApplication(App).make({
         documentId: documentId('todos'),
         shared: Todos,
         // Structurally similar, but the owner token is a different application.
@@ -179,7 +179,7 @@ describe('Sync.forApplication', () => {
   })
 
   describe('with a custom replay', () => {
-    const Custom = forApplication(App).define({
+    const Custom = forApplication(App).make({
       documentId: documentId('todos'),
       name: 'CustomTodos',
       shared: Todos,

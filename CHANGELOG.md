@@ -15,6 +15,15 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-surface` (private)
 
+- **`make` constructs, `application` scopes.** One vocabulary across the
+  application-contract packages (#60): `forApplication(App)` specializes a
+  package to an application and `make(config)` constructs a contract, as
+  `Ref.make`/`Queue.make` do in Effect and `Remote.make`/`Entity.make` already
+  did here. `Surface.define(App, name, config)` is now `Surface.make`, and the
+  scope-only `Surface.make({ Model, Message })` is folded into
+  `Surface.application`, which already accepted a config without
+  `initial`/`update`. The mixins packages keep their own `Slots.define`/
+  `SurfaceView.define` vocabulary for now.
 - **Reference-based selection.** `Surface.application` generates a reference tree
   (`App.fields`), and `Surface.pick`/`Surface.compose` build writable projections
   from it, so a shared projection is derived from the Model Schema instead of
@@ -197,8 +206,12 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-agent`
 
+- **`define` is `make`.** `Agent.define`, `Agent.forModel<Model>().define`, and
+  `Agent.forApplication(App).define` are `make`, and `DefineOptions` is
+  `MakeOptions`, matching `Sync.forApplication(App).make` and `Surface.make`
+  (#60). `Definition` keeps its name: it is what `make` returns.
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The
-  `define` `context` option now takes a `foldkit-surface` projection — a read-only
+  `make` `context` option now takes a `foldkit-surface` projection — a read-only
   `Projection` (`Projection.of`/`struct`/`fromReader`) or a writable
   `Surface.pick`/`Surface.compose` — and the runtime reads it with `.read`.
   `Agent.forApplication(App)` infers the Model from a `Surface.application` and
@@ -270,7 +283,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 - **Surface-based contract.** The standalone `pick`/`Projection` (#59 spike) is
   gone, superseded by the shared Surface `ModelRef`/`Projection`.
-  `Sync.forApplication(App).define({ documentId, shared, durable })` derives the
+  `Sync.forApplication(App).make({ documentId, shared, durable })` derives the
   shared projection, the durable subset, the initial snapshot, and replay from a
   `Surface.application`, a `Surface.pick`/`Surface.compose` projection, and a
   `Surface.messages` subset; `define({ ..., replay })` replaces the derived replay
@@ -280,12 +293,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   Additive — `defineSync` remains the protocol primitive. `Sync.project` now also
   carries the projection's dependency paths.
 - **One entry point, shaped like Agent's.** `Sync.forApplication(App)` specializes
-  the constructors to an application and `.define(config)` produces the
-  contract, matching `Agent.forApplication(App).define(config)` (#60). The
+  the constructors to an application and `.make(config)` produces the
+  contract, matching `Agent.forApplication(App).make(config)` (#60). The
   earlier `Sync.forApplication(App, config)` and `Sync.make(App, name, config)`
   forms are gone; `Sync.make`'s explicit `initial` and bare constructor array
-  came from the application and a `Surface.messages` subset anyway. `define`
+  came from the application and a `Surface.messages` subset anyway. `make`
   refuses a durable subset whose owner token belongs to a different application.
+  `MakeOptions` names its config.
 - **Derived replay is guarded.** `Sync.forApplication`'s replay refuses a durable
   Message whose `update` returns a Command or changes a Model field outside the
   shared projection, naming the Message and the fields, instead of silently
@@ -298,7 +312,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   the replay's message and cause) when replay throws, so a Message no replica
   could apply is never persisted. The submit-time result seeds the optimistic
   projection, so a read after a submit no longer replays the whole outbox.
-- **Replay documented at the definition.** `DefineConfig.replay` states that a
+- **Replay documented at the definition.** `MakeOptions.replay` states that a
   custom replay is a pure reducer over the shared subset, that only durable
   Messages reach it, that it runs during admission, replay, and optimistic
   projection, and that it is not guarded.

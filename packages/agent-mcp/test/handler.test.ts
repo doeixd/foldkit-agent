@@ -24,7 +24,7 @@ const emptyModel: Model = { todos: [], selectedTodoId: Option.none() }
 
 const TodoAgent = Agent.forModel<Model, { readonly canDelete: boolean }>()
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   context: Projection.of(Schema.Struct({ todos: Schema.Array(Todo) }))({ todos: true }),
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
@@ -122,7 +122,7 @@ describe('lifecycle', () => {
   it('declares no resources capability when the contract has none', async () => {
     const served = AgentMcp.handler({
       agent: Agent.bind({
-        definition: Agent.define({
+        definition: Agent.make({
           messages: Agent.expose(Message, { RequestedCreateTodo: 'Create a todo' }),
         }),
         host: { model: () => emptyModel, dispatch: () => {} },
@@ -344,7 +344,7 @@ describe('resources', () => {
     const serve = async (withProjection: boolean) => {
       const served = AgentMcp.handler({
         agent: TodoAgent.bind({
-          definition: TodoAgent.define({
+          definition: TodoAgent.make({
             ...(withProjection
               ? {
                   context: Projection.of(Schema.Struct({ todos: Schema.Array(Todo) }))({
@@ -549,7 +549,7 @@ describe('cancelling a call in flight', () => {
 
     const served = AgentMcp.handler({
       agent: Agent.bind({
-        definition: Agent.define({
+        definition: Agent.make({
           messages: Agent.expose(Message, {
             RequestedCreateTodo: {
               name: 'create_todo',
@@ -681,7 +681,7 @@ describe('defects at the protocol boundary', () => {
   ): ReturnType<typeof AgentMcp.handler> =>
     AgentMcp.handler({
       agent: TodoAgent.bind({
-        definition: TodoAgent.define({
+        definition: TodoAgent.make({
           context: Projection.fromReader(
             Schema.Struct({ todos: Schema.Array(Todo) }),
             part === 'context' ? boom : (m: Model) => ({ todos: m.todos }),

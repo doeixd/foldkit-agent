@@ -114,7 +114,7 @@ the replica reconciles with the server's authoritative order.
 
 ```ts
 const App = Surface.application({ Model, Message, initial, update })
-const TodoSync = forApplication(App).define({
+const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Surface.pick(App.fields.todos),
   durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo]),

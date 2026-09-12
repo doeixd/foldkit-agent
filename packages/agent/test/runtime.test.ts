@@ -42,7 +42,7 @@ const invocation = (transport = 'webmcp') => ({
   transport,
 })
 
-const AppAgent = Agent.define({
+const AppAgent = Agent.make({
   context: Projection.fromReader(Schema.Struct({ todos: Schema.Array(Todo) }), (model: Model) => ({
     todos: model.todos,
   })),
@@ -109,7 +109,7 @@ const defectOf = (effect: Effect.Effect<unknown, unknown>): Error => {
 
 /** A contract whose projections return values their declared schemas reject. */
 const lyingRuntime = Agent.bind({
-  definition: Agent.define({
+  definition: Agent.make({
     context: Projection.fromReader(
       Schema.Struct({ userId: Schema.String }),
       (): { userId: string } => ({ userId: 4242 }) as unknown as { userId: string },
@@ -131,7 +131,7 @@ const lyingRuntime = Agent.bind({
  * encoded side that adapters put on the wire.
  */
 const encodedRuntime = Agent.bind({
-  definition: Agent.define({
+  definition: Agent.make({
     context: Projection.fromReader(Schema.Struct({ count: Schema.FiniteFromString }), () => ({
       count: 2,
       secret: 'do not serve me',
@@ -224,7 +224,7 @@ describe('AgentRuntime.messages.dispatch', () => {
   })
 
   it('supports an Effect-returning authorize hook', () => {
-    const definition = Agent.define({
+    const definition = Agent.make({
       messages: Agent.expose(MessageUnion, {
         RequestedCreateTodo: {
           name: 'create_todo',
@@ -354,7 +354,7 @@ describe('cancellation', () => {
   const cancellingAgent = (authorize: () => Effect.Effect<boolean>) => {
     const dispatched: Array<Message> = []
     const runtime = Agent.bind({
-      definition: Agent.define({
+      definition: Agent.make({
         messages: Agent.expose(MessageUnion, {
           RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo', authorize },
         }),
@@ -443,7 +443,7 @@ describe('an already-cancelled invocation', () => {
     let authorizeCalls = 0
 
     const runtime = Agent.bind({
-      definition: Agent.define({
+      definition: Agent.make({
         messages: Agent.expose(MessageUnion, {
           RequestedCreateTodo: {
             name: 'create_todo',
@@ -495,7 +495,7 @@ describe('the Model snapshot', () => {
     const dispatched: Array<Message> = []
 
     const runtime = Agent.bind({
-      definition: Agent.define({
+      definition: Agent.make({
         messages: Agent.expose(MessageUnion, {
           RequestedDeleteTodo: {
             name: 'delete_selected_todo',

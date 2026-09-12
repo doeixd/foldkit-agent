@@ -37,7 +37,7 @@ describe('description shorthand', () => {
   })
 
   it('mixes with variants that need more than a description', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       messages: TodoAgent.expose(MessageUnion, {
         RequestedCreateTodo: 'Create a todo',
         RequestedDeleteTodo: {
@@ -57,7 +57,7 @@ describe('description shorthand', () => {
   it('dispatches a shorthand variant like any other', () => {
     const dispatched: Array<Message> = []
     const runtime = TodoAgent.bind({
-      definition: TodoAgent.define({
+      definition: TodoAgent.make({
         messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
       }),
       host: {
@@ -75,7 +75,7 @@ describe('description shorthand', () => {
 describe('optional invocation', () => {
   const dispatched: Array<Message> = []
   const runtime = TodoAgent.bind({
-    definition: TodoAgent.define({
+    definition: TodoAgent.make({
       messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
     }),
     host: {
@@ -132,7 +132,7 @@ describe('optional invocation', () => {
 
 describe('Projection context', () => {
   it('produces a context schema covering exactly the selected fields', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       context: Projection.of(ModelSchema)({ todos: true }),
       messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
     })
@@ -144,7 +144,7 @@ describe('Projection context', () => {
   it('reads through the runtime like a hand-written context', () => {
     const todo = { id: 'a', title: 'A', completed: false }
     const runtime = TodoAgent.bind({
-      definition: TodoAgent.define({
+      definition: TodoAgent.make({
         context: Projection.of(ModelSchema)({ todos: true }),
         messages: TodoAgent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
       }),
@@ -157,7 +157,7 @@ describe('Projection context', () => {
 
 describe('dispatch by Message reference', () => {
   const dispatched: Array<Message> = []
-  const definition = TodoAgent.define({
+  const definition = TodoAgent.make({
     messages: TodoAgent.expose(MessageUnion, {
       RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
       RequestedRenameTodo: {

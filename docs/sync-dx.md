@@ -15,8 +15,8 @@ same primitives rather than grow independent projection systems. Sync's initial
 compatible entry points during migration.
 
 The default field selection is reference-based:
-`Surface.pick(App.fields.todos)`, with `Sync.forApplication(App).define(options)`
-and `Agent.forApplication(App).define(options)` consuming the same application
+`Surface.pick(App.fields.todos)`, with `Sync.forApplication(App).make(options)`
+and `Agent.forApplication(App).make(options)` consuming the same application
 reference. See the
 [usage sketches](../packages/agent/DESIGN.md#usage-sketches-across-packages) for a
 single projection used as agent context and replicated state, then bound to
@@ -81,7 +81,7 @@ const App = Surface.application({
   update,
 })
 
-const TodosSync = Sync.forApplication(App).define({
+const TodosSync = Sync.forApplication(App).make({
   documentId: documentId('todos'),
   shared: Surface.pick(App.fields.todos),
 

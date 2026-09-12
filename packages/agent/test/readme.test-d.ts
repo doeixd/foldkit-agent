@@ -42,7 +42,7 @@ const App = Surface.application({
 
 const TodoAgent = Agent.forApplication(App)
 
-const AppAgent = TodoAgent.define({
+const AppAgent = TodoAgent.make({
   context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {

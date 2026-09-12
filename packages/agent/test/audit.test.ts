@@ -6,7 +6,7 @@ import { type Message, type Model, Message as MessageUnion, emptyModel } from '.
 
 const TodoAgent = Agent.forModel<Model, { readonly user: string; readonly token: string }>()
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   messages: TodoAgent.expose(MessageUnion, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {
@@ -243,7 +243,7 @@ describe('the principal is resolved once per dispatch', () => {
 })
 
 describe('recorded input is a snapshot', () => {
-  const nestedDefinition = TodoAgent.define({
+  const nestedDefinition = TodoAgent.make({
     messages: TodoAgent.expose(MessageUnion, {
       ReceivedTodos: { name: 'receive_todos', description: 'Load todos' },
     }),
@@ -451,7 +451,7 @@ describe('a dispatch that was accepted but did not complete', () => {
     completion: Completion<{ readonly id: string }, Message, Message>,
   ) =>
     Agent.bind({
-      definition: Agent.define({
+      definition: Agent.make({
         messages: Agent.expose(MessageUnion, {
           RequestedDeleteTodo: { name: 'delete_todo', description: 'Delete a todo', completion },
         }),

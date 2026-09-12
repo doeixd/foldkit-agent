@@ -20,6 +20,6 @@ const _selection: string | null = value.selectedTodoId
 void value.missing
 
 const OtherModel = Schema.Struct({ route: Schema.String, extra: Schema.Number })
-const Other = Surface.make({ Model: OtherModel, Message: App.Message })
+const Other = Surface.application({ Model: OtherModel, Message: App.Message })
 // @ts-expect-error projections must share one Model
 Surface.compose(Surface.pick(App.model.todos), Surface.pick(Other.model.route, Other.model.extra))

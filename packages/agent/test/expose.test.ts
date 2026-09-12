@@ -149,7 +149,7 @@ describe('payload-free capabilities', () => {
   it('refuses undeclared input through the runtime, before update', () => {
     const dispatched: Array<unknown> = []
     const runtime = Agent.bind({
-      definition: Agent.define({ messages }),
+      definition: Agent.make({ messages }),
       host: { model: () => emptyModel, dispatch: message => void dispatched.push(message) },
     })
 
@@ -222,7 +222,7 @@ describe('an externally declared empty input that carries checks', () => {
   it('refuses input the declared schema rejects, before update', () => {
     const dispatched: Array<unknown> = []
     const runtime = Agent.bind({
-      definition: Agent.define({ messages }),
+      definition: Agent.make({ messages }),
       host: { model: () => emptyModel, dispatch: message => void dispatched.push(message) },
     })
 
@@ -270,7 +270,7 @@ describe('an externally declared empty input whose check permits invocation', ()
     const before = seen
     const dispatched: Array<unknown> = []
     const runtime = Agent.bind({
-      definition: Agent.define({ messages }),
+      definition: Agent.make({ messages }),
       host: { model: () => emptyModel, dispatch: message => void dispatched.push(message) },
     })
 

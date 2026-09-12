@@ -1,5 +1,5 @@
 /**
- * The Foldkit-facing sync layer: `Sync.forApplication(App).define(config)`
+ * The Foldkit-facing sync layer: `Sync.forApplication(App).make(config)`
  * compiles an application, a writable projection, and a durable Message subset
  * into the low-level `defineSync` contract, and exposes a read-only Surface over
  * the same projection.
@@ -36,7 +36,7 @@ const messageTag = (constructor: unknown): string | undefined => {
   return typeof literal === 'string' ? literal : undefined
 }
 
-export interface DefineConfig<
+export interface MakeOptions<
   AppModel,
   Fields extends Schema.Struct.Fields,
   Subset,
@@ -62,7 +62,7 @@ export interface DefineConfig<
 }
 
 /**
- * The value `define` returns: the low-level `Sync` protocol plus the writable
+ * The value `make` returns: the low-level `Sync` protocol plus the writable
  * projection, the declared Messages, and a read-only Surface over the
  * projection. Exported so a consumer can name the type.
  */
@@ -83,12 +83,12 @@ export interface ApplicationSync<
   F extends Schema.Struct.Fields,
   Cases extends Record<string, Schema.Struct.Fields>,
 > {
-  readonly define: <
+  readonly make: <
     Fields extends Schema.Struct.Fields,
     Subset,
     Ms extends readonly MessageConstructor<AppMessage<AppModel, F, Cases>>[],
   >(
-    config: DefineConfig<AppModel, Fields, Subset, Ms>,
+    config: MakeOptions<AppModel, Fields, Subset, Ms>,
   ) => DefinedSync<AppModel, Fields, AppMessage<AppModel, F, Cases>, Ms>
 }
 
@@ -149,7 +149,7 @@ const derivedReplay = <
 
 /**
  * Specializes the sync constructors to a `Surface.application`, so
- * `Sync.forApplication(App).define({ documentId, shared, durable })` derives the
+ * `Sync.forApplication(App).make({ documentId, shared, durable })` derives the
  * shared codec, the initial snapshot, the durable predicate, and replay from
  * the application, and refuses a subset that belongs to another application.
  * `defineSync` remains the protocol primitive when there is no application to
@@ -162,12 +162,12 @@ export const forApplication = <
 >(
   app: RunnableApplication<AppModel, F, Cases, any>,
 ): ApplicationSync<AppModel, F, Cases> => ({
-  define: <
+  make: <
     Fields extends Schema.Struct.Fields,
     Subset,
     Ms extends readonly MessageConstructor<AppMessage<AppModel, F, Cases>>[],
   >(
-    config: DefineConfig<AppModel, Fields, Subset, Ms>,
+    config: MakeOptions<AppModel, Fields, Subset, Ms>,
   ): DefinedSync<AppModel, Fields, AppMessage<AppModel, F, Cases>, Ms> => {
     type Message = AppMessage<AppModel, F, Cases>
     type Shared = Schema.Struct.Type<Fields>
@@ -207,7 +207,7 @@ export const forApplication = <
       requirements: [],
       read: shared.get,
     }
-    const surface = Surface.define(app, config.name ?? String(config.documentId), {
+    const surface = Surface.make(app, config.name ?? String(config.documentId), {
       model: () => readOnly,
       messages: durable.constructors,
     })

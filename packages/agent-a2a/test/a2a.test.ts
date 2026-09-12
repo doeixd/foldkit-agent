@@ -27,7 +27,7 @@ let dispatched: Array<Message>
 let principal: { readonly canDelete: boolean }
 let emit: (message: Message) => void
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {
@@ -84,7 +84,7 @@ const SlowMessage = defineMessageUnion({
 
 const SlowAgent = Agent.forModel<Model, undefined>()
 
-const slowDefinition = SlowAgent.define({
+const slowDefinition = SlowAgent.make({
   messages: SlowAgent.expose(SlowMessage, {
     RequestedSlowTodo: {
       name: 'slow_todo',

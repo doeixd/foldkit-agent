@@ -20,7 +20,7 @@ const User = Entity.make('User', Schema.Struct({ id: Schema.String, name: Schema
 const Data = Remote.make({ entities: [User] })
 const Model = Schema.Struct({ remote: Data.Model })
 const Message = defineMessageUnion({ Ping: {} })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 const AppRemote = Remote.at(Data, App.model.remote)
 
 const LiveMessage = defineMessageUnion({
@@ -29,7 +29,7 @@ const LiveMessage = defineMessageUnion({
 })
 type LiveMessageType = Schema.Schema.Type<typeof LiveMessage>
 
-const UserPage = Surface.define(App, 'UserPage', {
+const UserPage = Surface.make(App, 'UserPage', {
   Params: Schema.Struct({ userId: Schema.String }),
   model: ({ params }) =>
     Projection.struct({

@@ -17,17 +17,17 @@ export const Message = defineMessageUnion({
   ClickedLike: { index: Schema.Number },
 })
 
-export const App = Surface.make({ Model, Message })
+export const App = Surface.application({ Model, Message })
 
 /** A child Surface over an array slice of the parent's Model. */
-export const PostList = Surface.define(App, 'PostList', {
+export const PostList = Surface.make(App, 'PostList', {
   model: ({ model }) =>
     Projection.struct({ posts: model.posts.select(Projection.array(PostSummary)) }),
   messages: [Message.ClickedPost, Message.ClickedLike],
 })
 
 /** The parent projects the child's array plus its own field. */
-export const Feed = Surface.define(App, 'Feed', {
+export const Feed = Surface.make(App, 'Feed', {
   model: ({ model }) =>
     Projection.struct({
       posts: model.posts.select(Projection.array(PostSummary)),
@@ -37,7 +37,7 @@ export const Feed = Surface.define(App, 'Feed', {
 })
 
 /** A parameterized Surface, used at the application boundary. */
-export const PostDetail = Surface.define(App, 'PostDetail', {
+export const PostDetail = Surface.make(App, 'PostDetail', {
   Params: Schema.Struct({ index: Schema.Number }),
   model: ({ model, params }) =>
     Projection.struct({ post: model.posts.index(params.index).select(PostSummary) }),

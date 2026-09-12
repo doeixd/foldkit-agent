@@ -36,7 +36,7 @@ const Message = defineMessageUnion({
 })
 type AppMessage = Schema.Schema.Type<typeof Message>
 
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 
 // --- case 1: App.model tree is typed, optional accesses are Option ---------
 
@@ -103,7 +103,7 @@ const _listProjection: Projection<
 > = listProjection
 
 const OtherMixModel = Schema.Struct({ route: Schema.String })
-const OtherMixApp = Surface.make({ Model: OtherMixModel, Message })
+const OtherMixApp = Surface.application({ Model: OtherMixModel, Message })
 // @ts-expect-error entries must share one Root
 Projection.struct({
   name: App.model.session.user.name,
@@ -141,7 +141,7 @@ const _selectedProject: Projection<
 const Keyed = Schema.Struct({
   byLetter: Schema.Record(Schema.Literal('a'), Schema.Struct({ name: Schema.String })),
 })
-const KeyedApp = Surface.make({ Model: Keyed, Message })
+const KeyedApp = Surface.application({ Model: Keyed, Message })
 const _byLetter = KeyedApp.model.byLetter.at('a')
 // @ts-expect-error only the record's literal key `'a'` is valid
 KeyedApp.model.byLetter.at('b')
@@ -150,14 +150,14 @@ const ProjectId2 = Schema.String.pipe(Schema.brand('ProjectId2'))
 const ByProject = Schema.Struct({
   byProject: Schema.Record(ProjectId2, Schema.Struct({ name: Schema.String })),
 })
-const ByProjectApp = Surface.make({ Model: ByProject, Message })
+const ByProjectApp = Surface.application({ Model: ByProject, Message })
 const _byProject = ByProjectApp.model.byProject.at(Schema.decodeSync(ProjectId2)('p1'))
 // @ts-expect-error a plain string is not a branded ProjectId2
 ByProjectApp.model.byProject.at('p1')
 
 // --- case 3: Surface.view narrows the projected Model and Message set ------
 
-const ProjectCard = Surface.define(App, 'ProjectCard', {
+const ProjectCard = Surface.make(App, 'ProjectCard', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
   messages: [Message.ChangedProjectName],
 })
@@ -179,7 +179,7 @@ const _appView: (model: ModelValue, h: HtmlBuilder<AppMessage>) => Html = Surfac
 
 // --- registry: explicit collection, duplicate and cross-App rejection ------
 
-const CardA = Surface.define(App, 'CardA', {
+const CardA = Surface.make(App, 'CardA', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
   messages: [Message.ChangedProjectName],
 })
@@ -187,15 +187,15 @@ const _registry = Surface.registry(App, [ProjectCard, CardA])
 
 const OtherModel = Schema.Struct({ route: Schema.String })
 const OtherMessage = defineMessageUnion({ Ping: {} })
-const OtherApp = Surface.make({ Model: OtherModel, Message: OtherMessage })
-const OtherCard = Surface.define(OtherApp, 'OtherCard', {
+const OtherApp = Surface.application({ Model: OtherModel, Message: OtherMessage })
+const OtherCard = Surface.make(OtherApp, 'OtherCard', {
   model: ({ model }) => Projection.struct({ route: model.route }),
   messages: [OtherMessage.Ping],
 })
 // @ts-expect-error `OtherCard` belongs to a different App Root
 Surface.registry(App, [OtherCard])
 
-Surface.define(App, 'BadCard', {
+Surface.make(App, 'BadCard', {
   model: ({ model }) => Projection.struct({ name: model.session.user.name }),
   // @ts-expect-error `OtherMessage.Ping` is not part of App.Message
   messages: [OtherMessage.Ping],

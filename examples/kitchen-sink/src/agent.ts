@@ -18,7 +18,7 @@ export interface AgentPrincipal {
 
 const BoardAgent = Agent.forApplication<AgentPrincipal>()(App)
 
-export const AppAgent = BoardAgent.define({
+export const AppAgent = BoardAgent.make({
   // What an agent may see: the replicated notes and the current selection.
   context: Surface.pick(App.fields.notes, App.fields.selectedNoteId),
 

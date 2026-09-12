@@ -50,7 +50,7 @@ assert.deepEqual(shared(alice), shared(bob))
 
 const SyncAgent = Agent.forModel<Shared, Principal>()
 const agent = Agent.bind({
-  definition: SyncAgent.define({
+  definition: SyncAgent.make({
     messages: SyncAgent.expose(Message, {
       RenamedTodo: { name: 'rename_todo', description: 'Rename a shared todo' },
     }),

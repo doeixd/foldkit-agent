@@ -35,7 +35,7 @@ describe('Surface.pick', () => {
   })
 
   it('rejects references from a different application with an identical Model', () => {
-    const Other = Surface.make({ Model: App.Model, Message: App.Message })
+    const Other = Surface.application({ Model: App.Model, Message: App.Message })
 
     expect(() => Surface.pick(App.model.todos, Other.model.selectedTodoId)).toThrow(
       'different applications',

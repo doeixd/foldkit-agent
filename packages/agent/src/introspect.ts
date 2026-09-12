@@ -1,5 +1,5 @@
 import type { Schema } from 'effect'
-import type { Definition } from './define.js'
+import type { Definition } from './make.js'
 import { toJsonSchema } from './jsonSchema.js'
 import type { AgentSchema, MessageDescriptor, ResourceDescriptor } from './types.js'
 

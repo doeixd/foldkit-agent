@@ -45,7 +45,7 @@ const App = Surface.application({
 const Todos = Surface.pick(App.fields.todos)
 const TodoChanges = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
 
-const TodoSync = forApplication(App).define({
+const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos, // the shared codec, read, and write
   durable: TodoChanges, // the durable subset
@@ -62,7 +62,7 @@ live effect cannot be replayed) or changes a field outside the projection (the
 change would be silently lost), naming the Message and the fields. A Message that
 needs an effect stays local and emits a durable fact once the effect settles:
 `RequestedChargeCard` runs the Command; `CardCharged` is what replicates.
-Pass `replay` to `define` when an application needs a custom reducer over the
+Pass `replay` to `make` when an application needs a custom reducer over the
 shared slice; a custom replay is not guarded.
 
 On the server, the same contract produces the journal's codecs and reducer, so
@@ -81,7 +81,7 @@ const journal = yield* makeJournal({
 
 ### Lower level
 
-`Sync.forApplication(App).define` compiles down to `defineSync`, the protocol
+`Sync.forApplication(App).make` compiles down to `defineSync`, the protocol
 primitive. Use `defineSync` directly when there is no Foldkit application to
 derive the contract from — a non-Foldkit client, or a hand-written projection.
 
@@ -107,7 +107,7 @@ const shared = Effect.runSync(replica.shared)
 
 ## What it owns
 
-- The Foldkit-facing contract (`Sync.forApplication(App).define`, optionally with
+- The Foldkit-facing contract (`Sync.forApplication(App).make`, optionally with
   a custom `replay`): derives the shared projection, the durable Message subset, the
   initial snapshot, and the journal contract from the application, so none is
   declared twice. `Surface.pick`/`Sync.project` build the writable projection;

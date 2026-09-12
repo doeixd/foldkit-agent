@@ -9,7 +9,7 @@ const Model = Schema.Struct({
   todos: Schema.Array(Todo),
   selectedTodoId: Schema.NullOr(Schema.String),
 })
-const App = Surface.make({ Model, Message: defineMessageUnion({ Ping: {} }) })
+const App = Surface.application({ Model, Message: defineMessageUnion({ Ping: {} }) })
 
 describe('Sync.project', () => {
   it('derives the shared schema, get, and set from ModelRefs', () => {

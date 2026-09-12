@@ -198,7 +198,7 @@ void picked.read({ todos: [], selectedTodoId: Option.none() }).selectedTodoId
 // Dispatching by Message reference and by name are both checked.
 declare const model: Model
 const typedRuntime = TodoAgent.bind({
-  definition: TodoAgent.define({
+  definition: TodoAgent.make({
     messages: TodoAgent.expose(Message, {
       RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
       RequestedDeleteTodo: 'Delete a todo',
@@ -266,7 +266,7 @@ Agent.expose(Message, {
 // Dispatch input is the encoded side of a transforming schema.
 const Transforming = defineMessageUnion({ Set: { value: Schema.NumberFromString } })
 const transformingRuntime = Agent.bind({
-  definition: Agent.define({ messages: Agent.expose(Transforming, { Set: 'Set a value' }) }),
+  definition: Agent.make({ messages: Agent.expose(Transforming, { Set: 'Set a value' }) }),
   host: { model: () => ({}), dispatch: () => {} },
 })
 transformingRuntime.messages.dispatch('set', { value: '42' })
@@ -275,14 +275,14 @@ transformingRuntime.messages.dispatch('set', { value: 42 })
 
 // A host must accept the Messages the contract constructs.
 Agent.bind({
-  definition: Agent.define({ messages: Agent.expose(Message, { RequestedCreateTodo: 'Create' }) }),
+  definition: Agent.make({ messages: Agent.expose(Message, { RequestedCreateTodo: 'Create' }) }),
   // @ts-expect-error this host cannot receive RequestedCreateTodo.
   host: { model: () => ({}), dispatch: (_: { _tag: 'Unrelated'; count: number }) => {} },
 })
 
 // A contract that reads a principal requires the host to supply one.
 const Guarded = Agent.forModel<{ readonly ok: boolean }, { readonly allowed: boolean }>()
-const guarded = Guarded.define({
+const guarded = Guarded.make({
   messages: Guarded.expose(Message, {
     RequestedCreateTodo: { description: 'Create', authorize: ({ principal }) => principal.allowed },
   }),
@@ -307,7 +307,7 @@ Guarded.bind({
 // the literal name survives, and dispatch takes the codec's encoded side.
 const Valued = defineMessageUnion({ Set: { value: Schema.Number } })
 const namedVariantRuntime = Agent.bind({
-  definition: Agent.define({
+  definition: Agent.make({
     messages: Agent.expose(Valued, {
       Set: Agent.variant({
         name: 'set_value',
@@ -338,7 +338,7 @@ namedVariantRuntime.messages.dispatch(Valued.Set, { value: 42 })
 
 // Without a name override the tag-derived name is still what dispatch accepts.
 const unnamedVariantRuntime = Agent.bind({
-  definition: Agent.define({
+  definition: Agent.make({
     messages: Agent.expose(Valued, {
       Set: Agent.variant({
         description: 'Set a value',

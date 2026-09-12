@@ -41,7 +41,7 @@ it('commits a durable operation from an MCP tool call and converges a replica', 
       principal,
     )
     const agent = Agent.bind({
-      definition: SyncAgent.define({
+      definition: SyncAgent.make({
         messages: SyncAgent.expose(Message, {
           RenamedTodo: { name: 'rename_todo', description: 'Rename a shared todo' },
         }),

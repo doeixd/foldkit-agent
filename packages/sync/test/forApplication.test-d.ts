@@ -1,5 +1,5 @@
 /**
- * `Sync.forApplication(App).define` inference contract. Type-checked but not
+ * `Sync.forApplication(App).make` inference contract. Type-checked but not
  * executed.
  */
 import { Schema } from 'effect'
@@ -21,7 +21,7 @@ const update = (model: typeof Model.Type, _message: typeof Message.Type) => ({ m
 const App = Surface.application({ Model, Message, initial, update })
 const Todos = Surface.pick(App.fields.todos)
 const Changes = Surface.messages(App, [Message.CreatedTodo])
-const TodoSync = forApplication(App).define({
+const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   durable: Changes,
@@ -30,7 +30,7 @@ const TodoSync = forApplication(App).define({
 // The projection exposes only the shared field, not the local `selectedTodoId`.
 const _shared: { readonly todos: ReadonlyArray<string> } = TodoSync.projection.get(initial)
 
-forApplication(App).define({
+forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   // @ts-expect-error `durable` must be a `Surface.messages` subset, not a bare array
@@ -38,7 +38,7 @@ forApplication(App).define({
 })
 
 // A custom `replay` sees only the declared subset and returns the shared shape.
-forApplication(App).define({
+forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   durable: Changes,
@@ -48,7 +48,7 @@ forApplication(App).define({
   },
 })
 
-forApplication(App).define({
+forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   durable: Changes,
@@ -56,7 +56,7 @@ forApplication(App).define({
   replay: value => ({ todos: value.todos.length }),
 })
 
-forApplication(App).define({
+forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
   durable: Changes,

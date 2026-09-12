@@ -39,7 +39,7 @@ const update = (model: typeof Model.Type, message: typeof Message.Type) => {
 }
 
 // A runnable application carries `initial` and `update`, so a replicator can
-// derive the shared value and replay. `Surface.make` omits them.
+// derive the shared value and replay; both are optional.
 const App = Surface.application({
   Model,
   Message,
@@ -49,7 +49,7 @@ const App = Surface.application({
 
 const Todos = Surface.pick(App.fields.todos)
 
-const TodoList = Surface.define(App, 'TodoList', {
+const TodoList = Surface.make(App, 'TodoList', {
   model: ({ model }) =>
     Projection.struct({
       todos: model.todos,
@@ -117,7 +117,7 @@ contributes its dependencies and requirements to the parent.
 
 ## Applications
 
-`Surface.make({ Model, Message })` captures the pure references (`App.model`,
+`Surface.application({ Model, Message })` captures the pure references (`App.model`,
 `App.Model`, `App.Message`, `App.owner`) with no transition. Use it when a
 consumer needs only the reference tree.
 
@@ -144,11 +144,11 @@ Surface does not label a subset durable, agent-visible, or presence; `Sync` and
 
 ## Surfaces
 
-`Surface.define(app, name, { Params?, model, messages? })` binds a projection and
+`Surface.make(app, name, { Params?, model, messages? })` binds a projection and
 the Messages a feature may use into a named, inspectable contract.
 
 ```ts
-const TodoDetail = Surface.define(App, 'TodoDetail', {
+const TodoDetail = Surface.make(App, 'TodoDetail', {
   model: ({ model }) =>
     Projection.struct({
       todos: model.todos,
@@ -158,7 +158,7 @@ const TodoDetail = Surface.define(App, 'TodoDetail', {
 })
 
 // A parameterized Surface may read `params`; dynamic lookups are OptionalRefs.
-const ById = Surface.define(App, 'ById', {
+const ById = Surface.make(App, 'ById', {
   Params: Schema.Struct({ id: Schema.String }),
   model: ({ model, params }) =>
     Projection.struct({ todo: model.todosById.at(params.id) }),
@@ -170,7 +170,7 @@ Surface.view(TodoDetail, render)                   // bind a renderer
 Surface.rootView(TodoDetail, undefined, render)    // bound to the app root
 ```
 
-`Surface.define` does not evaluate `projection(undefined)` for a parameterized
+`Surface.make` does not evaluate `projection(undefined)` for a parameterized
 Surface, because the projection may read `params`.
 
 ## What it owns

@@ -120,7 +120,7 @@ pnpm bench           # sync bench + durable storage script (not a gate)
 | `Agent.resource({ schema, read })` | `packages/agent` | `Agent.resource({ projection })` |
 | `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Sync.project` |
 | `pick(Model, [keys])` | `packages/sync` (added recently) | Superseded by Surface `pick`/`ModelRef` |
-| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.forApplication(App).define` compiles to it |
+| `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.forApplication(App).make` compiles to it |
 | `examples/sync/src/runtime.ts` mount wrapper | example | Generalized under a `Sync.mount`/`Sync.browser` adapter (needs a decision, §10.6) |
 
 ---
@@ -370,17 +370,17 @@ the value bar in §8.14.
 ### 4.4 One shared application scope
 
 ```ts
-export const App = Surface.make({ Model, Message })
+export const App = Surface.application({ Model, Message })
 ```
 
-`Surface.make` is descriptive only (it does not create a Runtime). It provides
+`Surface.application` is descriptive only (it does not create a Runtime). It provides
 `App.Model`, `App.Message`, and `App.model` (the typed root `ModelRef`). Everything
 is scoped to it:
 
 ```ts
-const ProjectPage = Surface.define(App, "ProjectPage", { ... })
-const TodoAgent   = Agent.define(App, "TodoAgent", { ... })
-const TodoSync    = Sync.forApplication(App).define({ ... })
+const ProjectPage = Surface.make(App, "ProjectPage", { ... })
+const TodoAgent   = Agent.make(App, "TodoAgent", { ... })
+const TodoSync    = Sync.forApplication(App).make({ ... })
 const Data        = Remote.make({ entities: [...], queries: [...], mutations: [...] })
 ```
 
@@ -543,7 +543,7 @@ descriptor. A parameterized projection may read `params`, so evaluating it eager
 with `undefined` is invalid; they are derived on demand via `projection(params)`.
 
 ```ts
-const ProjectCard = Surface.define(App, "ProjectCard", {
+const ProjectCard = Surface.make(App, "ProjectCard", {
   Params: Schema.Struct({ projectId: ProjectId }),
   model: ({ model, params }) =>
     Projection.struct({
@@ -607,7 +607,7 @@ gaining the other's authority.
   renderer and uses a sound cast internally; a Foldkit core seam is the durable
   alternative (§15 Phase 0 results).
 - A child whose projected Model is a strict subset of what the child `model`
-  callback reads: the `Surface.define` callback receives the **root** Model and
+  callback reads: the `Surface.make` callback receives the **root** Model and
   returns a Projection, so the callback itself may read anything; the *view* is
   narrowed. Do not confuse the two.
 
@@ -822,7 +822,7 @@ const Data = Remote.make({
 // Data.Model, Data.Message, Data.update, Data.initial, Data.rpc
 
 const Model = Schema.Struct({ route: Route, session: Session, remote: Data.Model })
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 const AppRemote = pipe(Data, Remote.at(App.model.remote))
 ```
 
@@ -1472,7 +1472,7 @@ authorization, principal, completion, audit, cancellation). Surface only supplie
 the Model projection and Message subset.
 
 ```ts
-const AppAgent = Agent.define(App, "TodoAgent", {
+const AppAgent = Agent.make(App, "TodoAgent", {
   model: ({ model }) =>
     Projection.struct({ todos: model.todos, selectedTodoId: model.selectedTodoId }),
   capabilities: [
@@ -1521,7 +1521,7 @@ Sync keeps the offline replica, replay, reconciliation, and presence. It stops
 hand-rolling a projection.
 
 ```ts
-const TodoSync = Sync.forApplication(App).define({
+const TodoSync = Sync.forApplication(App).make({
   documentId: documentId("todos"),
   shared: Surface.pick(App.fields.todos),  // writable projection from ModelRefs
   durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo]),
@@ -1537,7 +1537,7 @@ const TodoSync = Sync.forApplication(App).define({
   publicly; only Sync regains write authority.
 - `replay` is inferred against the declared Message subset, not the whole union.
 - The low-level `defineSync({ message, shared, empty, durable, replay })` remains the
-  protocol primitive and escape hatch; `Sync.forApplication(App).define` compiles
+  protocol primitive and escape hatch; `Sync.forApplication(App).make` compiles
   down to it.
 - `foldkit-durable` stays independent; Sync produces the replay contract via
   `TodoSync.journalContract()` → `{ operation:{encode,decode},
@@ -1591,19 +1591,19 @@ const Message = defineMessageUnion({
   SelectedTodo: { id: TodoId },
 })
 
-const App = Surface.make({ Model, Message })
+const App = Surface.application({ Model, Message })
 
-const TodoList = Surface.define(App, "TodoList", {
+const TodoList = Surface.make(App, "TodoList", {
   model: ({ model }) => Projection.struct({ todos: model.todos, selection: model.selectedTodoId }),
   messages: [Message.CreatedTodo, Message.RenamedTodo],
 })
 
-const TodoAgent = Agent.define(App, "TodoAgent", {
+const TodoAgent = Agent.make(App, "TodoAgent", {
   model: ({ model }) => Projection.struct({ todos: model.todos }),
   capabilities: [Agent.capability(Message.CreatedTodo, { description: "Create a todo" })],
 })
 
-const TodoSync = Sync.forApplication(App).define({
+const TodoSync = Sync.forApplication(App).make({
   documentId: documentId("todos"),
   shared: Surface.pick(App.fields.todos),
   durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo]),
@@ -1865,7 +1865,7 @@ Build a scratch module plus `*.test-d.ts` proving:
    optic and dependency path; `.at(key)` is optional; `.index(i)` works.
 2. `Projection.of(Schema)({...})` checks nested projections and rejects bad keys;
    `Projection.struct(...)` infers the combined value and unions dependencies.
-3. `Surface.define`/`Surface.view` narrow the projected Model and the
+3. `Surface.make`/`Surface.view` narrow the projected Model and the
    `HtmlBuilder` Message set; a child view composes into a parent whose Message set
    is a superset; an undeclared Message does not compile.
 4. `Remote.make({entities}).Model` embeds as a Submodel without widening to `any`;

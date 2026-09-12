@@ -22,7 +22,7 @@ interface Principal {
 
 const TodoAgent = Agent.forModel<Model, Principal>()
 
-const definition = TodoAgent.define({
+const definition = TodoAgent.make({
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: { name: 'create_todo', description: 'Create a todo' },
     RequestedDeleteTodo: {

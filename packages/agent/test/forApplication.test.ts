@@ -16,7 +16,7 @@ const TodoAgent = Agent.forApplication(App)
 
 describe('Agent.forApplication', () => {
   it('accepts a Surface projection as context', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       context: Context,
       messages: TodoAgent.expose(MessageUnion, {
         RequestedDeleteTodo: 'Delete the selected todo',
@@ -33,7 +33,7 @@ describe('Agent.forApplication', () => {
   })
 
   it('still accepts a read-only Projection for context', () => {
-    const definition = TodoAgent.define({
+    const definition = TodoAgent.make({
       context: Projection.of(Model)({ todos: true }),
       messages: TodoAgent.expose(MessageUnion, {}),
     })

@@ -1,6 +1,6 @@
 import type { Schema } from 'effect'
 import type { Application, Projection, WritableProjection } from 'foldkit-surface'
-import { type Definition, define } from './define.js'
+import { type Definition, make } from './make.js'
 import {
   type AnyCapabilitiesByName,
   type AnyCapabilitiesByTag,
@@ -45,9 +45,9 @@ const toProjection = <Model, R extends ReadableProjection<Model, any>>(
  */
 export interface ApplicationAgent<Model, Principal> extends Omit<
   BoundAgent<Model, Principal>,
-  'define'
+  'make'
 > {
-  readonly define: <
+  readonly make: <
     R extends ReadableProjection<Model, any> | undefined = undefined,
     ByName = AnyCapabilitiesByName,
     ByTag = AnyCapabilitiesByTag,
@@ -72,16 +72,12 @@ const buildAgent = <Model, Principal>(
     )
   }) as ApplicationAgent<Model, Principal>['exposeSubset']
 
-  const agentDefine = <
-    R extends ReadableProjection<Model, any> | undefined,
-    ByName,
-    ByTag,
-  >(options: {
+  const agentMake = <R extends ReadableProjection<Model, any> | undefined, ByName, ByTag>(options: {
     readonly context?: R
     readonly messages: ExposedMessages<Model, Principal, ByName, ByTag>
     readonly resources?: ReadonlyArray<Resource<Model, any>> | undefined
   }): Definition<Model, ProjectionValue<R>, Principal, ByName, ByTag> =>
-    define<Model, ProjectionValue<R>, Principal, ByName, ByTag>({
+    make<Model, ProjectionValue<R>, Principal, ByName, ByTag>({
       ...(options.context === undefined
         ? {}
         : { context: toProjection(options.context as ReadableProjection<Model, any>) }),
@@ -94,7 +90,7 @@ const buildAgent = <Model, Principal>(
     exposeSubset: appExposeSubset,
     resource,
     bind,
-    define: agentDefine,
+    make: agentMake,
   }
 }
 
@@ -110,7 +106,7 @@ const buildAgent = <Model, Principal>(
  * ```ts
  * const TodoAgent = Agent.forApplication(App) // no principal
  * const AdminAgent = Agent.forApplication<Principal>()(App)
- * const AppAgent = TodoAgent.define({
+ * const AppAgent = TodoAgent.make({
  *   context: Surface.pick(App.fields.todos),
  *   messages: TodoAgent.expose(Message, { RequestedDeleteTodo: 'Delete a todo' }),
  * })

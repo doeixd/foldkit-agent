@@ -36,7 +36,7 @@ const makeHost = (update?: (message: Message, emit: (message: Message) => void) 
 }
 
 const contractOf = (completion: Completion<{ readonly id: string }, Message, Message>) =>
-  Agent.define({
+  Agent.make({
     messages: Agent.expose(MessageUnion, {
       RequestedDeleteTodo: { name: 'delete_todo', description: 'Delete a todo', completion },
     }),
@@ -229,7 +229,7 @@ describe('completion tracking', () => {
   it('leaves capabilities without a contract at validated dispatch', async () => {
     const { host } = makeHost()
     const runtime = Agent.bind({
-      definition: Agent.define({
+      definition: Agent.make({
         messages: Agent.expose(MessageUnion, { RequestedCreateTodo: 'Create a todo' }),
       }),
       host,
@@ -245,7 +245,7 @@ describe('completion tracking', () => {
   it('never subscribes for an invocation that was refused', async () => {
     const { host, listeners } = makeHost()
     const runtime = Agent.bind({
-      definition: Agent.define({
+      definition: Agent.make({
         messages: Agent.expose(MessageUnion, {
           RequestedDeleteTodo: {
             name: 'delete_todo',

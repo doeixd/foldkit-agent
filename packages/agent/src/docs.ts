@@ -1,4 +1,4 @@
-import type { Definition } from './define.js'
+import type { Definition } from './make.js'
 import { contextSchema, messages, resources } from './introspect.js'
 import { messageTags } from './tag.js'
 
