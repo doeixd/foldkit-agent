@@ -37,7 +37,11 @@ surface: the board Surface projects the project and the notes
 after fetch (Drizzle SQLite): Ready Apollo      # remote read compiled to SQL
 nested selection (one read): owner Ada          # owner resolved through its ref
 mutation: {"id":"p1"} -> Ready Apollo II        # Remote.mutateInto reconciles
+live (hub.changed): EntityPatched name=Apollo II # the server's live hub re-reads for the subscriber
 query connection: Project:p2, Project:p1        # Remote.query -> a connection
+optimistic insert: p3, p2, p1                    # MutationStarted shows the pending edge
+confirmed insert: p3, p2, p1                     # the result's insert replaces it in place
+hydrated: Ready Apollo II, plan empty            # dehydrate/hydrate, nothing left to fetch
 replicated (durable journal): First note        # durable + sync reconciled
 capabilities: requested_create_note, ...        # the agent contract is data
 notes after agent: First note, From the agent   # the agent drives the same update

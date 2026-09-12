@@ -5,6 +5,7 @@
  * note, a human, and an agent; the four agent adapters project one contract.
  */
 import { Effect, Fiber, Stream } from 'effect'
+import { Entity, Optimistic, dehydrate, hydrate } from 'foldkit-remote'
 import { defineMessageUnion } from 'foldkit/message'
 import type { HtmlBuilder } from 'foldkit/html'
 import { inertHtml } from 'foldkit/html'
@@ -20,16 +21,20 @@ import { Button, ButtonSlots } from 'foldkit-mixins-ui'
 import { view as buttonView } from '@foldkit/ui/button'
 import { Surface } from 'foldkit-surface'
 import { Remote, RemoteData, Query, type EntityStore } from 'foldkit-remote'
+import { Data } from './stack.js'
 import { layerFromPromise } from 'foldkit-sync'
 import {
   App,
   AppRemote,
   BoardSurface,
+  CreateProject,
   Message,
+  Project,
   ProjectSummary,
   ProjectsByOwner,
   RenameProject,
   KitchenSync,
+  liveHub,
   makeSyncServer,
   openReplica,
   serverClient,
@@ -111,23 +116,81 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
     `nested selection (one read): owner ${fetched._tag === 'Ready' ? fetched.value.owner.name : fetched._tag}`,
   )
 
-  const renamed = await Effect.runPromise(
-    Remote.mutateInto(
-      AppRemote,
-      loaded,
-      RenameProject,
-      { id: 'p1', name: 'Apollo II' },
-      'req-1',
-    ).pipe(Effect.provide(client)),
+  // A live subscription for the Board is registered with the server's hub
+  // before the rename, so the mutation's `hub.changed` reaches it.
+  const liveEntry = Remote.live(AppRemote, BoardSurface, undefined, message => message)
+  const { renamed, liveEvent } = await Effect.runPromise(
+    Effect.gen(function* () {
+      const subscription = yield* Effect.forkChild(
+        Stream.runHead(liveEntry.dependenciesToStream(liveEntry.modelToDependencies(loaded))),
+      )
+      // The hub delivers only to registered subscribers; wait for this one.
+      while ((yield* liveHub.size) === 0) yield* Effect.yieldNow
+      const renamed = yield* Remote.mutateInto(
+        AppRemote,
+        loaded,
+        RenameProject,
+        { id: 'p1', name: 'Apollo II' },
+        'req-1',
+      )
+      const head = yield* Fiber.join(subscription)
+      return { renamed, liveEvent: head._tag === 'Some' ? head.value : undefined }
+    }).pipe(Effect.provide(client)),
   )
   say(
     `mutation: ${JSON.stringify(renamed.output)} -> ${describeData(projection.read(renamed.model))}`,
+  )
+  say(
+    `live (hub.changed): ${
+      liveEvent?._tag === 'LiveReceived' && liveEvent.event._tag === 'EntityPatched'
+        ? `${liveEvent.event._tag} ${liveEvent.event.changed.join(',')}=${String(liveEvent.event.values.name)}`
+        : 'nothing'
+    }`,
   )
 
   const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId: 'u1' }))
   const page = await Effect.runPromise(Remote.query(ref).pipe(Effect.provide(client)))
   say(`query connection: ${page.edges.map(edge => edge.key).join(', ')}`)
-  say(`inspect: ${Remote.inspect(renamed.model.remote).entities.length} entities cached`)
+
+  // An optimistic insert: the new project shows in the connection at once,
+  // and the server's confirmed insert takes its place without a duplicate.
+  let remote = Data.update(renamed.model.remote, Remote.queryMessage(ref, page))
+  remote = Data.update(remote, {
+    _tag: 'MutationStarted',
+    requestId: 'req-2',
+    optimistic: [
+      Entity.patch(Project.ref('p3'), { id: 'p3', name: 'Calypso', status: 'active' }),
+      Optimistic.prepend(ref, Project.ref('p3')),
+    ],
+  })
+  const visible = () =>
+    Remote.visibleItems(remote, ref.identity)
+      .map(edge => edge.ref.id)
+      .join(', ')
+  say(`optimistic insert: ${visible()}`)
+  const created = await Effect.runPromise(
+    Remote.mutate(CreateProject, { id: 'p3', name: 'Calypso', ownerId: 'u1' }, 'req-2').pipe(
+      Effect.provide(client),
+    ),
+  )
+  remote = Data.update(remote, {
+    _tag: 'MutationSucceeded',
+    requestId: 'req-2',
+    entities: created.entities,
+    connections: created.connections,
+  })
+  say(`confirmed insert: ${visible()}`)
+  say(`inspect: ${Remote.inspect(remote).entities.length} entities cached`)
+
+  // Hydration: the store dehydrates to deterministic text (SSR would embed it)
+  // and hydrates into a fresh Model with nothing left to fetch.
+  const snapshot = dehydrate(remote.entities, { scope: 'u1' })!
+  const fresh = withStore(App.initial, hydrate(snapshot, { scope: 'u1' })!)
+  say(
+    `hydrated: ${describeData(projection.read(fresh))}, plan ${
+      Remote.observeProjection(AppRemote, fresh, projection).length === 0 ? 'empty' : 'pending'
+    }`,
+  )
 
   // -------------------------------------------------------------------------
   // Client-owned replicated state: durable + sync
@@ -159,7 +222,7 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   // -------------------------------------------------------------------------
   // The agent contract, driven by a human and by the agent
   // -------------------------------------------------------------------------
-  let live = { ...renamed.model, notes: replicated.notes }
+  let live = { ...renamed.model, remote, notes: replicated.notes }
   const listeners = new Set<() => void>()
   const dispatch = (message: typeof Message.Type): void => {
     live = update(live, message).model

@@ -264,6 +264,15 @@ A `MutationSucceeded` message reconciles the patches at most once per
 `requestId`, so a transport retry cannot apply the same change twice; an unknown
 or already-applied result is a no-op.
 
+A Remote mutation is an immediate, server-derived command: it runs now, against
+the server that owns the data, and its result is cache. It is not durable
+intent. An edit that must survive the process or the network (offline writes,
+a queue that replays later, convergence between replicas) belongs to
+`foldkit-sync` and `foldkit-durable`, which already own an ordered log and its
+idempotency; Remote adds no second queue. If a bridge is ever needed, it turns a
+durable operation into a Remote mutation when it replays, not the other way
+round.
+
 ### Optimistic updates
 
 A mutation owns its optimistic operations: entity patches and connection

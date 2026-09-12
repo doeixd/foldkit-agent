@@ -74,6 +74,14 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
   `relations`, and a version mismatch fails with `RemoteProtocolError`
   (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
+- **Property tests and two fixes they found.** Seeded property checks over
+  connection merge, live event ordering, and optimistic convergence. `merge`
+  now puts a terminal-start segment first and a terminal-end segment last, so
+  a gap never reorders the sides; `foldkit-remote-server` chunks a nested
+  level's fan-out by `maxIdsPerEntity` instead of refusing it (#65, Phase E).
+- **The durable boundary, stated.** The README says what a Remote mutation is
+  (an immediate, server-derived command) and what it is not (durable intent,
+  which `foldkit-sync`/`foldkit-durable` own); no second queue (#65, section 9).
 - **Hydration hardening.** Snapshots are deterministic (equal stores give
   byte-equal text), carry a `scope`, and respect `maxBytes` on save and
   restore; `dehydrate`/`hydrate` are the text forms for SSR, `mergeStores`
@@ -282,6 +290,14 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   model, resolved attributes, the compiled stylesheet, and the serializable
   `SurfaceView.describe` value plus its `toMarkdown`; `pnpm demo` runs it and a
   test asserts every line. Remote is not part of this example.
+
+### `foldkit-kitchen-sink` (example)
+
+- The transcript now runs the whole Remote path end to end: a nested `owner`
+  selection over Drizzle, a live subscription fed by the server's hub from the
+  rename mutation, an optimistic insert into the projects connection confirmed
+  in place by the mutation result, and a dehydrate/hydrate round trip that
+  leaves nothing to fetch (#65, Phase E).
 
 ### `foldkit-remote-example` (example)
 

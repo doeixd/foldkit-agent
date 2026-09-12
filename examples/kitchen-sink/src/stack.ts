@@ -20,9 +20,11 @@ import {
   Entity,
   Mutation,
   Query,
+  REMOTE_PROTOCOL_VERSION,
   Remote,
   RemoteClient,
   Selection,
+  liveEventOf,
   type RemoteModel,
 } from 'foldkit-remote'
 import {
@@ -108,6 +110,26 @@ export const RenameProject = Mutation.make('RenameProject', {
   Output: Schema.Struct({ id: Schema.String }),
 })
 
+export const ProjectsByOwner = Query.make('ProjectsByOwner', {
+  Input: Schema.Struct({ ownerId: Schema.String }),
+  Result: Query.connection({ name: 'Project' }),
+})
+
+export const CreateProject = Mutation.make('CreateProject', {
+  Input: Schema.Struct({ id: Schema.String, name: Schema.String, ownerId: Schema.String }),
+  Output: Schema.Struct({ id: Schema.String }),
+})
+
+/**
+ * The live hub: mutation sources tell it what changed, and every live
+ * subscriber that selects those fields receives them, re-read through the
+ * entity source under its own principal. It needs only the entity sources.
+ */
+const entitySources = [source(User), source(Project)]
+export const liveHub = Effect.runSync(
+  RemoteServer.liveHub(RemoteServer.make({ entities: entitySources })),
+)
+
 const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
   Effect.gen(function* () {
     const fields = ['id', 'name', 'status'] as const
@@ -120,14 +142,41 @@ const RenameProjectSource = RemoteServer.mutation(RenameProject, ({ input }) =>
           .returning(selectColumns(Project, fields)),
       ),
     )
+    // Live subscribers that select `name` learn of the rename from here.
+    yield* liveHub.changed(Project.ref(input.id), ['name'])
     return { output: { id: input.id }, entities: normalize(Project, rows, fields) }
   }),
 )
 
-export const ProjectsByOwner = Query.make('ProjectsByOwner', {
-  Input: Schema.Struct({ ownerId: Schema.String }),
-  Result: Query.connection({ name: 'Project' }),
-})
+/**
+ * A mutation that also changes a connection: the result carries the confirmed
+ * insert, so the client's optimistic prepend becomes the real edge in place.
+ */
+const CreateProjectSource = RemoteServer.mutation(CreateProject, ({ input }) =>
+  Effect.gen(function* () {
+    const fields = ['id', 'name', 'status'] as const
+    const rows = yield* Effect.promise(() =>
+      Promise.resolve(
+        db
+          .insert(projects)
+          .values({ id: input.id, name: input.name, ownerId: input.ownerId, status: 'active' })
+          .returning(selectColumns(Project, fields)),
+      ),
+    )
+    return {
+      output: { id: input.id },
+      entities: normalize(Project, rows, fields),
+      connections: [
+        {
+          _tag: 'Insert' as const,
+          connection: ProjectsByOwner.ref({ ownerId: input.ownerId }).identity,
+          position: 'prepend' as const,
+          edge: { entity: 'Project', id: input.id, key: Entity.refKey(Project.ref(input.id)) },
+        },
+      ],
+    }
+  }),
+)
 
 const ProjectsByOwnerSource = query(ProjectsByOwner, {
   entity: Project,
@@ -137,7 +186,7 @@ const ProjectsByOwnerSource = query(ProjectsByOwner, {
 
 export const Data = Remote.make({
   entities: [User, Project],
-  mutations: [RenameProject],
+  mutations: [RenameProject, CreateProject],
   queries: [ProjectsByOwner],
 })
 
@@ -299,18 +348,23 @@ export const openReplica = KitchenSync.openReplica(replicaId('kitchen-a'), memor
  */
 export const serverClient = (principal: string): Layer.Layer<RemoteClient> => {
   const server = RemoteServer.make({
-    entities: [source(User), source(Project)],
-    mutations: [RenameProjectSource],
+    entities: entitySources,
+    mutations: [RenameProjectSource, CreateProjectSource],
     queries: [ProjectsByOwnerSource],
   })
   // Every source names a descriptor the domain declared.
   RemoteServer.validate(Data, server)
-  const handlers = RemoteServer.handlers(server, principal)
+  const handlers = RemoteServer.handlers(server, principal, { live: liveHub })
   const onDatabase = databaseLayer(db)
-  return Layer.succeed(RemoteClient, {
-    read: batch => handlers.FoldkitRemoteRead(batch).pipe(Effect.provide(onDatabase)),
-    query: request => handlers.FoldkitRemoteQuery(request).pipe(Effect.provide(onDatabase)),
-    mutate: request => handlers.FoldkitRemoteMutate(request).pipe(Effect.provide(onDatabase)),
-    live: () => Stream.empty,
-  })
+  return Remote.coalesced(
+    Layer.succeed(RemoteClient, {
+      read: batch => handlers.FoldkitRemoteRead(batch).pipe(Effect.provide(onDatabase)),
+      query: request => handlers.FoldkitRemoteQuery(request).pipe(Effect.provide(onDatabase)),
+      mutate: request => handlers.FoldkitRemoteMutate(request).pipe(Effect.provide(onDatabase)),
+      live: ({ requirements, after }) =>
+        handlers
+          .FoldkitRemoteLive({ version: REMOTE_PROTOCOL_VERSION, requirements, after })
+          .pipe(Stream.map(liveEventOf), Stream.provide(onDatabase)),
+    }),
+  )
 }
