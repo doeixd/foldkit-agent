@@ -1,6 +1,6 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
-import { Entity, Mutation, Query, ReadBatch, RemoteRpc } from 'foldkit-remote'
+import { Entity, Mutation, Query, ReadBatch, Remote, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import { RemoteServer, RemoteServerError, type ServerDefinition } from '../src/index.js'
 
@@ -531,5 +531,25 @@ describe('RemoteServer', () => {
       after: 0,
     })
     expect([...patches]).toEqual([])
+  })
+
+  it('accepts a server whose sources the domain declares', () => {
+    const domain = Remote.make({ entities: [User], mutations: [RenameUser] })
+    const server = RemoteServer.make({
+      entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
+      mutations: [
+        RemoteServer.mutation(RenameUser, () => Effect.succeed({ output: { id: 'u1' } })),
+      ],
+    })
+    expect(() => RemoteServer.validate(domain, server)).not.toThrow()
+  })
+
+  it('refuses a source the domain never declared', () => {
+    const Ghost = Entity.make('Ghost', Schema.Struct({ id: Schema.String }))
+    const domain = Remote.make({ entities: [Ghost] })
+    const server = RemoteServer.make({
+      entities: [RemoteServer.entity<string>(User, { read: () => Effect.succeed([]) })],
+    })
+    expect(() => RemoteServer.validate(domain, server)).toThrow(/User.*not declared/)
   })
 })

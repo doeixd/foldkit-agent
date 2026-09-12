@@ -151,6 +151,9 @@ principal read this semantic field*. Authorization is mandatory, not opt-in:
 - Selection authorization and field filtering.
 - Request grouping, id de-duplication, field unions, and window threading.
 - Normalization of source results into wire entities.
+- Source-name validation: `RemoteServer.validate(domain, server)` checks every
+  entity, query, and mutation source against the domain's `registry`, so an
+  undeclared name fails at startup rather than returning nothing at call time.
 - Compilation to the `RemoteRpc` handlers.
 
 ## Limits

@@ -282,14 +282,14 @@ export const openReplica = KitchenSync.openReplica(replicaId('kitchen-a'), memor
  * database, so `Remote.observe`/`prefetch`/`mutate` run the real server path.
  */
 export const serverClient = (principal: string): Layer.Layer<RemoteClient> => {
-  const handlers = RemoteServer.handlers(
-    RemoteServer.make({
-      entities: [source(Project)],
-      mutations: [RenameProjectSource],
-      queries: [ProjectsByOwnerSource],
-    }),
-    principal,
-  )
+  const server = RemoteServer.make({
+    entities: [source(Project)],
+    mutations: [RenameProjectSource],
+    queries: [ProjectsByOwnerSource],
+  })
+  // Every source names a descriptor the domain declared.
+  RemoteServer.validate(Data, server)
+  const handlers = RemoteServer.handlers(server, principal)
   const onDatabase = databaseLayer(db)
   return Layer.succeed(RemoteClient, {
     read: batch => handlers.FoldkitRemoteRead(batch).pipe(Effect.provide(onDatabase)),

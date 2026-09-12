@@ -25,6 +25,7 @@ import {
   type QueryDescriptor,
   type QueryWindow,
   type ReadRequest,
+  type RemoteDescriptor,
 } from 'foldkit-remote'
 
 export class RemoteServerError extends Schema.TaggedError<RemoteServerError>()(
@@ -187,6 +188,27 @@ export const RemoteServer = {
     queries: new Map((config.queries ?? []).map(source => [source.query, source])),
     live: new Map((config.live ?? []).map(source => [source.entity, source])),
   }),
+
+  /**
+   * Checks every source name against the declared domain, so an undeclared
+   * entity/query/mutation fails at startup rather than returning nothing at
+   * call time.
+   */
+  validate: (domain: RemoteDescriptor, server: ServerDefinition<any, any>): void => {
+    const assertDeclared = (
+      kind: string,
+      declared: ReadonlyMap<string, unknown>,
+      names: Iterable<string>,
+    ): void => {
+      for (const name of names) {
+        if (!declared.has(name))
+          throw new Error(`RemoteServer: ${kind} "${name}" is not declared in the Remote domain`)
+      }
+    }
+    assertDeclared('entity', domain.registry.entities, server.entities.keys())
+    assertDeclared('query', domain.registry.queries, server.queries.keys())
+    assertDeclared('mutation', domain.registry.mutations, server.mutations.keys())
+  },
 
   /**
    * Compiles the server into the `Read`/`Mutate` RPC handlers. `principal` is

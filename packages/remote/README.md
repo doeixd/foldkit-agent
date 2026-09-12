@@ -284,8 +284,9 @@ planner refetches.
   store and return only missing or stale fields, deterministically.
 - **The Remote submodel.** `Remote.make` returns `Model`, `initial`, `Message`,
   `update`, `rpc`, and a name-keyed `registry` of the declared entities, queries,
-  and mutations; `Remote.update` is the single reducer over reads, mutation
-  results, live events, connections, and optimistic layers.
+  and mutations (consumed by `RemoteServer.validate` and available to tooling);
+  `Remote.update` is the single reducer over reads, mutation results, live
+  events, connections, and optimistic layers.
 - **Mutation reconciliation.** Idempotent per `requestId`, with a bounded
   settled-request ledger.
 - **Connections.** Segmented ordered data with explicit boundaries and overlay
