@@ -34,8 +34,9 @@ friction that prompted it, so it can be judged rather than taken on faith.
   because source compilation broke it. The base config's module resolution
   ignores `exports`, so `dist` resolution is inconsistent. Pick
   `bundler`/`nodenext` and a single strategy, and document it.
-- **A `pnpm ci` script** that runs `format:check`, `typecheck`, `test`, `demo` in
-  one command, so "run the four checks" is one word.
+- **A `pnpm check` script** that runs `format:check`, `typecheck`, `test`, `demo`,
+  and `pack:check` in one command, so "run the four checks" is one word. (`ci`
+  cannot be the script name: `pnpm ci` is a pnpm builtin and never runs it.)
 - **`node:sqlite` under Vite** cost time twice. A Vite `ssr.external` / `test.server.deps.external`
   entry does not prevent the rewrite; a shared `createRequire` helper (the
   workaround recorded in `AGENTS.md`) is the fix, and it should live in one place
