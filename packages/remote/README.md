@@ -301,6 +301,8 @@ planner refetches.
   serializable cache view for DevTools.
 - **The transport seam.** `RemoteClient`, an Effect service with `read`, `query`,
   `mutate`, and `live`; the wire schemas and `RemoteRpc` group.
+  `Remote.clientLayer(rpcClient)` adapts an Effect RPC client for `RemoteRpc` to
+  `RemoteClient`, including the `LiveChange`-to-`LiveEvent` mapping.
 - **Disposable cache persistence.** Snapshot encode/decode over `KeyValueStore`.
 
 ## Limits

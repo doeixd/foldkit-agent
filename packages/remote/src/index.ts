@@ -5,7 +5,7 @@
  * live classification, optimistic layers) performs no I/O. The `Remote.*`
  * helpers that read or mutate go through the `RemoteClient` Effect service.
  */
-import { Context, Effect, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
+import { Context, Effect, Layer, Option, Result, Schema, SchemaGetter, Stream } from 'effect'
 import type { EntryWithoutKeepAlive } from 'foldkit/subscription'
 import type { ModelRef, Projection, Requirement, Surface } from 'foldkit-surface'
 import { emptyConnection, merge, type Connection, type Segment } from './connection.js'
@@ -56,6 +56,8 @@ import {
   RemoteQueryError,
   RemoteReadError,
   RemoteRpc,
+  type LiveChange,
+  type LiveRequirement,
 } from './wire.js'
 import type { LivePolicy, QueryDescriptor, QueryRef, QueryWindow } from './query.js'
 
@@ -842,6 +844,59 @@ export const inspectEntity = (
   return entry === undefined ? undefined : inspectEntry(key, entry)
 }
 
+/** The methods an Effect RPC client for `RemoteRpc` exposes. */
+export interface RemoteRpcClient {
+  readonly FoldkitRemoteRead: (
+    payload: Schema.Schema.Type<typeof ReadBatch>,
+  ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError>
+  readonly FoldkitRemoteQuery: (
+    payload: Schema.Schema.Type<typeof QueryRequest>,
+  ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
+  readonly FoldkitRemoteMutate: (
+    payload: Schema.Schema.Type<typeof MutationRequest>,
+  ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
+  readonly FoldkitRemoteLive: (
+    payload: Schema.Schema.Type<typeof LiveRequirement>,
+  ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError>
+}
+
+/** Reconstructs the client's `LiveEvent` from the wire's flattened `LiveChange`. */
+export const liveEventOf = (change: Schema.Schema.Type<typeof LiveChange>): LiveEvent => {
+  switch (change._tag) {
+    case 'EntityPatched':
+      return {
+        _tag: 'EntityPatched',
+        ref: { entity: change.entity, id: change.id },
+        values: change.values,
+        changed: change.changed,
+        cursor: change.cursor,
+      }
+    case 'EntityDeleted':
+      return {
+        _tag: 'EntityDeleted',
+        ref: { entity: change.entity, id: change.id },
+        cursor: change.cursor,
+      }
+    case 'ConnectionInsert':
+      return {
+        _tag: 'ConnectionInsert',
+        connection: change.connection,
+        position: change.position,
+        edge: { key: change.edge.key, ref: { entity: change.edge.entity, id: change.edge.id } },
+        cursor: change.cursor,
+      }
+    case 'ConnectionRemove':
+      return {
+        _tag: 'ConnectionRemove',
+        connection: change.connection,
+        edge: { key: change.edge.key, ref: { entity: change.edge.entity, id: change.edge.id } },
+        cursor: change.cursor,
+      }
+    case 'ConnectionInvalidate':
+      return { _tag: 'ConnectionInvalidate', connection: change.connection, cursor: change.cursor }
+  }
+}
+
 /**
  * `Remote.mutate` as a standalone effect, so `Remote.mutateInto` can reuse it
  * without the object literal referencing itself.
@@ -1019,6 +1074,20 @@ export const Remote = {
    * `requests` are the planned requirements the result answers.
    */
   writeRead,
+
+  /**
+   * Adapts an Effect RPC client for `RemoteRpc` to `RemoteClient`, so an
+   * application provides the transport's RPC layer instead of writing the
+   * `LiveChange`-to-`LiveEvent` mapping by hand.
+   */
+  clientLayer: (client: RemoteRpcClient): Layer.Layer<RemoteClient> =>
+    Layer.succeed(RemoteClient, {
+      read: batch => client.FoldkitRemoteRead(batch),
+      query: request => client.FoldkitRemoteQuery(request),
+      mutate: request => client.FoldkitRemoteMutate(request),
+      live: ({ requirements, after }) =>
+        client.FoldkitRemoteLive({ requirements, after }).pipe(Stream.map(liveEventOf)),
+    }),
 
   /**
    * Runs a `Query` through `RemoteClient`, encoding its input from the ref.

@@ -59,6 +59,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Self-describing refs and a registry.** `QueryRef` carries its input codec, so
   `Remote.query(ref)` needs no descriptor; `Remote.make` builds a name-keyed
   `registry` from the declared entities, queries, and mutations.
+- **An RPC client adapter.** `Remote.clientLayer(rpcClient)` turns an Effect RPC
+  client for `RemoteRpc` into a `RemoteClient`, reconstructing the client's
+  `LiveEvent` from the wire's `LiveChange` so the mapping is not re-invented per
+  application.
 
 ### `foldkit-remote-server` (private)
 
