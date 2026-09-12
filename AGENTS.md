@@ -90,6 +90,13 @@ you just redid. Keep each to a couple of lines, with the concrete failure.
   assumption as the code tests nothing. Make it reject what the real thing
   rejects.
 
+- **Make the wire carry every field the client sends, with the same types.**
+  `RemoteClient.live` sends `{ requirements, after }`, but the `LiveRequirement`
+  payload omitted `after` and `LivePatch.cursor` was a `string` while the client
+  cursor is numeric, so a real server could never answer the client's own call.
+  The adapter is cast, so only diffing the client's request/response types against
+  the payload/success schemas catches it.
+
 **Library behaviour**
 
 - **Give embedded Foldkit containers an id.** The runtime fails asynchronously
@@ -178,6 +185,23 @@ installed `.d.ts` before reaching for a remembered API.
   `V & Mapped<...>` to keep `V` for the return type -- and an intersection is
   not excess-property-checked, so the unknown-key rejection has to move into the
   template.
+
+- **Thread `Encoded`, not only `Type`, through a generic reference.**
+  `ModelRef<Root, Value>` typed `Schema.Codec<Value, unknown>`, so a transforming
+  field (`NumberFromString`) lost its encoded `string` through `Surface.pick`, and
+  an assignability test could not see it (`unknown` accepts anything). Carry an
+  `Encoded` parameter and pin it with a type-equality assertion.
+
+- **An unused parameter or config field is a promise the runtime does not keep.**
+  `RemoteServer.make(Data, …)` never read `Data`, and `Remote.make` accepted
+  `queries`/`mutations` it dropped, so the API advertised a relationship that did
+  not exist. Type it and use it, or delete it.
+
+- **Do not make a caller reconstruct a key the library owns.** `Remote.live` took
+  a `cursor` callback, but the stream key was internal, so the application could
+  not compute it; the fix was for the library to read its own state. If a caller
+  would need library internals to satisfy an argument, the library should read
+  them itself.
 
 **Async**
 
