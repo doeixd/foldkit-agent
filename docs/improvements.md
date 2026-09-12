@@ -7,9 +7,9 @@ friction that prompted it, so it can be judged rather than taken on faith.
 
 ## If you do three things
 
-1. **Fix the runtime seam.** The application-dispatch gap documented in
-   `docs/sync-runtime-binding.md` is the one blocker that keeps Sync, Agent, and
-   Surface from being transparent; everything else is polish next to it.
+1. **Fix the runtime seam.** Resolved by `Sync.mount`: once replay was
+   guaranteed state-only, applying `update` first and persisting after needed no
+   upstream hook (`docs/sync-runtime-binding.md`).
 2. **Stop sharing one worktree between agents.** Two sessions committing to the
    same tree caused `git add -A` to sweep edits, and stale `.tsbuild` caches that
    passed alone but failed when rebuilt inside another project's graph.
@@ -63,11 +63,8 @@ friction that prompted it, so it can be judged rather than taken on faith.
 
 ## Architecture
 
-- **The runtime seam is the real gap.** Foldkit `makeApplication` accepts no async
-  admission hook and exposes no Model/dispatch handle, so Sync and Agent bridge
-  by hand. The proposed `admission` service in `docs/sync-runtime-binding.md` is
-  the highest-leverage upstream change; a small `foldkit-host` package owning the
-  loop would be the fallback.
+- **The runtime seam.** Resolved by `Sync.mount` (see above). What an upstream
+  handle would still add is `model()`/`dispatch()` conveniences, not correctness.
 - **Sync's replay drops Commands.** `forApplication` derives replay from
   `update(...).model`, so a durable Message whose `update` produces Commands
   silently loses its effects during replay and optimistic projection. Either
