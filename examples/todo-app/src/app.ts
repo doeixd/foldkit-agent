@@ -76,15 +76,18 @@ export const initialModel: Model = {
 export const update = (model: Model, message: Message): Update.Return<Model, Message> =>
   Message.match<Update.Return<Model, Message>>(message, {
     DraftChanged: ({ value }) => ({ model: { ...model, draft: value } }),
-    SubmittedTodo: ({ id, title }) => ({
-      model: {
-        ...model,
-        draft: '',
-        todos: model.todos.some(todo => todo.id === id)
-          ? model.todos
-          : [...model.todos, { id, title, completed: false }],
-      },
-    }),
+    SubmittedTodo: ({ id, title }) =>
+      title.trim() === ''
+        ? { model }
+        : {
+            model: {
+              ...model,
+              draft: '',
+              todos: model.todos.some(todo => todo.id === id)
+                ? model.todos
+                : [...model.todos, { id, title: title.trim(), completed: false }],
+            },
+          },
     ToggledTodo: ({ id }) => ({
       model: {
         ...model,
