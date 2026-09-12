@@ -3,7 +3,7 @@
  */
 import { Effect, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
-import { Surface } from '../src/index.js'
+import { Projection, Surface } from '../src/index.js'
 
 const Model = Schema.Struct({ count: Schema.Number })
 const Message = defineMessageUnion({ Incremented: {} })
@@ -16,7 +16,7 @@ const App = Surface.application({
 
 const _initial: { readonly count: number } = App.initial
 const _field = App.fields.count
-const _value: number = Surface.pick(App.fields.count).get({ count: 1 }).count
+const _value: number = Projection.pick(App.fields.count).get({ count: 1 }).count
 
 // References only: an agent-only application needs no `initial` or `update`.
 const RefsOnly = Surface.application({ Model, Message })

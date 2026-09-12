@@ -47,7 +47,7 @@ const App = Surface.application({
   update,
 })
 
-const Todos = Surface.pick(App.fields.todos)
+const Todos = Projection.pick(App.fields.todos)
 
 const TodoList = Surface.make(App, 'TodoList', {
   model: ({ model }) =>
@@ -76,16 +76,16 @@ App.fields.todos.index(0)        // OptionalRef<Model, Option<Todo>> (dynamic in
 Struct fields recurse, so a nested reference such as `App.fields.todo.title` is a
 `FieldRef`. Array and record access is `.index(i)` / `.at(key)`, which returns an
 `OptionalRef` — a `ModelRef` with an `Option` value. Those are dynamic selections,
-so `Surface.pick` (which needs a static field name) rejects them; they are useful
+so `Projection.pick` (which needs a static field name) rejects them; they are useful
 inside a `Projection`.
 
 `App.model` is the same tree under its older name; prefer `App.fields`.
 
-`Surface.pick` turns references into a writable projection — a `Schema.Struct`,
+`Projection.pick` turns references into a writable projection — a `Schema.Struct`,
 `get`, and `set`:
 
 ```ts
-const Shared = Surface.pick(App.fields.todos, App.fields.selectedTodoId)
+const Shared = Projection.pick(App.fields.todos, App.fields.selectedTodoId)
 // { schema, dependencies, get, set }
 ```
 
@@ -93,7 +93,7 @@ A reference from a different application is rejected by a per-application owner
 token, so two structurally identical Models cannot be mixed. Duplicate members
 deduplicate; a conflicting definition throws.
 
-`Surface.compose` merges disjoint writable projections, keeping each part's own
+`Projection.compose` merges disjoint writable projections, keeping each part's own
 write behavior. `ModelRef.fromOptic` builds a reference from an optic you already
 have.
 
@@ -131,9 +131,9 @@ A subset selects typed variants of one application's Message union by constructo
 reference:
 
 ```ts
-const TodoChanges = Surface.messages(App, [Message.CreatedTodo, Message.ToggledTodo])
-const SelectionChanges = Surface.messages(App, [Message.SelectedTodo])
-const AllChanges = Surface.unionMessages(TodoChanges, SelectionChanges)
+const TodoChanges = MessageSet.make(App, [Message.CreatedTodo, Message.ToggledTodo])
+const SelectionChanges = MessageSet.make(App, [Message.SelectedTodo])
+const AllChanges = MessageSet.union(TodoChanges, SelectionChanges)
 ```
 
 A subset carries the constructors, a pure codec for exactly those variants, a
@@ -175,12 +175,12 @@ Surface, because the projection may read `params`.
 
 ## What it owns
 
-- Reference-based Model selection (`App.fields`, `Surface.pick`,
-  `Surface.compose`).
+- Reference-based Model selection (`App.fields`, `Projection.pick`,
+  `Projection.compose`).
 - Pure `Projection` values with their codec, reader, dependencies, and remote
   requirements.
 - Application scopes (`make` / `application`) and their identity token.
-- Typed Message subsets (`Surface.messages`, `Surface.unionMessages`).
+- Typed Message subsets (`MessageSet.make`, `MessageSet.union`).
 - Named Surfaces and their renderer binding.
 
 ## Limits

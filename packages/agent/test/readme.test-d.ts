@@ -4,7 +4,7 @@
  */
 import { Option, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
-import { Surface } from 'foldkit-surface'
+import { Projection, Surface } from 'foldkit-surface'
 import { Agent } from '../src/index.js'
 
 const Todo = Schema.Struct({
@@ -43,7 +43,7 @@ const App = Surface.application({
 const TodoAgent = Agent.forApplication(App)
 
 const AppAgent = TodoAgent.make({
-  context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
+  context: Projection.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {
     RequestedCreateTodo: 'Create a new todo',

@@ -2,7 +2,7 @@
  * `Agent.forApplication` inference contract. Type-checked but not executed.
  */
 import { Schema } from 'effect'
-import { Projection, Surface } from 'foldkit-surface'
+import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import { Agent } from '../src/index.js'
 import { Message as MessageUnion, Model, emptyModel, type Message } from './todoApp.js'
 
@@ -11,7 +11,7 @@ const App = Surface.application({ Model, Message: MessageUnion, initial: emptyMo
 
 const TodoAgent = Agent.forApplication(App)
 const definition = TodoAgent.make({
-  context: Surface.pick(App.fields.todos),
+  context: Projection.pick(App.fields.todos),
   messages: TodoAgent.expose(MessageUnion, { RequestedDeleteTodo: 'Delete' }),
 })
 
@@ -28,14 +28,14 @@ TodoAgent.make({
   messages: TodoAgent.expose(MessageUnion, {}),
 })
 
-const Changes = Surface.messages(App, [MessageUnion.RequestedCreateTodo])
+const Changes = MessageSet.make(App, [MessageUnion.RequestedCreateTodo])
 // @ts-expect-error RequestedDeleteTodo is not in the subset
 Agent.exposeSubset(Changes, { RequestedDeleteTodo: 'Delete' })
 
 // `withPrincipal` fixes the principal `authorize` sees; the Model stays inferred.
 const AdminAgent = Agent.forApplication(App).withPrincipal<{ readonly role: 'admin' | 'user' }>()
 AdminAgent.make({
-  context: Surface.pick(App.fields.todos),
+  context: Projection.pick(App.fields.todos),
   messages: AdminAgent.expose(MessageUnion, {
     RequestedDeleteTodo: {
       description: 'Delete',

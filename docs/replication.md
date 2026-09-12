@@ -116,8 +116,8 @@ the replica reconciles with the server's authoritative order.
 const App = Surface.application({ Model, Message, initial, update })
 const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
-  shared: Surface.pick(App.fields.todos),
-  durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo]),
+  shared: Projection.pick(App.fields.todos),
+  durable: MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo]),
 })
 
 const replica = yield* TodoSync.openReplica(replicaId('tab-1'), yield* indexedDb('todos-tab-1'))
@@ -135,7 +135,7 @@ It owns:
 
 - **A derived contract** (`Sync.forApplication`): one application declaration
   produces the writable projection, the durable Message subset, the initial
-  snapshot, and the durable journal contract. `Surface.pick` builds the
+  snapshot, and the durable journal contract. `Projection.pick` builds the
   projection; only the declared Messages reach durable state.
 - **A persisted outbox and optimistic projection.** `submit` replays the Message
   first and writes it locally only if replay accepts it; `replica.shared` shows

@@ -15,7 +15,7 @@ import { type Resource, type ResourceOptions, resource } from './resource.js'
 import { type AgentRuntime, type BindOptions, bind } from './runtime.js'
 import type { AnyMessage } from './types.js'
 import type { MessageUnion } from 'foldkit/message'
-import type { MessageSubset } from 'foldkit-surface'
+import type { MessageSet } from 'foldkit-surface'
 
 /**
  * The `foldkit-agent` constructors with `Model` and `Principal` already fixed.
@@ -42,7 +42,7 @@ export interface BoundAgent<Model, Principal> {
     const V extends Record<string, unknown>,
     Ext extends Record<string, unknown> = {},
   >(
-    subset: MessageSubset<Root, Message, Subset, Ms, AllCases>,
+    subset: MessageSet<Root, Message, Subset, Ms, AllCases>,
     variants: V & ValidateVariants<SubsetCases<AllCases, Ms>, Ext, Model, Principal>,
   ) => ExposedMessages<
     Model,

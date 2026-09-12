@@ -1,17 +1,17 @@
 import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Surface, type WritableProjection } from '../src/index.js'
+import { Projection, type WritableProjection } from '../src/index.js'
 import { App, Model as TodoModel } from './todoFixture.js'
 
 type TodoModelValue = typeof TodoModel.Type
 const model: TodoModelValue = { todos: [{ id: 'a', title: 'A' }], selectedTodoId: 'a' }
 
-const Todos = Surface.pick(App.model.todos)
-const Selection = Surface.pick(App.model.selectedTodoId)
+const Todos = Projection.pick(App.model.todos)
+const Selection = Projection.pick(App.model.selectedTodoId)
 
-describe('Surface.compose', () => {
+describe('Projection.compose', () => {
   it('merges disjoint picks with their codecs and dependencies', () => {
-    const Both = Surface.compose(Todos, Selection)
+    const Both = Projection.compose(Todos, Selection)
 
     expect(Both.dependencies).toEqual([['todos'], ['selectedTodoId']])
     expect(Both.get(model)).toEqual({ todos: [{ id: 'a', title: 'A' }], selectedTodoId: 'a' })
@@ -22,7 +22,7 @@ describe('Surface.compose', () => {
   })
 
   it('deduplicates an identical member', () => {
-    expect(Surface.compose(Todos, Todos).dependencies).toEqual([['todos']])
+    expect(Projection.compose(Todos, Todos).dependencies).toEqual([['todos']])
   })
 
   it('rejects an overlapping field with a different codec', () => {
@@ -33,6 +33,6 @@ describe('Surface.compose', () => {
       set: candidate => candidate,
     }
 
-    expect(() => Surface.compose(Todos, Conflicting)).toThrow('conflicting definitions')
+    expect(() => Projection.compose(Todos, Conflicting)).toThrow('conflicting definitions')
   })
 })

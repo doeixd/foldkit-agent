@@ -118,7 +118,7 @@ pnpm bench           # sync bench + durable storage script (not a gate)
 | `Agent.context({ schema, select })` | `packages/agent` | Surface `Projection` |
 | `Agent.pick(Model, [keys])` | `packages/agent` | `App.model.key…` ModelRefs |
 | `Agent.resource({ schema, read })` | `packages/agent` | `Agent.resource({ projection })` |
-| `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Sync.project` |
+| `Projection<Model,Fields>{schema,get,set}` | `packages/sync/src/projection.ts` | Surface `ModelRef` + `Projection.pick` |
 | `pick(Model, [keys])` | `packages/sync` (added recently) | Superseded by Surface `pick`/`ModelRef` |
 | `defineSync({ message, shared, empty, durable, replay })` | `packages/sync` | Kept as the low-level escape hatch; `Sync.forApplication(App).make` compiles to it |
 | `examples/sync/src/runtime.ts` mount wrapper | example | Generalized under a `Sync.mount`/`Sync.browser` adapter (needs a decision, §10.6) |
@@ -1523,8 +1523,8 @@ hand-rolling a projection.
 ```ts
 const TodoSync = Sync.forApplication(App).make({
   documentId: documentId("todos"),
-  shared: Surface.pick(App.fields.todos),  // writable projection from ModelRefs
-  durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo]),
+  shared: Projection.pick(App.fields.todos),  // writable projection from ModelRefs
+  durable: MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo]),
   // replay is derived from `update`; pass `replay` to override it
 })
 // TodoSync.surface : observes/writes Model.todos, accepts those Messages
@@ -1532,7 +1532,7 @@ const TodoSync = Sync.forApplication(App).make({
 
 ### 10.1 Invariants
 
-- `Sync.project({...})` is a **writable** projection derived from `ModelRef`s
+- `Projection.pick(...)` is a **writable** projection derived from `ModelRef`s
   (`ModelRef` carries `get`/`set` internally). Surface projections stay read-only
   publicly; only Sync regains write authority.
 - `replay` is inferred against the declared Message subset, not the whole union.
@@ -1605,8 +1605,8 @@ const TodoAgent = Agent.make(App, "TodoAgent", {
 
 const TodoSync = Sync.forApplication(App).make({
   documentId: documentId("todos"),
-  shared: Surface.pick(App.fields.todos),
-  durable: Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo]),
+  shared: Projection.pick(App.fields.todos),
+  durable: MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo]),
 })
 
 const journal = yield* makeJournal({
@@ -2192,20 +2192,20 @@ now uses both, replacing its hand-written replica and journal contracts
 (`717a28e`); the Foldkit runtime-binding gap and the proposed upstream hook are
 documented in `docs/sync-runtime-binding.md` (`fdd9789`, with the concrete
 admission-hook proposal in `c3d6c91`); the reference-based
-selection from `packages/agent/DESIGN.md` started as `Surface.pick` over keyed,
+selection from `packages/agent/DESIGN.md` started as `Projection.pick` over keyed,
 owner-tagged Model references (`61eb87e`); `Surface.application`/`App.fields`
-landed next (`8daf52b`); typed Message subsets landed as `Surface.messages`
+landed next (`8daf52b`); typed Message subsets landed as `MessageSet.make`
 (`fbf5368`); the derivation landed as `Sync.forApplication` (`f779fc9`);
-`Surface.compose` landed as `0d29bc1`; `examples/sync` now builds on the whole
+`Projection.compose` landed as `0d29bc1`; `examples/sync` now builds on the whole
 reference-based layer (`a915c0b`); `Agent.forApplication` landed as `a32c2e4`, so
 agent and sync consume the same application/projection references. The reference
 API was then sharpened after review (`5144264`, `bea8706`): `Surface.application`
-takes optional `initial`/`update` and resource-carrying Commands; `Surface.pick`
-rejects dynamic `.at`/`.index` refs; `Surface.unionMessages` and
+takes optional `initial`/`update` and resource-carrying Commands; `Projection.pick`
+rejects dynamic `.at`/`.index` refs; `MessageSet.union` and
 `Agent.exposeSubset` compose and expose subsets; `Agent.forApplication` infers the
 Model with a curried `Principal`; `ModelRef` codecs are typed pure. Encoded
 types now flow through `ModelRef`/`FieldRef`/`FieldRef`-derived projections and
-`MessageSubset` (`0606e5e`), so `Surface.pick`/`Surface.compose` and the journal
+`MessageSet` (`0606e5e`), so `Projection.pick`/`Projection.compose` and the journal
 snapshot codec keep each field's encoded type. The remaining integration work is
 the Foldkit binding (step 3 onward in `packages/agent/DESIGN.md`). Work through
 the review findings and open questions below.

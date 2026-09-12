@@ -1,5 +1,5 @@
 import { Agent } from 'foldkit-agent'
-import { Surface } from 'foldkit-surface'
+import { Projection, Surface } from 'foldkit-surface'
 import { Option, Schema } from 'effect'
 import { Message, Model, Todo, initialModel, update } from './app.js'
 
@@ -25,7 +25,7 @@ const TodoAgent = Agent.forApplication(App).withPrincipal<Principal>()
  */
 export const AppAgent = TodoAgent.make({
   // What an agent may see. `lastError` is deliberately not projected.
-  context: Surface.pick(App.fields.todos, App.fields.selectedTodoId),
+  context: Projection.pick(App.fields.todos, App.fields.selectedTodoId),
 
   messages: TodoAgent.expose(Message, {
     // Most capabilities need nothing but a description.

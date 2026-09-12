@@ -1,7 +1,7 @@
 import type { Duration } from 'effect'
 import { Schema } from 'effect'
 import type { MessageUnion } from 'foldkit/message'
-import type { MessageSubset } from 'foldkit-surface'
+import type { MessageSet } from 'foldkit-surface'
 import { toJsonSchema } from './jsonSchema.js'
 import { messageTag } from './tag.js'
 import { type CompiledCompletion, compileCompletion } from './completion.js'
@@ -435,7 +435,7 @@ export const expose = <
 }
 
 /** A tag-to-constructor map for a subset, in the shape `expose` reads. */
-const subsetUnion = (subset: MessageSubset<any, any, any, any, any>): Record<string, unknown> => {
+const subsetUnion = (subset: MessageSet<any, any, any, any, any>): Record<string, unknown> => {
   const union: Record<string, unknown> = {}
   for (const constructor of subset.constructors) {
     const tag = messageTag(constructor)
@@ -445,7 +445,7 @@ const subsetUnion = (subset: MessageSubset<any, any, any, any, any>): Record<str
 }
 
 /**
- * Exposes the variants of a `Surface.messages` subset. A separate entry point
+ * Exposes the variants of a `MessageSet.make` subset. A separate entry point
  * from `expose` so the common path keeps its precise error messages; a variant
  * outside the subset is a compile error, and the runtime only sees the subset's
  * own constructors.
@@ -461,7 +461,7 @@ export const exposeSubset = <
   Model = any,
   Principal = any,
 >(
-  subset: MessageSubset<Root, Message, Subset, Ms, AllCases>,
+  subset: MessageSet<Root, Message, Subset, Ms, AllCases>,
   variants: V & ValidateVariants<SubsetCases<AllCases, Ms>, Ext, Model, Principal>,
 ): ExposedMessages<
   Model,

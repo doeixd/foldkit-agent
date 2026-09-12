@@ -42,8 +42,8 @@ const App = Surface.application({
   update,
 })
 
-const Todos = Surface.pick(App.fields.todos)
-const TodoChanges = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
+const Todos = Projection.pick(App.fields.todos)
+const TodoChanges = MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo])
 
 const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
@@ -110,7 +110,7 @@ const shared = Effect.runSync(replica.shared)
 - The Foldkit-facing contract (`Sync.forApplication(App).make`, optionally with
   a custom `replay`): derives the shared projection, the durable Message subset, the
   initial snapshot, and the journal contract from the application, so none is
-  declared twice. `Surface.pick`/`Sync.project` build the writable projection;
+  declared twice. `Projection.pick`/`Projection.compose` build the writable projection;
   `TodoSync.journalContract()` builds the durable codecs and reducer.
 - The operation envelope: `replicaId:localSequence` identity, `baseCursor`, and
   protocol/schema versions. The wire codecs live under `Sync.codec`

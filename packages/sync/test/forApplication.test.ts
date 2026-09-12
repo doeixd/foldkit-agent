@@ -1,6 +1,6 @@
 import { Effect, Schema } from 'effect'
 import { defineMessageUnion } from 'foldkit/message'
-import { Surface } from 'foldkit-surface'
+import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import type * as Update from 'foldkit/update'
 import { describe, expect, it } from 'vitest'
 import { documentId, forApplication, replicaId } from '../src/index.js'
@@ -31,8 +31,8 @@ const update = (model: Model, message: Message): Update.Return<Model, Message> =
 })
 
 const App = Surface.application({ Model: ModelSchema, Message, initial, update })
-const Todos = Surface.pick(App.fields.todos)
-const Changes = Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])
+const Todos = Projection.pick(App.fields.todos)
+const Changes = MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo])
 const TodoSync = forApplication(App).make({
   documentId: documentId('todos'),
   shared: Todos,
@@ -116,8 +116,8 @@ describe('Sync.forApplication', () => {
     })
     const sync = forApplication(Faulty).make({
       documentId: documentId('todos'),
-      shared: Surface.pick(Faulty.fields.todos),
-      durable: Surface.messages(Faulty, [Message.CreatedTodo, Message.RenamedTodo]),
+      shared: Projection.pick(Faulty.fields.todos),
+      durable: MessageSet.make(Faulty, [Message.CreatedTodo, Message.RenamedTodo]),
     })
     return Effect.runPromise(sync.openReplica(replicaId('a'), memoryStorage()))
   }
@@ -166,7 +166,7 @@ describe('Sync.forApplication', () => {
       initial: { todos: [] },
       update: (model: typeof OtherModel.Type) => ({ model }),
     })
-    const OtherChanges = Surface.messages(OtherApp, [OtherMessage.Ping])
+    const OtherChanges = MessageSet.make(OtherApp, [OtherMessage.Ping])
 
     expect(() =>
       forApplication(App).make({

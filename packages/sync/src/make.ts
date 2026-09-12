@@ -8,12 +8,12 @@ import { Schema } from 'effect'
 import {
   Surface,
   type AppScope,
-  type MessageSubset,
+  type MessageSet,
   type Projection,
   type RunnableApplication,
+  type WritableProjection,
 } from 'foldkit-surface'
 import type { DocumentId } from './ids.js'
-import type { WritableProjection } from './project.js'
 import { defineSync, type Sync } from './sync.js'
 
 type MessageConstructor<Message> = (...args: never[]) => Message
@@ -48,7 +48,7 @@ export interface MakeOptions<
   /** The writable projection of the shared fields. */
   readonly shared: WritableProjection<AppModel, Fields>
   /** The Message subset the replica durably records and replays. */
-  readonly durable: MessageSubset<AppModel, any, Subset, Ms>
+  readonly durable: MessageSet<AppModel, any, Subset, Ms>
   /**
    * Replaces the replay derived from the application's `update`. It is a pure
    * reducer over the shared subset; only durable Messages reach it, and it runs

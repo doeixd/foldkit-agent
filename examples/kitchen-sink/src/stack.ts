@@ -34,7 +34,7 @@ import {
   source,
 } from 'foldkit-remote-drizzle'
 import { RemoteServer } from 'foldkit-remote-server'
-import { Projection, Surface } from 'foldkit-surface'
+import { MessageSet, Projection, Surface } from 'foldkit-surface'
 import {
   actorId as toDurableActorId,
   cursor as toDurableCursor,
@@ -193,11 +193,8 @@ export const BoardSurface = Surface.make(App, 'Board', {
 // The client-owned replica (durable + sync)
 // ---------------------------------------------------------------------------
 
-export const Notes = Surface.pick(App.fields.notes)
-const NoteChanges = Surface.messages(App, [
-  Message.RequestedCreateNote,
-  Message.RequestedRenameNote,
-])
+export const Notes = Projection.pick(App.fields.notes)
+const NoteChanges = MessageSet.make(App, [Message.RequestedCreateNote, Message.RequestedRenameNote])
 export const KitchenSync: SyncContract<
   Message,
   { readonly notes: ReadonlyArray<typeof Note.Type> }

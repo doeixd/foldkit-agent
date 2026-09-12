@@ -80,7 +80,7 @@ type Selectable<Root, Value, Key extends string, Encoded = unknown> = [Value] ex
 
 /**
  * A dynamic focus from `.at`/`.index`. Deliberately not a `FieldRef`: its key is
- * a record key or index, not a Model field, so a static `Surface.pick` cannot
+ * a record key or index, not a Model field, so a static `Projection.pick` cannot
  * infer a field name from it.
  */
 type OptionalRef<Root, Value> = [Value] extends [Option.Option<infer Inner>]
@@ -511,6 +511,89 @@ export const Projection = {
     requirements: options?.requirements ?? [],
     read,
   }),
+
+  /**
+   * Derives a writable projection from generated Model field references:
+   * `Projection.pick(App.model.todos, App.model.selectedTodoId)` infers
+   * `{ todos, selectedTodoId }` and its codec. Every reference must share one
+   * Root; a raw optic or an unrelated application is rejected. Repeated
+   * identical members deduplicate; a conflicting definition throws.
+   */
+  pick: <const Refs extends readonly FieldRef<any, any, string>[]>(
+    ...refs: Refs & (IsUnion<RefRoots<Refs>[number]> extends true ? never : unknown)
+  ): WritableProjection<RefRoots<Refs>[number], PickFields<Refs>> => {
+    const selected = [...refs]
+    // Two applications can have structurally identical Models, so the root type
+    // check cannot separate them; the owner token can.
+    const owner = selected[0]?.owner
+    for (const ref of selected) {
+      if (ref.owner !== owner) {
+        throw new Error('Projection.pick: references from different applications')
+      }
+    }
+    const fields: Record<string, AnySchema> = {}
+    for (const ref of selected) {
+      const existing = fields[ref.key]
+      if (existing !== undefined) {
+        if (existing === ref.Schema) continue
+        throw new Error(`Projection.pick: conflicting definitions for "${ref.key}"`)
+      }
+      fields[ref.key] = ref.Schema
+    }
+    return {
+      schema: objectSchema(fields) as never,
+      dependencies: mergeDependencies(selected.map(ref => ref.dependency)),
+      get: model => {
+        const out: Record<string, unknown> = {}
+        for (const ref of selected) out[ref.key] = ref.get(model as never)
+        return out as never
+      },
+      set: (model, shared) => {
+        let next = model
+        for (const ref of selected)
+          next = ref.set(next as never, (shared as Record<string, unknown>)[ref.key] as never)
+        return next
+      },
+    }
+  },
+
+  /**
+   * Merges disjoint writable projections into one: `Projection.compose(Todos,
+   * Selection)`. Every projection must own the same Model; a field defined twice
+   * with a different codec throws, while an identical definition deduplicates.
+   * `set` installs each part, so composed fields keep their own write behaviour.
+   */
+  compose: <const Ps extends readonly WritableProjection<any, any>[]>(
+    ...projections: Ps & (IsUnion<ProjectionModel<Ps[number]>> extends true ? never : unknown)
+  ): WritableProjection<ProjectionModel<Ps[number]>, MergeFields<Ps>> => {
+    const parts = [...projections]
+    const fields: Record<string, AnySchema> = {}
+    for (const part of parts) {
+      for (const [key, codec] of Object.entries(part.schema.fields)) {
+        const existing = fields[key]
+        if (existing !== undefined) {
+          if (existing === codec) continue
+          throw new Error(`Projection.compose: conflicting definitions for "${key}"`)
+        }
+        fields[key] = codec as AnySchema
+      }
+    }
+    return {
+      schema: objectSchema(fields) as never,
+      dependencies: mergeDependencies(parts.flatMap(part => [...part.dependencies])),
+      get: model => {
+        const out: Record<string, unknown> = {}
+        for (const part of parts) Object.assign(out, part.get(model as never))
+        return out as never
+      },
+      set: (model, shared) => {
+        let next = model
+        // Each part reads only its own fields from the merged value.
+        for (const part of parts) next = part.set(next as never, shared as never)
+        return next
+      },
+    }
+  },
 }
 
 // ===========================================================================
@@ -651,7 +734,7 @@ declare const messageSubsetRoot: unique symbol
 type SubsetEncoded<Ms extends readonly unknown[]> =
   Ms[number] extends Schema.Codec<any, infer Encoded, any, any> ? Encoded : never
 
-export interface MessageSubset<
+export interface MessageSet<
   Root,
   Message,
   Subset extends Message,
@@ -732,33 +815,32 @@ function application(config: any): any {
   return { ...scope, initial: config.initial, fields: scope.model, update: config.update }
 }
 
-type ConstructorOfSubset<S> = S extends MessageSubset<any, any, any, infer Ms, any> ? Ms : never
-type ValueOfSubset<S> = S extends MessageSubset<any, any, infer V, any, any> ? V : never
-type RootOfSubset<S> = S extends MessageSubset<infer R, any, any, any, any> ? R : never
-type MessageOfSubset<S> = S extends MessageSubset<any, infer M, any, any, any> ? M : never
-type CasesOfSubset<S> = S extends MessageSubset<any, any, any, any, infer C> ? C : never
+type ConstructorOfSubset<S> = S extends MessageSet<any, any, any, infer Ms, any> ? Ms : never
+type ValueOfSubset<S> = S extends MessageSet<any, any, infer V, any, any> ? V : never
+type RootOfSubset<S> = S extends MessageSet<infer R, any, any, any, any> ? R : never
+type MessageOfSubset<S> = S extends MessageSet<any, infer M, any, any, any> ? M : never
+type CasesOfSubset<S> = S extends MessageSet<any, any, any, any, infer C> ? C : never
 
 type Concat<A extends readonly unknown[], B extends readonly unknown[]> = [...A, ...B]
 
 /** Concatenates the constructor tuples of several subsets, preserving each. */
-type MergeConstructors<Subs extends readonly MessageSubset<any, any, any, any, any>[]> =
+type MergeConstructors<Subs extends readonly MessageSet<any, any, any, any, any>[]> =
   Subs extends readonly [
-    infer Head extends MessageSubset<any, any, any, any, any>,
-    ...infer Tail extends readonly MessageSubset<any, any, any, any, any>[],
+    infer Head extends MessageSet<any, any, any, any, any>,
+    ...infer Tail extends readonly MessageSet<any, any, any, any, any>[],
   ]
     ? Concat<ConstructorOfSubset<Head>, MergeConstructors<Tail>>
     : []
 
-export const Surface = {
-  application,
-
+/** Typed Message subsets of one application, by constructor reference. */
+export const MessageSet = {
   /**
    * Selects a typed Message subset by constructor reference:
-   * `Surface.messages(App, [Message.CreatedTodo, Message.RenamedTodo])`. Each
+   * `MessageSet.make(App, [Message.CreatedTodo, Message.RenamedTodo])`. Each
    * constructor must be this application's own variant; a duplicate or a variant
    * from another union throws.
    */
-  messages: <
+  make: <
     Root,
     F extends Schema.Struct.Fields,
     Cases extends Record<string, Schema.Struct.Fields>,
@@ -766,7 +848,7 @@ export const Surface = {
   >(
     app: AppScope<Root, F, Cases>,
     messages: Ms,
-  ): MessageSubset<
+  ): MessageSet<
     Root,
     Schema.Schema.Type<MessageUnion<Cases>>,
     SubsetOf<Ms> & Schema.Schema.Type<MessageUnion<Cases>>,
@@ -778,14 +860,14 @@ export const Surface = {
     for (const constructor of messages) {
       const tag = messageTag(constructor)
       if (tag === undefined) {
-        throw new Error('Surface.messages: expected Message constructors')
+        throw new Error('MessageSet.make: expected Message constructors')
       }
       if ((app.Message as unknown as Record<string, unknown>)[tag] !== constructor) {
         throw new Error(
-          `Surface.messages: "${tag}" is not a variant of this application's Message union`,
+          `MessageSet.make: "${tag}" is not a variant of this application's Message union`,
         )
       }
-      if (tags.has(tag)) throw new Error(`Surface.messages: duplicate "${tag}"`)
+      if (tags.has(tag)) throw new Error(`MessageSet.make: duplicate "${tag}"`)
       tags.add(tag)
     }
     return {
@@ -810,9 +892,9 @@ export const Surface = {
    * same application; a tag declared twice throws. Disjoint feature modules can
    * each declare their own subset and compose them here.
    */
-  unionMessages: <const Subs extends readonly MessageSubset<any, any, any, any, any>[]>(
+  union: <const Subs extends readonly MessageSet<any, any, any, any, any>[]>(
     ...subsets: Subs
-  ): MessageSubset<
+  ): MessageSet<
     RootOfSubset<Subs[number]>,
     MessageOfSubset<Subs[number]>,
     ValueOfSubset<Subs[number]>,
@@ -826,12 +908,12 @@ export const Surface = {
     const constructors: Array<Schema.Schema<unknown>> = []
     for (const part of parts) {
       if (part.owner !== owner) {
-        throw new Error('Surface.unionMessages: subsets from different applications')
+        throw new Error('MessageSet.union: subsets from different applications')
       }
       for (const constructor of part.constructors) {
         const tag = messageTag(constructor)
         if (tag === undefined) continue
-        if (tags.has(tag)) throw new Error(`Surface.unionMessages: duplicate "${tag}"`)
+        if (tags.has(tag)) throw new Error(`MessageSet.union: duplicate "${tag}"`)
         tags.add(tag)
         constructors.push(constructor as Schema.Schema<unknown>)
       }
@@ -850,89 +932,10 @@ export const Surface = {
         tags.has((message as { readonly _tag?: string })._tag ?? ''),
     }
   },
+}
 
-  /**
-   * Derives a writable projection from generated Model field references:
-   * `Surface.pick(App.model.todos, App.model.selectedTodoId)` infers
-   * `{ todos, selectedTodoId }` and its codec. Every reference must share one
-   * Root; a raw optic or an unrelated application is rejected. Repeated
-   * identical members deduplicate; a conflicting definition throws.
-   */
-  pick: <const Refs extends readonly FieldRef<any, any, string>[]>(
-    ...refs: Refs & (IsUnion<RefRoots<Refs>[number]> extends true ? never : unknown)
-  ): WritableProjection<RefRoots<Refs>[number], PickFields<Refs>> => {
-    const selected = [...refs]
-    // Two applications can have structurally identical Models, so the root type
-    // check cannot separate them; the owner token can.
-    const owner = selected[0]?.owner
-    for (const ref of selected) {
-      if (ref.owner !== owner) {
-        throw new Error('Surface.pick: references from different applications')
-      }
-    }
-    const fields: Record<string, AnySchema> = {}
-    for (const ref of selected) {
-      const existing = fields[ref.key]
-      if (existing !== undefined) {
-        if (existing === ref.Schema) continue
-        throw new Error(`Surface.pick: conflicting definitions for "${ref.key}"`)
-      }
-      fields[ref.key] = ref.Schema
-    }
-    return {
-      schema: objectSchema(fields) as never,
-      dependencies: mergeDependencies(selected.map(ref => ref.dependency)),
-      get: model => {
-        const out: Record<string, unknown> = {}
-        for (const ref of selected) out[ref.key] = ref.get(model as never)
-        return out as never
-      },
-      set: (model, shared) => {
-        let next = model
-        for (const ref of selected)
-          next = ref.set(next as never, (shared as Record<string, unknown>)[ref.key] as never)
-        return next
-      },
-    }
-  },
-
-  /**
-   * Merges disjoint writable projections into one: `Surface.compose(Todos,
-   * Selection)`. Every projection must own the same Model; a field defined twice
-   * with a different codec throws, while an identical definition deduplicates.
-   * `set` installs each part, so composed fields keep their own write behaviour.
-   */
-  compose: <const Ps extends readonly WritableProjection<any, any>[]>(
-    ...projections: Ps & (IsUnion<ProjectionModel<Ps[number]>> extends true ? never : unknown)
-  ): WritableProjection<ProjectionModel<Ps[number]>, MergeFields<Ps>> => {
-    const parts = [...projections]
-    const fields: Record<string, AnySchema> = {}
-    for (const part of parts) {
-      for (const [key, codec] of Object.entries(part.schema.fields)) {
-        const existing = fields[key]
-        if (existing !== undefined) {
-          if (existing === codec) continue
-          throw new Error(`Surface.compose: conflicting definitions for "${key}"`)
-        }
-        fields[key] = codec as AnySchema
-      }
-    }
-    return {
-      schema: objectSchema(fields) as never,
-      dependencies: mergeDependencies(parts.flatMap(part => [...part.dependencies])),
-      get: model => {
-        const out: Record<string, unknown> = {}
-        for (const part of parts) Object.assign(out, part.get(model as never))
-        return out as never
-      },
-      set: (model, shared) => {
-        let next = model
-        // Each part reads only its own fields from the merged value.
-        for (const part of parts) next = part.set(next as never, shared as never)
-        return next
-      },
-    }
-  },
+export const Surface = {
+  application,
 
   make: <
     Root,

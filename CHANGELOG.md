@@ -15,6 +15,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 
 ### `foldkit-surface` (private)
 
+- **The primitives are first-class.** `Projection.pick`/`Projection.compose`
+  (were `Surface.pick`/`Surface.compose`) build writable projections, and
+  `MessageSet.make(App, [constructors])`/`MessageSet.union` (were
+  `Surface.messages`/`Surface.unionMessages`) build typed Message subsets, now
+  typed `MessageSet`. Agent and Sync consume `Projection` and `MessageSet`
+  values, not Surface helpers; a `Surface` is what composes one of each with a
+  name and a renderer (#60, section 4).
 - **`make` constructs, `application` scopes.** One vocabulary across the
   application-contract packages (#60): `forApplication(App)` specializes a
   package to an application and `make(config)` constructs a contract, as
@@ -25,16 +32,16 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `initial`/`update`. The mixins packages keep their own `Slots.define`/
   `SurfaceView.define` vocabulary for now.
 - **Reference-based selection.** `Surface.application` generates a reference tree
-  (`App.fields`), and `Surface.pick`/`Surface.compose` build writable projections
+  (`App.fields`), and `Projection.pick`/`Projection.compose` build writable projections
   from it, so a shared projection is derived from the Model Schema instead of
   declared twice. `Sync.forApplication` and `Agent.forApplication` consume it.
-- **Typed Message subsets.** `Surface.messages(app, [constructors])` and
-  `Surface.unionMessages(...)` produce a `MessageSubset` with a pure codec, a tag
+- **Typed Message subsets.** `MessageSet.make(app, [constructors])` and
+  `MessageSet.union(...)` produce a `MessageSet` with a pure codec, a tag
   set, and an owner token, so two structurally identical applications cannot mix
   selections and a subset cannot leak across applications.
-- **Encoded types are preserved.** `ModelRef`/`FieldRef` and `MessageSubset` carry
+- **Encoded types are preserved.** `ModelRef`/`FieldRef` and `MessageSet` carry
   an `Encoded` parameter, so a transforming field (`Schema.NumberFromString`)
-  keeps its encoded type through `Surface.pick` and the journal snapshot codec
+  keeps its encoded type through `Projection.pick` and the journal snapshot codec
   instead of widening to `unknown`.
 - **Transition and resources.** `Surface.application` accepts optional
   `initial`/`update` and resource-carrying Commands; the runnable form is what
@@ -213,13 +220,13 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Surface-based context.** `Agent.context` and `Agent.pick` are removed. The
   `make` `context` option now takes a `foldkit-surface` projection — a read-only
   `Projection` (`Projection.of`/`struct`/`fromReader`) or a writable
-  `Surface.pick`/`Surface.compose` — and the runtime reads it with `.read`.
+  `Projection.pick`/`Projection.compose` — and the runtime reads it with `.read`.
   `Agent.forApplication(App)` infers the Model from a `Surface.application` and
   accepts either projection directly; `Agent.forModel<Model>()` remains when there
   is no application. `Agent.contextSchema` is unchanged.
 - **Subset exposure and a curried principal.** `Agent.exposeSubset(subset,
-  variants)` exposes only the variants of a `Surface.messages` subset, and
-  `Surface.unionMessages` composes disjoint subsets. `Agent.forApplication` infers
+  variants)` exposes only the variants of a `MessageSet.make` subset, and
+  `MessageSet.union` composes disjoint subsets. `Agent.forApplication` infers
   the Model, so a `Principal` is supplied by
   `Agent.forApplication(App).withPrincipal<Principal>()` — TypeScript cannot
   infer Model beside an explicit principal, and the chained form keeps one entry
@@ -286,19 +293,19 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   gone, superseded by the shared Surface `ModelRef`/`Projection`.
   `Sync.forApplication(App).make({ documentId, shared, durable })` derives the
   shared projection, the durable subset, the initial snapshot, and replay from a
-  `Surface.application`, a `Surface.pick`/`Surface.compose` projection, and a
-  `Surface.messages` subset; `define({ ..., replay })` replaces the derived replay
+  `Surface.application`, a `Projection.pick`/`Projection.compose` projection, and a
+  `MessageSet.make` subset; `define({ ..., replay })` replaces the derived replay
   with a custom reducer over the shared slice. It compiles to the low-level
   `defineSync` and returns a read-only `surface`; `TodoSync.journalContract()`
   derives the durable operation/snapshot codecs, empty snapshot, and reducer.
-  Additive — `defineSync` remains the protocol primitive. `Sync.project` now also
-  carries the projection's dependency paths.
+  Additive — `defineSync` remains the protocol primitive. `Sync.project` is
+  removed; `Projection.pick` is the writable projection.
 - **One entry point, shaped like Agent's.** `Sync.forApplication(App)` specializes
   the constructors to an application and `.make(config)` produces the
   contract, matching `Agent.forApplication(App).make(config)` (#60). The
   earlier `Sync.forApplication(App, config)` and `Sync.make(App, name, config)`
   forms are gone; `Sync.make`'s explicit `initial` and bare constructor array
-  came from the application and a `Surface.messages` subset anyway. `make`
+  came from the application and a `MessageSet.make` subset anyway. `make`
   refuses a durable subset whose owner token belongs to a different application.
   `MakeOptions` names its config.
 - **Derived replay is guarded.** `Sync.forApplication`'s replay refuses a durable

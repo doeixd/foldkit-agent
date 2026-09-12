@@ -40,7 +40,7 @@ const toProjection = <Model, R extends ReadableProjection<Model, any>>(
 /**
  * `Agent.forApplication(App)` fixes the Model from a `Surface.application` and
  * accepts a Surface projection (read-only or writable) as the agent context, so
- * the same `Surface.pick`/`Surface.compose` value an application replicates is
+ * the same `Projection.pick`/`Projection.compose` value an application replicates is
  * also what an agent may see.
  */
 export interface ApplicationAgent<Model, Principal> extends Omit<
@@ -68,7 +68,7 @@ export interface ApplicationAgent<Model, Principal> extends Omit<
 const buildAgent = <Model, Principal>(
   app: Application<Model, any, any>,
 ): ApplicationAgent<Model, Principal> => {
-  // `Surface.pick`/`Surface.messages` carry a per-application owner token, so a
+  // `Projection.pick`/`MessageSet.make` carry a per-application owner token, so a
   // subset from another application is refused even when the types match.
   const appExposeSubset = ((subset: { readonly owner: object }, variants: unknown): unknown => {
     if (subset.owner !== app.owner)

@@ -14,7 +14,6 @@ export {
   type DefinedSync,
   type MsgOf,
 } from './make.js'
-export { project, type WritableProjection } from './project.js'
 export {
   DocumentId,
   LocalSequence,

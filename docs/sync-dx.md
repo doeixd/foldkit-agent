@@ -15,7 +15,7 @@ same primitives rather than grow independent projection systems. Sync's initial
 compatible entry points during migration.
 
 The default field selection is reference-based:
-`Surface.pick(App.fields.todos)`, with `Sync.forApplication(App).make(options)`
+`Projection.pick(App.fields.todos)`, with `Sync.forApplication(App).make(options)`
 and `Agent.forApplication(App).make(options)` consuming the same application
 reference. See the
 [usage sketches](../packages/agent/DESIGN.md#usage-sketches-across-packages) for a
@@ -83,7 +83,7 @@ const App = Surface.application({
 
 const TodosSync = Sync.forApplication(App).make({
   documentId: documentId('todos'),
-  shared: Surface.pick(App.fields.todos),
+  shared: Projection.pick(App.fields.todos),
 
   durable: [Message.CreatedTodo, Message.RenamedTodo, Message.DeletedTodo],
   presence: [Message.SelectedTodo],
@@ -109,7 +109,7 @@ easier to infer and read for a first release, so it is the recommendation.
 
 ## Reference-based state projection
 
-`Surface.pick(App.fields.todos)` infers a projection from generated field
+`Projection.pick(App.fields.todos)` infers a projection from generated field
 references on the application's Model. `App.fields` is derived once, so authors
 write neither path strings nor a parallel field registry:
 
@@ -123,7 +123,7 @@ interface Projection<Model, Shared, SharedEncoded> {
 
 - `schema` is `Schema.Struct` over the picked fields, so its encoded side is the
   shared codec the replica already needs.
-- `get`/`set` are derived from the references, so `Surface.pick(App.fields.todos)`
+- `get`/`set` are derived from the references, so `Projection.pick(App.fields.todos)`
   produces `{ todos: Model['todos'] }` with no annotation.
 - A missing field is a compile error at `App.fields.missingField`.
 - For a computed projection, `Surface.state({ schema, get, set })` is the escape
@@ -131,7 +131,7 @@ interface Projection<Model, Shared, SharedEncoded> {
 
 The initial shared value is `get(initial)`, so no separate `empty` is written.
 
-Select several fields as `Surface.pick(App.fields.todos, App.fields.members)`
+Select several fields as `Projection.pick(App.fields.todos, App.fields.members)`
 when both exist. A field reference carries owner, path, and codec; raw schema
 identity alone is insufficient because several fields can reuse one schema.
 Nested selection should use typed references with explicit optional-parent
@@ -194,7 +194,7 @@ low-level `defineSync` escape hatch rather than a fabricated replay guarantee.
 
   ```ts
   const Todos = Sync.fragment(App).pipe(
-    Sync.shared(Surface.pick(App.fields.todos)),
+    Sync.shared(Projection.pick(App.fields.todos)),
     Sync.durable(Message.CreatedTodo, Message.RenamedTodo),
   )
   const Presence = Sync.fragment(App).pipe(Sync.presence(Message.SelectedTodo))

@@ -143,8 +143,8 @@ cancellation; it does not silently interrupt a mount's persistence.
 ```ts
 const { dispatch, install, dispose } = mountReplica({
   app: App,                       // Surface.application(...)
-  replica,                        // durable subset = Surface.messages(App, [...])
-  shared: Surface.pick(App.fields.todos),
+  replica,                        // durable subset = MessageSet.make(App, [...])
+  shared: Projection.pick(App.fields.todos),
   view, container,
 })
 

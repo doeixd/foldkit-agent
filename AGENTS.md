@@ -199,7 +199,7 @@ installed `.d.ts` before reaching for a remembered API.
 
 - **Thread `Encoded`, not only `Type`, through a generic reference.**
   `ModelRef<Root, Value>` typed `Schema.Codec<Value, unknown>`, so a transforming
-  field (`NumberFromString`) lost its encoded `string` through `Surface.pick`, and
+  field (`NumberFromString`) lost its encoded `string` through `Projection.pick`, and
   an assignability test could not see it (`unknown` accepts anything). Carry an
   `Encoded` parameter and pin it with a type-equality assertion.
 
