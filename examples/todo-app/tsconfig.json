@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".tsbuild",
+    "emitDeclarationOnly": true,
+    "composite": true,
+    "paths": {
+      "foldkit-agent": ["../../packages/agent/src/index.ts"],
+      "foldkit-agent-webmcp": ["../../packages/agent-webmcp/src/index.ts"],
+      "foldkit-durable": ["../../packages/durable/src/index.ts"],
+      "foldkit-remote": ["../../packages/remote/src/index.ts"],
+      "foldkit-remote-drizzle": ["../../packages/remote-drizzle/src/index.ts"],
+      "foldkit-remote-server": ["../../packages/remote-server/src/index.ts"],
+      "foldkit-sync": ["../../packages/sync/src/index.ts"],
+      "foldkit-surface": ["../../packages/surface/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "references": [
+    { "path": "../../packages/agent/tsconfig.build.json" },
+    { "path": "../../packages/agent-webmcp/tsconfig.build.json" },
+    { "path": "../../packages/durable/tsconfig.build.json" },
+    { "path": "../../packages/remote/tsconfig.build.json" },
+    { "path": "../../packages/remote-drizzle/tsconfig.build.json" },
+    { "path": "../../packages/remote-server/tsconfig.build.json" },
+    { "path": "../../packages/sync/tsconfig.build.json" },
+    { "path": "../../packages/surface/tsconfig.build.json" }
+  ]
+}

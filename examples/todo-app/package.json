@@ -1,0 +1,34 @@
+{
+  "name": "foldkit-todo-app-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/dev.ts",
+    "server": "tsx src/serverMain.ts",
+    "demo": "tsx src/main.ts",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "drizzle-orm": "1.0.0-rc.4",
+    "effect": "4.0.0-rc.112",
+    "foldkit": "0.158.2",
+    "foldkit-agent": "workspace:*",
+    "foldkit-agent-webmcp": "workspace:*",
+    "foldkit-durable": "workspace:*",
+    "foldkit-remote": "workspace:*",
+    "foldkit-remote-drizzle": "workspace:*",
+    "foldkit-remote-server": "workspace:*",
+    "foldkit-sync": "workspace:*",
+    "foldkit-surface": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "21.1.7",
+    "@types/ws": "^8.5.12",
+    "fake-indexeddb": "6.2.4",
+    "jsdom": "26.1.0",
+    "typescript": "^5.7.2",
+    "vite": "5.4.21"
+  }
+}

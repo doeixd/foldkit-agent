@@ -325,6 +325,30 @@ describe('a durable journal', () => {
       expect(yield* journal.load(todos)).toEqual({ snapshot: { ids: ['a'] }, cursor: 1 })
     }))
 
+  it('clears the payload at the compaction floor', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      yield* journal.compact(todos, sequence(1))
+
+      // The payload through the floor is gone, so a retransmission is answered
+      // only from its identity.
+      expect(yield* journal.append(todos, add(1, 'a'), principal)).toMatchObject({
+        _tag: 'AlreadyCommitted',
+        opId: 'a:1',
+        sequence: 1,
+      })
+    }))
+
+  it('allows compacting to the current floor again', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1), principal)
+      yield* journal.compact(todos, sequence(1))
+
+      // Re-compacting at the same floor is an idempotent retry.
+      yield* journal.compact(todos, sequence(1))
+      expect(yield* journal.floor(todos)).toBe(1)
+    }))
+
   it('refuses a compaction cursor that moves backwards or past the snapshot', () =>
     withJournal(function* (journal) {
       yield* journal.append(todos, add(1), principal)
@@ -344,6 +368,58 @@ describe('a durable journal', () => {
       const result = yield* Effect.result(journal.read(todos, cursor(2)))
       expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'InvalidCursorError' } })
     }))
+
+  it('refuses a read cursor that is not a safe non-negative integer', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1), principal)
+
+      // `cursor` is only a branded number, so `read` owns the range check.
+      expect(yield* Effect.result(journal.read(todos, cursor(NaN)))).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'InvalidCursorError' },
+      })
+      expect(yield* Effect.result(journal.read(todos, cursor(-1)))).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'InvalidCursorError' },
+      })
+    }))
+
+  it('canonicalizes a null-prototype encoded payload by sorted keys', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'foldkit-canonical-'))
+    const path = join(directory, 'journal.sqlite')
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const journal = yield* makeJournal<Record<string, unknown>, Snapshot, Principal>({
+              file: path,
+              operation: {
+                encode: () => Object.assign(Object.create(null), { z: 1, a: 2 }),
+                decode: value => value as Record<string, unknown>,
+              },
+              snapshot,
+              empty: () => ({ ids: [] }),
+              reduce: state => state,
+              opId: () => opId('a:1'),
+              actorId: value => actorId(value.actorId),
+            })
+            yield* journal.append(todos, {}, principal)
+          }),
+        ),
+      )
+
+      const db = new DatabaseSync(path)
+      try {
+        expect(db.prepare('SELECT input FROM operations').get()).toMatchObject({
+          input: '{"a":2,"z":1}',
+        })
+      } finally {
+        db.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 
   it('upgrades a database written before version tracking, keeping its data', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'foldkit-migrate-'))
@@ -504,6 +580,22 @@ describe('a durable journal', () => {
 
       yield* Fiber.interrupt(subscriber)
       yield* journal.append(todos, add(2), principal)
+      yield* Effect.yieldNow
+      expect(seen).toEqual(['todos'])
+    }))
+
+  it('does not notify subscribers for an idempotent repeat', () =>
+    withJournal(function* (journal) {
+      const seen: string[] = []
+      yield* Effect.forkScoped(
+        Stream.runForEach(journal.subscribe, key => Effect.sync(() => seen.push(key))),
+      )
+      yield* Effect.yieldNow
+
+      yield* journal.append(todos, add(1), principal)
+      yield* Effect.yieldNow
+      // A repeat is not a change, so it must not wake subscribers again.
+      yield* journal.append(todos, add(1), principal)
       yield* Effect.yieldNow
       expect(seen).toEqual(['todos'])
     }))
@@ -727,6 +819,33 @@ describe('the recovery worker', () => {
         }),
       ).toBe(0)
       expect(runs).toBe(0)
+    }))
+
+  it('does not run a later operation after an earlier one freezes recovery', () =>
+    withJournal(function* (journal) {
+      yield* journal.append(todos, add(1, 'a'), principal)
+      yield* journal.append(todos, add(2, 'b'), principal)
+      const ran: string[] = []
+
+      const settled = yield* journal.recover({
+        key: todos,
+        from: cursor(0),
+        intents: (operation: Operation) => [
+          {
+            key: `effect-${operation.id}`,
+            run: Effect.sync(() => {
+              ran.push(operation.id)
+            }),
+          },
+        ],
+        // Only the first operation is frozen; a second operation's intent must
+        // still not run once recovery has stopped advancing.
+        onUnresolved: (intent: { readonly key: string }): 'retry' | 'skip' =>
+          intent.key === 'effect-a' ? 'skip' : 'retry',
+      })
+
+      expect(settled).toBe(0)
+      expect(ran).toEqual([])
     }))
 })
 

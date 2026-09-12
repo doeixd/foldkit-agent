@@ -202,4 +202,4 @@ The package READMEs document the full surface:
 [`foldkit-remote-server`](../packages/remote-server), and
 [`foldkit-remote-drizzle`](../packages/remote-drizzle). The worked trace is in
 [`examples/remote`](../examples/remote). The design rationale is in
-[Revision Plan §8](../REVISION_PLAN.md#8-remote).
+[Revision Plan §8](./design/REVISION_PLAN.md#8-remote).

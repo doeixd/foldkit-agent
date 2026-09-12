@@ -13,7 +13,8 @@
 - [Benchmarks](./benchmarks.md).
 - [Releases](./releases.md) — every workspace package's version, publish status,
   and dependency expectations.
-- [Revision plan](../REVISION_PLAN.md) — the full design and phase status.
+- [Design docs](./design/) — the revision plan, brainstorms, and per-package design notes.
+- [Revision plan](./design/REVISION_PLAN.md) — the full design and phase status.
 
 [`sync-dx.md`](./sync-dx.md) is superseded by the revision plan and kept only for
 history.

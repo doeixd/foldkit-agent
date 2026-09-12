@@ -20,7 +20,7 @@ same Messages.
 | [`foldkit-remote`](./packages/remote) | Normalized server state as a Foldkit Submodel: entities, selections, queries, connections, mutations, and live changes. |
 | [`foldkit-remote-server`](./packages/remote-server) | Entity, query, mutation, and live sources, selection authorization, and `RemoteRpc` handler compilation. |
 | [`foldkit-remote-drizzle`](./packages/remote-drizzle) | Compiles Remote selections and queries to Drizzle's typed query graph. |
-| [`foldkit-agent`](./packages/agent) | The protocol-neutral agent contract: project a Model and Message union into a deliberate agent interface. [Design rationale](./packages/agent/DESIGN.md). |
+| [`foldkit-agent`](./packages/agent) | The protocol-neutral agent contract: project a Model and Message union into a deliberate agent interface. [Design rationale](./docs/design/agent-DESIGN.md). |
 | [`foldkit-agent-webmcp`](./packages/agent-webmcp) | The browser adapter, projecting exposed Messages into `document.modelContext`. |
 | [`foldkit-agent-mcp`](./packages/agent-mcp) | The external MCP adapter: a transport-free protocol handler, plus stdio and Streamable HTTP. |
 | [`foldkit-agent-a2a`](./packages/agent-a2a) | The A2A adapter: an Agent Card and `message/send` as tasks. |
@@ -107,8 +107,8 @@ runtime.
   Behavior, and the `@foldkit/ui` adapters.
 - [Releases](./docs/releases.md) — the version and publish matrix for every
   workspace package.
-- [`foldkit-agent` design rationale](./packages/agent/DESIGN.md).
-- [Revision plan](./REVISION_PLAN.md) — the full design and phase status.
+- [`foldkit-agent` design rationale](./docs/design/agent-DESIGN.md).
+- [Revision plan](./docs/design/REVISION_PLAN.md) — the full design and phase status.
 - [All guides](./docs/README.md), including the [improvement suggestions](./docs/improvements.md).
 - Each package README documents its API; [`examples/`](./examples) has runnable
   traces, and `pnpm demo` runs them.

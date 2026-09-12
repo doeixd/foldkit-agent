@@ -1,0 +1,213 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --ink: #1c2430;
+  --muted: #6b7686;
+  --line: #e3e7ee;
+  --accent: #4f46e5;
+  --accent-ink: #ffffff;
+  --danger: #e5484d;
+  --done: #9aa4b2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116;
+    --card: #171b22;
+    --ink: #e7ebf0;
+    --muted: #97a1b0;
+    --line: #262c36;
+    --accent: #7c7bf5;
+    --done: #6b7686;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: start center;
+  padding: 4rem 1rem;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.app {
+  width: min(38rem, 100%);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.75rem;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 8%);
+}
+
+.app__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.app__title {
+  margin: 0;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+}
+
+.app__subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.app__error {
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+  font-size: 0.85rem;
+}
+
+.app__composer {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.app__input {
+  flex: 1;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.app__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.app__add {
+  padding: 0.7rem 1.1rem;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app__add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.app__filters {
+  display: flex;
+  gap: 0.35rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.filter {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.filter--active {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.app__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.item__toggle {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.item__title {
+  flex: 1;
+}
+
+.item--done .item__title {
+  color: var(--done);
+  text-decoration: line-through;
+}
+
+.item__delete {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.item__delete:hover {
+  color: var(--danger);
+}
+
+.app__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.app__clear {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.app__clear:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.app__clear:not(:disabled):hover {
+  color: var(--danger);
+}

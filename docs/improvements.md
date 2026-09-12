@@ -89,12 +89,12 @@ friction that prompted it, so it can be judged rather than taken on faith.
 ## Docs
 
 - **Index `docs/` and retire superseded guides.** `docs/sync-dx.md` is
-  superseded by `REVISION_PLAN.md` but still sits among the guides.
+  superseded by `docs/design/REVISION_PLAN.md` but still sits among the guides.
 - **Separate guide from API.** The guides and the package READMEs restate each
   other; a guide should link the READMEs and own the mental model only.
-- **Move design notes out of package directories.** `packages/agent/DESIGN.md`
-  and the `packages/surface/*.md` notes make a package directory half design
-  document; `docs/design/` would let package dirs be code + README.
+- **Move design notes out of package directories.** Done: `docs/design/` holds
+  the agent, mixins, remote-drizzle, and surface design notes, so package
+  directories are code + README.
 - **A publish matrix.** With `foldkit-agent-native` now published and Surface,
   Remote, and Mixins still private, a single table of version, status, and
   release order would save guessing.

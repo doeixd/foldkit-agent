@@ -377,7 +377,7 @@ joins, grouping and limits, but not Postgres NULL ordering.
 - No mutation DSL: use Drizzle directly inside `RemoteServer.mutation`.
 - Nested pagination runs one query per parent. `bench/nested.bench.ts` measures
   the cost; a window-function rewrite is deferred because it needs a subquery in
-  the query contract (see `DESIGN.md`).
+  the query contract (see `docs/design/remote-drizzle-DESIGN.md`).
 
 ## License
 

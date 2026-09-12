@@ -13,7 +13,7 @@ The server half is
 The worked end-to-end trace is
 [`examples/remote`](https://github.com/doeixd/foldkit-plus/tree/main/examples/remote).
 The full design rationale is in
-[Revision Plan §8](https://github.com/doeixd/foldkit-plus/blob/main/REVISION_PLAN.md#8-remote).
+[Revision Plan §8](https://github.com/doeixd/foldkit-plus/blob/main/docs/design/REVISION_PLAN.md#8-remote).
 
 ## Quick start
 

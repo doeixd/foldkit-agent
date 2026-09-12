@@ -147,7 +147,7 @@ Style.stylesheet(CardStyle, OtherStyle) // deduplicated, deterministic
 Equal rules share a class; nothing mutates the DOM, so the server and the client
 derive the same class and rules. Rules inside `Style.whenInput` are rejected
 (`style:conditional-rules-unsupported`) because the class is static while the
-condition is not. See [DESIGN.md](./DESIGN.md) for the compiler's scope.
+condition is not. See [DESIGN.md](../../docs/design/mixins-DESIGN.md) for the compiler's scope.
 
 ## Behavior
 
@@ -217,6 +217,6 @@ second update loop, mutable element handles as the default path, or an event bus
 It does not replace Foldkit Commands, Subscriptions, Mounts, ManagedResources or
 `@foldkit/ui`.
 
-Private while the API is settling (`0.0.0`). [DESIGN.md](./DESIGN.md) records the
+Private while the API is settling (`0.0.0`). [DESIGN.md](../../docs/design/mixins-DESIGN.md) records the
 substrate probes and the decisions they forced;
 [`examples/mixins`](../../examples/mixins) is a runnable trace.

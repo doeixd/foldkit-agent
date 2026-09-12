@@ -5,7 +5,7 @@
  *
  *   pnpm exec tsx probe/foldkit.ts
  *
- * Conclusions belong in DESIGN.md. This file is not public API.
+ * Conclusions belong in docs/design/mixins-DESIGN.md. This file is not public API.
  */
 import { Context, Effect, Stream } from 'effect'
 import { childAttributes, inertHtml as ih } from 'foldkit/html'

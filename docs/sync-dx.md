@@ -7,7 +7,7 @@ high-level constructors and adapters below remain proposals.
 
 ## Shared foundation with agent projections
 
-The [surface design](../packages/agent/DESIGN.md#shared-projection-foundation)
+The [surface design](./design/agent-DESIGN.md#shared-projection-foundation)
 places application references, state projections, typed Message subsets, and
 structural composition in `foldkit-surface`. Agent and sync should consume these
 same primitives rather than grow independent projection systems. Sync's initial
@@ -18,7 +18,7 @@ The default field selection is reference-based:
 `Projection.pick(App.fields.todos)`, with `Sync.forApplication(App).make(options)`
 and `Agent.forApplication(App).make(options)` consuming the same application
 reference. See the
-[usage sketches](../packages/agent/DESIGN.md#usage-sketches-across-packages) for a
+[usage sketches](./design/agent-DESIGN.md#usage-sketches-across-packages) for a
 single projection used as agent context and replicated state, then bound to
 browser and server instances.
 

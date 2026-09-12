@@ -172,6 +172,19 @@ describe('a durable LWW clock', () => {
       ),
     ))
 
+  it('closes storage only once across repeated close calls', () =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const saved = memory()
+          const clock = yield* open(saved.storage)
+          yield* clock.close
+          yield* clock.close
+          expect(saved.closes()).toBe(1)
+        }),
+      ),
+    ))
+
   it('does not reuse a timestamp when a save commits but its acknowledgement fails', () =>
     Effect.runPromise(
       Effect.scoped(
