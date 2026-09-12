@@ -119,6 +119,8 @@ describe('RemotePersistence', () => {
       '{"version":3,"scope":null,"entities":[]}',
       // `windows` is not a string record.
       '{"version":3,"scope":null,"entities":{"User:u1":{"values":{},"present":[],"stale":[],"tombstone":false,"updatedAt":0,"windows":{"x":1}}}}',
+      // `values` is an array, not a record.
+      '{"version":3,"scope":null,"entities":{"User:u1":{"values":[],"present":[],"stale":[],"tombstone":false,"updatedAt":0,"windows":{}}}}',
     ]
 
     for (const bad of cases) {

@@ -18,6 +18,17 @@ describe('Remote core', () => {
     expect(selection.fields).toEqual(['id', 'name'])
   })
 
+  it('refuses an empty selection, which would require nothing and read Ready', () => {
+    expect(() => Selection.make(User, {})).toThrow(/picks at least one field/)
+  })
+
+  it('refuses a page whose nested selection is of another entity', () => {
+    const Comment = Entity.make('Comment', Schema.Struct({ id: Schema.String }))
+    expect(() =>
+      Selection.connection(Comment, { first: 1 }, Selection.make(User, { id: true }) as never),
+    ).toThrow(/a page of "Comment" cannot select "User"/)
+  })
+
   it('names entities and builds a typed ref', () => {
     expect(User.name).toBe('User')
     expect(User.ref('u1').id).toBe('u1')

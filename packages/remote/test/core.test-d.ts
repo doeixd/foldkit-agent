@@ -145,5 +145,7 @@ Selection.make(Board, { owner: CommentBody })
 Selection.make(Board, { id: UserSummary })
 // @ts-expect-error a singular ref takes no connection selection
 Selection.make(Board, { owner: Selection.connection(User, { first: 1 }) })
+// @ts-expect-error a page's nested selection must be of the page's entity
+Selection.connection(Comment, { first: 1 }, UserSummary)
 // @ts-expect-error Remote.select takes an entity selection, not a bare connection
 Remote.select({} as never, Selection.connection(Comment, { first: 1 }))

@@ -73,7 +73,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   connection half of `MutateOptions.optimistic`; `OptimisticState` is the
   model slice. Persistence is namespace-only (`RemotePersistence.*`); the
   wire caps `MAX_FIELDS_PER_REQUEST` (256) and `MAX_RELATION_DEPTH` (8) with
-  static nesting; `Entity.patch` takes wire-shaped values.
+  static nesting; `Entity.patch` takes wire-shaped values; `Selection.make`
+  refuses an empty selection, which would require nothing and read `Ready`.
   `Remote.clientLayer` is generic in the RPC client's requirements, so
   in-process `RemoteServer.handlers` over a database become a `RemoteClient`
   with one `Layer.provide` instead of a hand-written adapter.

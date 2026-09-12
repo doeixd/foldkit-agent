@@ -116,6 +116,9 @@ export const Selection = {
     entity: EntityDescriptor<Name, F>,
     selection: Sel,
   ): Selection<SelectionValue<F, Sel>, Name, 'entity'> => {
+    if (Object.keys(selection).length === 0) {
+      throw new Error(`Selection.make: a selection of "${entity.name}" picks at least one field`)
+    }
     const picked: Record<string, AnySchema> = {}
     const connections: Record<string, QueryWindow> = {}
     const relations: Record<string, RelationRequirement> = {}
