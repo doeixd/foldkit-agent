@@ -10,16 +10,15 @@
 
 ## Before a commit
 
-Run the checks CI runs:
+Run the checks CI runs. `pnpm check` runs all five in sequence:
 
 ```bash
 pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm demo
+pnpm pack:check
 ```
-
-and `pnpm pack:check` when packaging could be affected.
 
 Format with `pnpm format`, never bare `prettier`: the repository config matches
 the style already in the tree, and without it prettier rewrites files to its own
