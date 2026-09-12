@@ -7,9 +7,59 @@ version changed; `pnpm` skips versions already in the registry.
 
 ## Unreleased
 
-Correctness fixes from a review of the implementation, and the first published
-`foldkit-agent-native`. Breaking for `foldkit-sync` (the storage and presence
-APIs) and `foldkit-durable` (`append`'s result).
+Correctness fixes from a review of the implementation, the `foldkit-surface`
+reference-selection work and the `foldkit-remote` submodel, and the first
+published `foldkit-agent-native`. Breaking for `foldkit-sync` (the storage and
+presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
+(`RemoteModel` and the mutation/observe signatures).
+
+### `foldkit-surface` (private)
+
+- **Reference-based selection.** `Surface.application` generates a reference tree
+  (`App.fields`), and `Surface.pick`/`Surface.compose` build writable projections
+  from it, so a shared projection is derived from the Model Schema instead of
+  declared twice. `Sync.forApplication` and `Agent.forApplication` consume it.
+- **Typed Message subsets.** `Surface.messages(app, [constructors])` and
+  `Surface.unionMessages(...)` produce a `MessageSubset` with a pure codec, a tag
+  set, and an owner token, so two structurally identical applications cannot mix
+  selections and a subset cannot leak across applications.
+- **Encoded types are preserved.** `ModelRef`/`FieldRef` and `MessageSubset` carry
+  an `Encoded` parameter, so a transforming field (`Schema.NumberFromString`)
+  keeps its encoded type through `Surface.pick` and the journal snapshot codec
+  instead of widening to `unknown`.
+- **Transition and resources.** `Surface.application` accepts optional
+  `initial`/`update` and resource-carrying Commands; the runnable form is what
+  `Agent.forApplication` and `Sync.forApplication` require.
+
+### `foldkit-remote` (private)
+
+- **A real Remote submodel.** `RemoteModel` is the four producers' shared state
+  (`entities`, `connections`, `optimistic`, `live`, `mutations`, `gaps`), and
+  `Remote.update` is the single reducer over reads, mutation results, live events,
+  connection merges, and optimistic layers. `Remote.make` returns
+  `Model`/`initial`/`Message`/`update`/`rpc`. A live event ahead of its cursor
+  records a gap instead of being applied out of order.
+- **Entity-aware selections.** `Remote.at` carries the domain's registered entity
+  names and `Remote.select` is constrained to them, so a selection for an entity
+  the domain never declared is a compile error. `Selection.schema` is a pure
+  codec, removing a decode cast.
+- **Mutation reconciliation.** `Remote.mutate` returns the result's normalized
+  patches (previously dropped) and `Remote.mutateInto` reconciles them and returns
+  the new Model; settling is idempotent per `requestId`.
+- **Simpler observation.** `observe`/`live` emit a `RemoteMessage` through a single
+  handler, and `Remote.live` reads its resume cursor from `RemoteModel.live`
+  instead of a callback the application cannot key. `Remote.prefetch` accepts a
+  freshness window; the pure planners take `PlanFreshness`. `RemoteData.schema` is
+  exported.
+
+### `foldkit-remote-server` (private)
+
+- **Live handler.** `RemoteServer.live` and the compiled `FoldkitRemoteLive`
+  handler were missing; the server can now stream the client's live requirements.
+  Two wire bugs are fixed with it: `LiveRequirement` was missing the resume cursor
+  and `LivePatch.cursor` was a string while the client cursor is numeric.
+- **Less ceremony.** `RemoteServer.make` drops its unused domain argument, and the
+  server imports the canonical `NormalizedPatch` instead of duplicating it.
 
 ### `foldkit-agent-native`
 

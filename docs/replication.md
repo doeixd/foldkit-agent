@@ -221,4 +221,6 @@ the external action and its record can repeat it — see the durable README).
 `pnpm demo` runs it.
 
 The package READMEs — [`foldkit-durable`](../packages/durable) and
-[`foldkit-sync`](../packages/sync) — document the full APIs.
+[`foldkit-sync`](../packages/sync) — document the full APIs. Server-derived state
+is the sibling guide:
+[Server-derived state: `foldkit-surface` + `foldkit-remote`](./remote.md).

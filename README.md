@@ -33,10 +33,9 @@ same Messages.
 `private`; they are not published yet. The rest are published.
 
 New to the state side? [Replicated state](./docs/replication.md) explains what
-`foldkit-durable` and `foldkit-sync` do, how they fit together, and when to reach
-for them. [Server-derived state](./packages/remote/README.md) covers the
-`foldkit-remote` Submodel, and [`foldkit-surface`](./packages/surface/README.md)
-covers the projection layer that Remote, Sync, and Agent all build on.
+`foldkit-durable` and `foldkit-sync` do. [Server-derived state](./docs/remote.md)
+covers the `foldkit-remote` Submodel and the Surface projection layer that
+Remote, Sync, and Agent all build on. Each package README has the full API.
 
 ## Install
 
