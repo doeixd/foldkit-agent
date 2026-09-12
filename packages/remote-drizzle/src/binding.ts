@@ -5,9 +5,10 @@
  * Tech); see `THIRD_PARTY_NOTICES.md`.
  *
  * A binding **is** a `foldkit-remote` `EntityDescriptor`: `entity(name, table)`
- * derives the Entity's fields from the table, and each declared relation adds a
- * ref field (keeping the foreign-key column too). So one declaration serves
- * `Selection.make` and `source`/`query`, and relation fields are typed.
+ * derives the Entity's fields from the table, each declared relation adds a ref
+ * field (keeping the foreign-key column too), and each computed adds a number.
+ * So one declaration serves `Selection.make` and `source`/`query`, and relation
+ * and computed fields are typed.
  */
 import { createSelectSchema } from 'drizzle-orm/effect-schema'
 import type { BuildSchema } from 'drizzle-orm/effect-schema'
@@ -16,11 +17,8 @@ import { Entity, type EntityDescriptor, type EntityRef } from 'foldkit-remote'
 import { Schema } from 'effect'
 import type { OrderTerm } from './cursor.js'
 
-/**
- * The Effect select schema Drizzle derives for a table. Naming it lets a binding
- * be built from its derived fields.
- */
-export type SelectSchema<Table extends DrizzleTable> = BuildSchema<
+/** The Effect select schema Drizzle derives for a table. */
+type SelectSchema<Table extends DrizzleTable> = BuildSchema<
   'select',
   Table['_']['columns'],
   undefined
@@ -68,7 +66,7 @@ export type RelationBinding = OneRelation<any, any> | ManyRelation<any> | ManyTo
 /** The Entity field a relation contributes: a ref, or an array of refs. */
 type RelationField<Relation> =
   Relation extends OneRelation<infer Target, infer Nullable>
-    ? Nullable extends true
+    ? true extends Nullable
       ? Schema.Codec<EntityRef<Target['name'], Target['fields']> | null, string | null>
       : Schema.Codec<EntityRef<Target['name'], Target['fields']>, string>
     : Relation extends ManyRelation<infer Target> | ManyToManyRelation<infer Target>
@@ -107,11 +105,12 @@ export interface EntityBinding<
 }
 
 /**
- * A binding with its derived fields erased. The field map is invariant through
- * `EntityDescriptor.ref`, so a concrete binding is not assignable to
- * `EntityBinding<any, any>`; parameters take this instead.
+ * A binding with its derived field map erased. The field map is invariant
+ * through `EntityDescriptor.ref`, so a concrete binding is not assignable to
+ * `EntityBinding<any, any>`; parameters take this instead. `relations` and
+ * `computed` stay typed.
  */
-export type AnyEntityBinding = EntityBinding<any, any, any, any>
+export type AnyEntityBinding = EntityBinding<any, any, any>
 
 export const one = <Target extends AnyEntityBinding, const Nullable extends boolean = false>(
   entity: Target,
@@ -181,13 +180,17 @@ export const entity = <
 > => {
   const columns = getTableColumns(table)
   const relations = options?.relations ?? ({} as Relations)
+  const baseFields = (options?.fields ?? createSelectSchema(table).fields) as Record<
+    string,
+    Schema.Schema<unknown>
+  >
 
   for (const [field, relation] of Object.entries(relations)) {
     // `selectColumns` gives a column priority and `source` treats the name as a
     // relation, so a collision is silently wrong. Refuse it up front.
-    if (columns[field] !== undefined) {
+    if (baseFields[field] !== undefined) {
       throw new Error(
-        `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" collides with a column of the same name`,
+        `[foldkit-remote-drizzle] relation "${field}" on entity "${name}" collides with a field of the same name`,
       )
     }
     // A null foreign key has no ref, so the client must decode a null. Without
@@ -200,9 +203,9 @@ export const entity = <
   }
   const computed: Record<string, ComputedConfig> = options?.computed ?? {}
   for (const [field, config] of Object.entries(computed)) {
-    if (columns[field] !== undefined || relations[field] !== undefined) {
+    if (baseFields[field] !== undefined || relations[field] !== undefined) {
       throw new Error(
-        `[foldkit-remote-drizzle] computed field "${field}" on entity "${name}" collides with a column or relation`,
+        `[foldkit-remote-drizzle] computed field "${field}" on entity "${name}" collides with a field or relation`,
       )
     }
     const relation = relations[config.relation]
@@ -213,12 +216,7 @@ export const entity = <
     }
   }
 
-  const fields: Record<string, Schema.Schema<unknown>> = {
-    ...((options?.fields ?? createSelectSchema(table).fields) as Record<
-      string,
-      Schema.Schema<unknown>
-    >),
-  }
+  const fields: Record<string, Schema.Schema<unknown>> = { ...baseFields }
   for (const [field, relation] of Object.entries(relations)) {
     const target = relation.entity as EntityDescriptor<any, any>
     if (relation.kind === 'one') {

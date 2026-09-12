@@ -126,7 +126,7 @@ export const normalize = (
  * with the principal's allowed fields by `RemoteServer`) become columns.
  */
 export const reader =
-  <P = unknown, E = never, R = never>(
+  <E, R = never, P = unknown>(
     binding: AnyEntityBinding,
     run: (query: SourceQuery) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E, R>,
   ) =>

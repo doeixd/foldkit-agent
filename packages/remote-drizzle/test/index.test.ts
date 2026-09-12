@@ -131,12 +131,20 @@ describe('RemoteDrizzle', () => {
     expect(render('backward')).toContain('"id" desc')
   })
 
-  it('rejects a relation whose name collides with a column', () => {
+  it('rejects a relation whose name collides with a field', () => {
     expect(() =>
       entity('Project', projects, {
         relations: { name: one(UserBinding, { field: projects.ownerId }) },
       }),
-    ).toThrow(/collides with a column/)
+    ).toThrow(/collides with a field/)
+
+    // A user-supplied `fields` key is a field too, even when it is not a column.
+    expect(() =>
+      entity('Project', projects, {
+        fields: { id: Schema.String, reviewer: Schema.String },
+        relations: { reviewer: one(UserBinding, { field: projects.ownerId }) },
+      }),
+    ).toThrow(/collides with a field/)
   })
 
   it('rejects a nullable relation not declared nullable', () => {
@@ -164,7 +172,7 @@ describe('RemoteDrizzle', () => {
         relations: { owner: one(UserBinding, { field: projects.ownerId }) },
         computed: { name: { relation: 'owner' } },
       }),
-    ).toThrow(/collides with a column or relation/)
+    ).toThrow(/collides with a field or relation/)
 
     expect(() =>
       entity('Project', projects, {
