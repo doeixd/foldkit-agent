@@ -33,7 +33,10 @@ same Messages.
 
 `foldkit-surface`, `foldkit-remote`, `foldkit-remote-server`,
 `foldkit-remote-drizzle`, and the `foldkit-mixins` view packages are in-tree and
-`private`; they are not published yet. The rest are published.
+`private`; they are not published. `foldkit-agent`, its WebMCP, MCP, and A2A
+adapters, `foldkit-durable`, and `foldkit-sync` are on npm;
+`foldkit-agent-native` is publishable but not on npm yet. See the
+[release matrix](./docs/releases.md).
 
 ## Install
 
@@ -102,6 +105,8 @@ runtime.
   the `foldkit-remote` Submodel.
 - [Inside-out view composition](./docs/mixins.md) — slot contracts, Style and
   Behavior, and the `@foldkit/ui` adapters.
+- [Releases](./docs/releases.md) — the version and publish matrix for every
+  workspace package.
 - [`foldkit-agent` design rationale](./packages/agent/DESIGN.md).
 - [Revision plan](./REVISION_PLAN.md) — the full design and phase status.
 - [All guides](./docs/README.md), including the [improvement suggestions](./docs/improvements.md).
@@ -147,13 +152,14 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the checks before a commit, and
 
 ## Releasing
 
-The published packages are the `foldkit-agent` family at `0.1.0`,
-`foldkit-durable` at `0.1.1`, and `foldkit-sync` at `0.2.0`. The Surface, Remote,
-and Mixins packages are `private`, and `foldkit-agent-native` publishes with the
-next release. `pnpm release` builds, then publishes every non-`private` package.
-Publishing must use **pnpm**, not npm: the adapters declare `foldkit-agent` as a
-`workspace:^` peer dependency, which pnpm rewrites to a real range (`^0.1.0`)
-when it packs.
+The published packages are `foldkit-agent`, `foldkit-agent-webmcp`,
+`foldkit-agent-mcp`, and `foldkit-agent-a2a` at `0.1.0`, `foldkit-durable` at
+`0.1.1`, and `foldkit-sync` at `0.2.0`. The Surface, Remote, and Mixins packages
+are `private`, and `foldkit-agent-native` is ready to publish with the next
+release; the [release matrix](./docs/releases.md) lists every package. `pnpm
+release` builds, then publishes every non-`private` package. Publishing must use
+**pnpm**, not npm: the adapters declare `foldkit-agent` as a `workspace:^` peer
+dependency, which pnpm rewrites to a real range (`^0.1.0`) when it packs.
 
 Bump the versions, add a [CHANGELOG.md](./CHANGELOG.md) entry, run the four
 checks, then push a `vX.Y.Z` tag. The
