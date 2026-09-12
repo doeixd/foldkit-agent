@@ -115,6 +115,7 @@ packages/mixins-surface   foldkit-mixins-surface (unpublished)
 packages/mixins-ui        foldkit-mixins-ui (unpublished)
 examples/todo             a worked example, end to end
 examples/sync             durable messages and ordered replication
+examples/remote           normalized server state, end to end
 examples/mixins           view mixins, end to end
 ```
 

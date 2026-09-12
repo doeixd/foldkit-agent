@@ -14,6 +14,8 @@ surface: ProjectPage
 plan: Project:p1 [id,name,status]
 before fetch: Initial
 after fetch: Ready {"id":"p1","name":"Apollo","status":"active"}
+query connection: Project:p1
+inspect: 1 entities, 1 connection, 1 registered queries
 rendered classes: project-card
 rendered status: active
 mutation RenameProject: output {"id":"p1"}
@@ -30,6 +32,10 @@ Read it as:
   `Initial` until its fields are present, `Ready` once they are. Fetching is
   `Remote.prefetch` here; in an application it is the `Remote.observe`
   Subscription.
+- **`query`** — `Remote.query(ref)` runs a list query and `Remote.queryMessage`
+  merges the page into a connection keyed by the ref's identity.
+- **`inspect`** — `Remote.inspect` summarizes the cache, and the domain's
+  `registry` counts the declared queries.
 - **render** — the SurfaceView styles the card and a Behavior reads the projected
   `RemoteData`, both over a Surface that only exposes `Ping`.
 - **mutation** — `Remote.mutateInto` returns the typed `Output` and the new Model;

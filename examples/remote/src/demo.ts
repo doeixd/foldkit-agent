@@ -14,11 +14,13 @@ import { SurfaceView } from 'foldkit-mixins-surface'
 import {
   Entity,
   Mutation,
+  Query,
   Remote,
   RemoteClient,
   RemoteData,
   Selection,
   entityKey,
+  items,
   writeEntity,
   type EntityStore,
 } from 'foldkit-remote'
@@ -36,7 +38,16 @@ const RenameProject = Mutation.make('RenameProject', {
   Output: Schema.Struct({ id: Schema.String }),
 })
 
-const Data = Remote.make({ entities: [Project], mutations: [RenameProject] })
+const ProjectsByOwner = Query.make('ProjectsByOwner', {
+  Input: Schema.Struct({ ownerId: Schema.String }),
+  Result: Query.connection(Project),
+})
+
+const Data = Remote.make({
+  entities: [Project],
+  mutations: [RenameProject],
+  queries: [ProjectsByOwner],
+})
 
 const Model = Schema.Struct({ remote: Data.Model, projectId: Schema.String })
 const Message = defineMessageUnion({ Ping: {}, GotRemote: { message: Data.Message } })
@@ -161,7 +172,12 @@ const FakeClient = Layer.succeed(RemoteClient, {
         values: { id: request.id, name: 'Apollo', status: 'active' },
       })),
     })),
-  query: () => Effect.die('unused'),
+  query: () =>
+    Effect.succeed({
+      edges: [{ entity: 'Project', id: 'p1', key: 'Project:p1' }],
+      start: { _tag: 'Terminal' as const },
+      end: { _tag: 'Terminal' as const },
+    }),
   mutate: request =>
     Effect.sync(() => {
       const input = request.input as { readonly id: string; readonly name: string }
@@ -189,6 +205,20 @@ export const runDemo = async (): Promise<ReadonlyArray<string>> => {
   )
   const loaded = withStore(initial, store)
   lines.push(`after fetch: ${describeData(projection.read(loaded))}`)
+
+  // A query runs through RemoteClient and merges into a connection by ref identity.
+  const ref = Query.first(25)(ProjectsByOwner.ref({ ownerId: 'u1' }))
+  const page = await Effect.runPromise(Remote.query(ref).pipe(Effect.provide(FakeClient)))
+  const queried = Data.update(loaded.remote, Remote.queryMessage(ref, page))
+  lines.push(
+    `query connection: ${items(queried.connections[ref.identity]!)
+      .map(edge => edge.key)
+      .join(', ')}`,
+  )
+  const inspection = Remote.inspect(queried)
+  lines.push(
+    `inspect: ${inspection.entities.length} entities, ${inspection.connections.length} connection, ${Data.registry.queries.size} registered queries`,
+  )
 
   let resolved:
     | {

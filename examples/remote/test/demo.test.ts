@@ -8,6 +8,8 @@ describe('foldkit-remote example', () => {
     expect(lines).toContain('plan: Project:p1 [id,name,status]')
     expect(lines).toContain('before fetch: Initial')
     expect(lines).toContain('after fetch: Ready {"id":"p1","name":"Apollo","status":"active"}')
+    expect(lines).toContain('query connection: Project:p1')
+    expect(lines).toContain('inspect: 1 entities, 1 connection, 1 registered queries')
     expect(lines).toContain('rendered classes: project-card')
     expect(lines).toContain('rendered status: active')
     expect(lines).toContain('mutation RenameProject: output {"id":"p1"}')

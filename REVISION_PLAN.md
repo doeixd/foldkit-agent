@@ -951,7 +951,7 @@ diffs it against the cache and returns the minimal missing/stale selections.
 ```ts
 const Read   = Rpc.make("FoldkitRemoteRead",   { payload: ReadBatch,      success: ReadBatchResult, error: RemoteReadError })
 const Mutate = Rpc.make("FoldkitRemoteMutate", { payload: MutationRequest, success: MutationResult,  error: RemoteMutationError })
-const Live   = Rpc.make("FoldkitRemoteLive",   { payload: LiveRequirement, success: LivePatch, error: RemoteLiveError, stream: true })
+const Live   = Rpc.make("FoldkitRemoteLive",   { payload: LiveRequirement, success: LiveChange, error: RemoteLiveError, stream: true })
 const RemoteRpc = RpcGroup.make(Read, Mutate, QueryRpc, Live)
 ```
 

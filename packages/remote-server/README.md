@@ -112,14 +112,15 @@ the normalized cache patches the client will reconcile.
 ```ts
 RemoteServer.live(Project, {
   subscribe: ({ requirements, after, principal }) =>
-    Stream.Stream<LivePatch, RemoteServerError, R>,
+    Stream.Stream<LiveChange, RemoteServerError, R>,
 })
 ```
 
 `after` is the client's resume cursor; events at or before it are duplicates. The
 handler merges the requested entities' streams and maps a source failure onto the
 wire error. An entity with no live source contributes nothing, so the client
-plans a refetch instead of failing the stream.
+plans a refetch instead of failing the stream. A `LiveChange` is an entity patch
+or delete, or a connection insert/remove/invalidate.
 
 ## Authorization
 
@@ -156,7 +157,7 @@ principal read this semantic field*. Authorization is mandatory, not opt-in:
 
 - Transport, serialization, and the authentication protocol are Effect RPC's; the
   application provides the server protocol layer.
-- The live wire carries entity patches (`LivePatch`); connection events are not
-  yet representable over the wire.
+- The live wire carries a `LiveChange` union: entity patches and deletes, plus
+  connection insert/remove/invalidate events.
 - Database and other runtime dependencies are the Source's Effect requirements,
   not this package's.

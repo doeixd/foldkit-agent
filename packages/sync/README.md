@@ -106,7 +106,10 @@ const shared = Effect.runSync(replica.shared)
   declared twice. `Surface.pick`/`Sync.project` build the writable projection;
   `TodoSync.journalContract()` builds the durable codecs and reducer.
 - The operation envelope: `replicaId:localSequence` identity, `baseCursor`, and
-  protocol/schema versions.
+  protocol/schema versions. The wire codecs live under `Sync.codec`
+  (`normalizeOperation`, `operationFrom`, `committedFrom`, `decodeExchange`) for a
+  custom transport or server; a server-committed operation is a
+  `CommittedOperation`.
 - A persisted outbox and optimistic projection: a durable Message is visible
   immediately and rebased onto the authoritative order.
 - Reconciliation: committed operations are replayed in order, acknowledged or

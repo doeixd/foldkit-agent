@@ -10,6 +10,8 @@ below it. The wire is Effect RPC (`RemoteRpc`), so the transport is whatever
 Effect layer the application chooses — HTTP, WebSocket, worker, in-process.
 The server half is
 [`foldkit-remote-server`](https://github.com/doeixd/foldkit-plus/tree/main/packages/remote-server).
+The worked end-to-end trace is
+[`examples/remote`](https://github.com/doeixd/foldkit-plus/tree/main/examples/remote).
 The full design rationale is in
 [Revision Plan §8](https://github.com/doeixd/foldkit-plus/blob/main/REVISION_PLAN.md#8-remote).
 
@@ -281,14 +283,21 @@ planner refetches.
 - **The requirement planner.** `Remote.plan*`/`plan` diff requirements against the
   store and return only missing or stale fields, deterministically.
 - **The Remote submodel.** `Remote.make` returns `Model`, `initial`, `Message`,
-  `update`, and `rpc`; `Remote.update` is the single reducer over reads,
-  mutation results, live events, connections, and optimistic layers.
+  `update`, `rpc`, and a name-keyed `registry` of the declared entities, queries,
+  and mutations; `Remote.update` is the single reducer over reads, mutation
+  results, live events, connections, and optimistic layers.
 - **Mutation reconciliation.** Idempotent per `requestId`, with a bounded
   settled-request ledger.
 - **Connections.** Segmented ordered data with explicit boundaries and overlay
   placement.
+- **Queries.** `Remote.query(ref)` encodes and runs a `QueryRef`; 
+  `Remote.queryMessage(ref, page)` merges the result into the connection keyed by
+  `ref.identity`.
 - **Live classification.** Per-stream cursor ordering, duplicate suppression, and
-  gap detection.
+  gap detection; a gap clears when an in-order event applies or a `GapCleared`
+  message arrives.
+- **Introspection.** `Remote.inspect` and `Remote.inspectEntity` return a pure,
+  serializable cache view for DevTools.
 - **The transport seam.** `RemoteClient`, an Effect service with `read`, `query`,
   `mutate`, and `live`; the wire schemas and `RemoteRpc` group.
 - **Disposable cache persistence.** Snapshot encode/decode over `KeyValueStore`.
