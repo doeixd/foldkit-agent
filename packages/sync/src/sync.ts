@@ -117,6 +117,15 @@ export interface ReplicaStatus {
   readonly rejected: ReadonlyArray<OpId>
 }
 
+/**
+ * A consistent status and optimistic-shared pair, read from one replica state.
+ * `Replica.changes` emits it so a UI can hold a single subscription.
+ */
+export interface ReplicaSnapshot<Shared> {
+  readonly status: ReplicaStatus
+  readonly shared: Shared
+}
+
 export interface Replica<Message, Shared> {
   /** The optimistic projection: committed state with pending operations replayed. */
   readonly shared: Effect.Effect<Shared>
@@ -129,6 +138,11 @@ export interface Replica<Message, Shared> {
   readonly status: Effect.Effect<ReplicaStatus>
   /** The status, re-emitted after every submit and exchange. */
   readonly statusChanges: Stream.Stream<ReplicaStatus>
+  /**
+   * The status and the optimistic shared value together, re-emitted after every
+   * submit and exchange, so a UI can subscribe once instead of to both.
+   */
+  readonly changes: Stream.Stream<ReplicaSnapshot<Shared>>
   readonly submit: (message: Message) => Effect.Effect<void, ReplicaError>
   /** Reconciles against the server. The `Transport` service must be provided. */
   readonly synchronize: Effect.Effect<void, ReplicaError | TransportError, Transport>
@@ -396,14 +410,27 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
       const projection = yield* Ref.make<
         { readonly state: ReplicaState<Shared>; readonly shared: Shared } | undefined
       >(undefined)
-      const shared = Effect.fn('Sync.shared')(function* () {
+      const snapshot = Effect.fn('Sync.snapshot')(function* () {
         const current = yield* SynchronizedRef.get(stateRef)
         const cached = yield* Ref.get(projection)
-        if (cached !== undefined && cached.state === current) return cached.shared
-        const projected = optimistic(current)
-        yield* Ref.set(projection, { state: current, shared: projected })
-        return projected
+        let projected: Shared
+        if (cached !== undefined && cached.state === current) projected = cached.shared
+        else {
+          projected = optimistic(current)
+          yield* Ref.set(projection, { state: current, shared: projected })
+        }
+        return {
+          status: {
+            pending: current.pending.length,
+            cursor: current.cursor,
+            lastError: yield* Ref.get(lastError),
+            rejected: yield* Ref.get(rejectedOps),
+          },
+          shared: projected,
+        }
       })()
+      const shared = Effect.map(snapshot, value => value.shared)
+      const status = Effect.map(snapshot, value => value.status)
 
       // `SynchronizedRef.modifyEffect` installs the returned state itself, so
       // persisting must not also set the ref (that would re-enter the lock).
@@ -581,16 +608,6 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         }
       })
 
-      const status = Effect.fn('Sync.status')(function* () {
-        const state = yield* SynchronizedRef.get(stateRef)
-        return {
-          pending: state.pending.length,
-          cursor: state.cursor,
-          lastError: yield* Ref.get(lastError),
-          rejected: yield* Ref.get(rejectedOps),
-        }
-      })()
-
       return {
         shared,
         pending: Effect.map(SynchronizedRef.get(stateRef), state => state.pending),
@@ -599,6 +616,10 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
         statusChanges: Stream.concat(
           Stream.fromEffect(status),
           Stream.fromPubSub(statusSignals).pipe(Stream.mapEffect(() => status)),
+        ),
+        changes: Stream.concat(
+          Stream.fromEffect(snapshot),
+          Stream.fromPubSub(statusSignals).pipe(Stream.mapEffect(() => snapshot)),
         ),
         submit,
         synchronize,

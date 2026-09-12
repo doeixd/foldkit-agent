@@ -81,6 +81,7 @@ export {
   type JournalContract,
   type Operation,
   type Replica,
+  type ReplicaSnapshot,
   type ReplicaState,
   type ReplicaStatus,
   type Sync,

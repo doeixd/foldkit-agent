@@ -706,4 +706,38 @@ describe('Replica.start', () => {
     expect(statuses[0]).toMatchObject({ pending: 1, cursor: 0 })
     await close(replica)
   })
+
+  it('changes emits the current shared value on subscribe', async () => {
+    const replica = await open('a')
+    const snapshots = await Effect.runPromise(
+      Effect.scoped(replica.changes.pipe(Stream.take(1), Stream.runCollect)),
+    )
+
+    expect(snapshots[0]!.status).toMatchObject({ pending: 0, cursor: 0 })
+    expect(snapshots[0]!.shared).toEqual({ todos: [] })
+    await close(replica)
+  })
+
+  it('changes emits the optimistic shared value with the status after a submit', async () => {
+    const replica = await open('a')
+    const snapshots = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* replica.changes.pipe(
+            Stream.filter(snapshot => snapshot.status.pending === 1),
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.forkScoped,
+          )
+          yield* Effect.yieldNow
+          yield* replica.submit(created('a'))
+          return [...(yield* Fiber.join(fiber))]
+        }),
+      ),
+    )
+
+    expect(snapshots[0]!.status).toMatchObject({ pending: 1, cursor: 0 })
+    expect(snapshots[0]!.shared).toEqual({ todos: [{ id: 'a', title: 'a' }] })
+    await close(replica)
+  })
 })

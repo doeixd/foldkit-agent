@@ -121,7 +121,8 @@ const shared = Effect.runSync(replica.shared)
   exchange failure, and the operations the server refused — enough for a UI to
   explain and recover without exposing Messages or the Model. `statusChanges` is
   the same status, emitted on subscribe and re-emitted after every submit and
-  exchange.
+  exchange. `changes` carries the status and the optimistic shared value together
+  from one read, so a UI holds one subscription instead of two.
 - Strict decoding: an operation is always validated with the application's
   Message schema, and a Message the contract does not call durable is refused.
 - Branded positions: `Sequence` (a committed document position) and

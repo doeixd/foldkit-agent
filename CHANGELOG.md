@@ -304,6 +304,9 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   subscribe and after every submit and exchange, so a UI can subscribe instead of
   polling `status`; `Replica.close` now wakes `Replica.start` so the loop returns
   rather than waiting for the scope.
+- **One subscription for status and shared.** `Replica.changes` emits a
+  `ReplicaSnapshot` — the status and the optimistic `shared` value read from one
+  replica state — on subscribe and after every submit and exchange.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.
