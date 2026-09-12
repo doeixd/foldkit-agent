@@ -51,27 +51,25 @@ interface SerializedStore {
 const sorted = <T>(values: Iterable<T>): T[] => [...values].sort()
 
 /**
- * The snapshot's data shape; `stableStringify` makes the text deterministic,
- * so equal stores give byte-equal snapshots whatever order they were built in.
+ * The snapshot's data shape. `stableStringify` sorts object keys, and the
+ * field sets are sorted here, so equal stores give byte-equal snapshots
+ * whatever order they were built in.
  */
 export const serializeStore = (store: EntityStore, scope?: string): SerializedStore => ({
   version: REMOTE_CACHE_VERSION,
   scope: scope ?? null,
   entities: Object.fromEntries(
-    sorted(Object.keys(store)).map(key => {
-      const entry = store[key]!
-      return [
-        key,
-        {
-          values: entry.values,
-          present: sorted(entry.present),
-          stale: sorted(entry.stale),
-          tombstone: entry.tombstone,
-          updatedAt: entry.updatedAt,
-          windows: entry.windows,
-        },
-      ]
-    }),
+    Object.entries(store).map(([key, entry]) => [
+      key,
+      {
+        values: entry.values,
+        present: sorted(entry.present),
+        stale: sorted(entry.stale),
+        tombstone: entry.tombstone,
+        updatedAt: entry.updatedAt,
+        windows: entry.windows,
+      },
+    ]),
   ),
 })
 
