@@ -7,11 +7,6 @@
  */
 import { Effect, Schema, Stream } from 'effect'
 import {
-  MutationResult,
-  QueryRequest,
-  QueryResult,
-  ReadBatch,
-  ReadBatchResult,
   RemoteLiveError,
   RemoteMutationError,
   RemoteQueryError,
@@ -19,13 +14,13 @@ import {
   type Boundary,
   type EntityDescriptor,
   type LiveChange,
-  type LiveRequirement,
   type MutationDescriptor,
   type NormalizedPatch,
   type QueryDescriptor,
   type QueryWindow,
   type ReadRequest,
   type RemoteDescriptor,
+  type RemoteRpcClient,
 } from 'foldkit-remote'
 
 export class RemoteServerError extends Schema.TaggedError<RemoteServerError>()(
@@ -220,22 +215,7 @@ export const RemoteServer = {
     server: ServerDefinition<P, R>,
     principal: P,
     options: HandlerOptions = {},
-  ): {
-    readonly FoldkitRemoteRead: (
-      payload: Schema.Schema.Type<typeof ReadBatch>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError, R>
-    readonly FoldkitRemoteMutate: (payload: {
-      readonly requestId: string
-      readonly mutation: string
-      readonly input: unknown
-    }) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError, R>
-    readonly FoldkitRemoteQuery: (
-      payload: Schema.Schema.Type<typeof QueryRequest>,
-    ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
-    readonly FoldkitRemoteLive: (
-      payload: Schema.Schema.Type<typeof LiveRequirement>,
-    ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError, R>
-  } => ({
+  ): RemoteRpcClient<R> => ({
     FoldkitRemoteRead: Effect.fn('RemoteServer.FoldkitRemoteRead')(function* (payload) {
       const grouped = new Map<
         string,

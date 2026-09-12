@@ -1,6 +1,6 @@
 import { Context, Effect, Schema, Stream } from 'effect'
 import { RpcTest } from 'effect/unstable/rpc'
-import { Entity, Mutation, Query, ReadBatch, Remote, RemoteRpc } from 'foldkit-remote'
+import { Entity, Mutation, Query, ReadBatch, Remote, RemoteClient, RemoteRpc } from 'foldkit-remote'
 import { describe, expect, it } from 'vitest'
 import { RemoteServer, RemoteServerError, type ServerDefinition } from '../src/index.js'
 
@@ -119,6 +119,17 @@ describe('RemoteServer', () => {
     expect(asAdmin.entities).toEqual([
       { entity: 'User', id: 'u1', values: { id: 'id:u1', name: 'name:u1', admin: true } },
     ])
+  })
+
+  it('serves through Remote.clientLayer, the client adapter', async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* RemoteClient
+        return yield* client.read({ requests: [{ entity: 'User', id: 'u1', fields: ['id'] }] })
+      }).pipe(Effect.provide(Remote.clientLayer(RemoteServer.handlers(server, 'admin')))),
+    )
+
+    expect(result.entities).toEqual([{ entity: 'User', id: 'u1', values: { id: 'id:u1' } }])
   })
 
   it('reflects a partial entity in the returned values (presence)', async () => {

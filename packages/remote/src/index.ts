@@ -844,20 +844,25 @@ export const inspectEntity = (
   return entry === undefined ? undefined : inspectEntry(key, entry)
 }
 
-/** The methods an Effect RPC client for `RemoteRpc` exposes. */
-export interface RemoteRpcClient {
+/**
+ * The methods an Effect RPC client for `RemoteRpc` exposes. `R` is the
+ * environment a handler needs; it defaults to `never`, which is what a real
+ * transport client satisfies. `RemoteServer.handlers` returns this type with its
+ * own `R`, so the two sides cannot drift apart.
+ */
+export interface RemoteRpcClient<R = never> {
   readonly FoldkitRemoteRead: (
     payload: Schema.Schema.Type<typeof ReadBatch>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError>
+  ) => Effect.Effect<Schema.Schema.Type<typeof ReadBatchResult>, RemoteReadError, R>
   readonly FoldkitRemoteQuery: (
     payload: Schema.Schema.Type<typeof QueryRequest>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError>
+  ) => Effect.Effect<Schema.Schema.Type<typeof QueryResult>, RemoteQueryError, R>
   readonly FoldkitRemoteMutate: (
     payload: Schema.Schema.Type<typeof MutationRequest>,
-  ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError>
+  ) => Effect.Effect<Schema.Schema.Type<typeof MutationResult>, RemoteMutationError, R>
   readonly FoldkitRemoteLive: (
     payload: Schema.Schema.Type<typeof LiveRequirement>,
-  ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError>
+  ) => Stream.Stream<Schema.Schema.Type<typeof LiveChange>, RemoteLiveError, R>
 }
 
 /** Reconstructs the client's `LiveEvent` from the wire's flattened `LiveChange`. */
