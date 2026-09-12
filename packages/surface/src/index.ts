@@ -1024,11 +1024,6 @@ export const Surface = {
       child(model, h as unknown as ViewBuilder<ChildMessage>),
 
   /**
-   * An explicit collection of Surfaces for one App; there is no hidden global
-   * registry. Duplicate names are rejected here so a diagnostic name cannot
-   * silently collide.
-   */
-  /**
    * A Surface as a `Contract` for `Module`: what it observes, requires, and may
    * emit. A parameterized Surface needs its `params` to build the projection.
    */
@@ -1210,7 +1205,7 @@ export const Module = {
       seen.set(name, contract)
       for (const path of [...contract.owns, ...contract.observes]) {
         const head = path[0]
-        if (head !== undefined && !fields.has(head))
+        if (head === undefined || !fields.has(head))
           findings.push({
             rule: 'unknown-path',
             contracts: [name],
@@ -1226,14 +1221,16 @@ export const Module = {
           })
     }
 
-    const owning = owners(module)
+    // The same value listed twice is one owner, as `duplicate-name` treats it.
+    const owning = [...new Set(owners(module))]
     for (let i = 0; i < owning.length; i += 1)
       for (let j = i + 1; j < owning.length; j += 1) {
         const a = owning[i]!
         const b = owning[j]!
         for (const pa of a.owns)
           for (const pb of b.owns)
-            if (isPrefix(pa, pb) || isPrefix(pb, pa))
+            // An empty path is reported as `unknown-path`, not as owning everything.
+            if (pa.length > 0 && pb.length > 0 && (isPrefix(pa, pb) || isPrefix(pb, pa)))
               findings.push({
                 rule: 'ownership-overlap',
                 contracts: [label(a), label(b)],
@@ -1325,13 +1322,22 @@ export const Module = {
     const lines = ['flowchart LR', '  subgraph Model']
     manifest.fields.forEach((field, index) => lines.push(`    f${index}["${field}"]`))
     lines.push('  end')
-    const fieldId = (path: readonly string[]): string => `f${manifest.fields.indexOf(path[0]!)}`
+    // A path outside the Model (reported by `validate`) draws no edge.
+    const fieldId = (path: readonly string[]): string | undefined => {
+      const index = path.length === 0 ? -1 : manifest.fields.indexOf(path[0]!)
+      return index < 0 ? undefined : `f${index}`
+    }
     manifest.contracts.forEach((contract, index) => {
       lines.push(`  c${index}["${contract.kind}:${contract.name}"]`)
-      for (const path of contract.owns) lines.push(`  c${index} -->|owns| ${fieldId(path)}`)
-      for (const path of contract.observes)
-        if (!contract.owns.some(owned => pathKey(owned) === pathKey(path)))
-          lines.push(`  c${index} -.-> ${fieldId(path)}`)
+      for (const path of contract.owns) {
+        const field = fieldId(path)
+        if (field !== undefined) lines.push(`  c${index} -->|owns| ${field}`)
+      }
+      for (const path of contract.observes) {
+        const field = fieldId(path)
+        if (field !== undefined && !contract.owns.some(owned => pathKey(owned) === pathKey(path)))
+          lines.push(`  c${index} -.-> ${field}`)
+      }
     })
     return lines.join('\n')
   },

@@ -94,6 +94,17 @@ describe('Module', () => {
     ])
   })
 
+  it('treats the same value listed twice as one owner', () => {
+    expect(Module.validate(Module.make(App, [notesSync, notesSync, remote, remote]))).toEqual([])
+  })
+
+  it('reports an empty path as unknown instead of as owning everything', () => {
+    const raw: Contract = { ...remote, name: 'raw', owns: [[]], observes: [[]] }
+    const findings = Module.validate(Module.make(App, [notesSync, raw]))
+    expect(findings.map(finding => finding.rule)).toEqual(['unknown-path', 'unknown-path'])
+    expect(Module.toMermaid(Module.make(App, [raw]))).not.toContain('f-1')
+  })
+
   it('finds a contract from another application and a duplicate name', () => {
     const foreign = Surface.make(Other, 'Board', {
       model: ({ model }) => Projection.struct({ route: model.route }),

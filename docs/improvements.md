@@ -54,13 +54,12 @@ friction that prompted it, so it can be judged rather than taken on faith.
   brands, so every cross-package seam needs `sequence(Number(...))` conversions
   (visible in `examples/kitchen-sink` and `examples/sync`). Share the brands, or
   namespace them so the conversion is obviously intentional.
-- **Config vocabulary should match across siblings.** `Sync.make` and
-  `Sync.forApplication` only recently agreed on `shared`/`durable` (was
-  `model`/`messages`). Audit Remote and Agent for the same drift.
-- **Owner tokens should be checked everywhere.** `Surface` subsets carry an
-  `owner`; `Sync.forApplication` now checks it, `Agent` should too. Make it a
-  rule with a test, since structurally identical applications cannot be told
-  apart by type.
+- **Config vocabulary should match across siblings.** Resolved by #60:
+  `forApplication(App).make(config)` across Agent and Sync, `Surface.make` for a
+  feature Surface, `Projection`/`MessageSet` as the shared primitives.
+- **Owner tokens should be checked everywhere.** Resolved: `Sync` and
+  `Agent.exposeSubset` refuse a foreign subset, and `Module.validate` reports a
+  foreign contract; each has a test.
 
 ## Architecture
 

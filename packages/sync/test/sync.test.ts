@@ -210,6 +210,32 @@ describe('the replica', () => {
     await Effect.runPromise(replica.close)
   })
 
+  it('fails with ReplayError when rebuilding the projection throws for a pending Message', async () => {
+    let poisoned = false
+    const Poisonable = defineSync({
+      ...definition,
+      replay: (shared, message) => {
+        if (poisoned && message._tag === 'CreatedTodo' && message.id === 't1')
+          throw new Error('t1 no longer replays')
+        return definition.replay(shared, message)
+      },
+    })
+    const replica = await Effect.runPromise(Poisonable.openReplica(replicaId('a'), memoryStorage()))
+    await submit(replica, created('t1'))
+    // An exchange replaces the state without a seeded projection.
+    await sync(replica, { exchange: async () => ({ operations: [], rejected: [] }) })
+    poisoned = true
+
+    const refused = await Effect.runPromise(Effect.result(replica.submit(created('t2'))))
+    expect(refused._tag).toBe('Failure')
+    if (refused._tag === 'Failure') {
+      expect(refused.failure._tag).toBe('ReplayError')
+      expect(refused.failure.message).toBe('t1 no longer replays')
+    }
+    expect(pending(replica).map(operation => operation.opId)).toEqual(['a:1'])
+    await Effect.runPromise(replica.close)
+  })
+
   it('refuses a Message whose replay throws and leaves the outbox unchanged', async () => {
     const Throwing = defineSync({
       ...definition,

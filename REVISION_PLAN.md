@@ -2205,12 +2205,22 @@ API was then sharpened after review (`5144264`, `bea8706`): `Surface.application
 takes optional `initial`/`update` and resource-carrying Commands; `Projection.pick`
 rejects dynamic `.at`/`.index` refs; `MessageSet.union` and
 `Agent.exposeSubset` compose and expose subsets; `Agent.forApplication` infers the
-Model with a curried `Principal`; `ModelRef` codecs are typed pure. Encoded
+Model, with `withPrincipal` fixing the `Principal`; `ModelRef` codecs are typed pure. Encoded
 types now flow through `ModelRef`/`FieldRef`/`FieldRef`-derived projections and
 `MessageSet` (`0606e5e`), so `Projection.pick`/`Projection.compose` and the journal
-snapshot codec keep each field's encoded type. The remaining integration work is
-the Foldkit binding (step 3 onward in `packages/agent/DESIGN.md`). Work through
-the review findings and open questions below.
+snapshot codec keep each field's encoded type. Issue #60 then unified the
+vocabulary and made the architecture inspectable: `forApplication(App)`
+specializes and `make(config)` constructs across Surface, Agent, and Sync (no
+`define`); `Projection.pick`/`compose` and `MessageSet.make`/`union` are the
+first-class primitives; the derived replay refuses Commands and local writes and
+`submit` fails closed with `ReplayError`; `Module.make(App, [contracts])`
+collects the contracts Sync, Remote, and Agent now carry and validates ownership,
+naming, and Message claims. Deferred from #60: the shared host seam (section 5,
+waits on the admission hook), a tagged requirement algebra (section 7, no second
+interpreter yet), and `Sync.for(Surface)` (a Surface's projection is read-only).
+The remaining integration work is the Foldkit binding (step 3 onward in
+`packages/agent/DESIGN.md`). Work through the review findings and open questions
+below.
 The builder-seam decision (open question 2) is answered: proceed with the sound
 cast recorded in §15.
 

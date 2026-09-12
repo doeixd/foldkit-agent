@@ -465,11 +465,18 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
             // applied, here or on another replica, so it must not reach the
             // outbox. The result is the next optimistic projection, so the
             // cache is seeded instead of replaying the outbox on the next read.
+            // Rebuilding the projection replays the outbox, which can throw
+            // too (an upgrade that changed `update` for a pending Message), so
+            // it sits inside the same typed error as the new Message's replay.
             const cached = yield* Ref.get(projection)
-            const projected =
-              cached !== undefined && cached.state === current ? cached.shared : optimistic(current)
             const replayed = yield* Effect.try({
-              try: () => definition.replay(projected, message),
+              try: () =>
+                definition.replay(
+                  cached !== undefined && cached.state === current
+                    ? cached.shared
+                    : optimistic(current),
+                  message,
+                ),
               catch: cause =>
                 new ReplayError({
                   message: cause instanceof Error ? cause.message : 'Replay failed',

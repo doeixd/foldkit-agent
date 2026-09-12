@@ -317,7 +317,7 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `Sync.forApplication(App).make({ documentId, shared, durable })` derives the
   shared projection, the durable subset, the initial snapshot, and replay from a
   `Surface.application`, a `Projection.pick`/`Projection.compose` projection, and a
-  `MessageSet.make` subset; `define({ ..., replay })` replaces the derived replay
+  `MessageSet.make` subset; `make({ ..., replay })` replaces the derived replay
   with a custom reducer over the shared slice. It compiles to the low-level
   `defineSync` and returns a read-only `surface`; `TodoSync.journalContract()`
   derives the durable operation/snapshot codecs, empty snapshot, and reducer.
@@ -340,7 +340,8 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   is never run. `examples/sync` drops its hand-written copy of the same guards.
 - **`submit` fails closed.** The replica replays a Message before writing it to
   the outbox and fails with `ReplayError` (a new `ReplicaError` member carrying
-  the replay's message and cause) when replay throws, so a Message no replica
+  the replay's message and cause) when replay throws, for the new Message or
+  for a pending one while the projection is rebuilt, so a Message no replica
   could apply is never persisted. The submit-time result seeds the optimistic
   projection, so a read after a submit no longer replays the whole outbox.
 - **Replay documented at the definition.** `MakeOptions.replay` states that a

@@ -987,10 +987,11 @@ export const Remote = {
     contract: {
       kind: 'remote',
       name: store.dependency.join('.') || 'remote',
-      // A generated field reference knows its application; a raw optic does not.
+      // A generated field reference knows its application and its path; a raw
+      // optic (`ModelRef.fromOptic`) knows neither, so it claims nothing.
       owner: (store as { readonly owner?: object }).owner,
-      owns: [store.dependency],
-      observes: [store.dependency],
+      owns: store.dependency.length === 0 ? [] : [store.dependency],
+      observes: store.dependency.length === 0 ? [] : [store.dependency],
       messages: [],
       requirements: [],
     },
