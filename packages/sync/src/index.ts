@@ -76,7 +76,7 @@ export {
   defineSync,
   syncMetrics,
   type Checkpoint,
-  type Committed,
+  type CommittedOperation,
   type Exchange,
   type JournalContract,
   type Operation,

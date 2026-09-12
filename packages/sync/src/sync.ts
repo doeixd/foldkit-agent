@@ -47,7 +47,8 @@ const CommittedSchema = Schema.Struct({
   serverSequence: Sequence.check(Schema.isGreaterThanOrEqualTo(1)),
   actorId: Schema.NonEmptyString,
 })
-export type Committed = typeof CommittedSchema.Type
+/** Named to avoid colliding with `foldkit-durable`'s `Committed`. */
+export type CommittedOperation = typeof CommittedSchema.Type
 
 const decodeOperation = Schema.decodeUnknownSync(OperationSchema, { onExcessProperty: 'error' })
 const decodeCommitted = Schema.decodeUnknownSync(CommittedSchema, { onExcessProperty: 'error' })
@@ -76,7 +77,7 @@ export interface Checkpoint<Shared> {
 }
 
 export interface Exchange<Shared> {
-  /** Server-committed operations as they arrived; validated against `Committed` on adoption. */
+  /** Server-committed operations as they arrived; validated against `CommittedOperation` on adoption. */
   readonly operations: ReadonlyArray<unknown>
   readonly rejected: ReadonlyArray<OpId>
   /** Sends from the request that are durably committed, so the replica can drop them. */
@@ -149,7 +150,7 @@ export interface Sync<Message, Shared> {
   readonly documentId: DocumentId
   readonly normalizeOperation: (input: unknown) => Operation
   readonly operationFrom: (input: unknown, documentId: DocumentId) => Operation
-  readonly committedFrom: (input: unknown, documentId: DocumentId) => Committed
+  readonly committedFrom: (input: unknown, documentId: DocumentId) => CommittedOperation
   readonly decodeExchange: (input: unknown) => Exchange<Shared>
   /** The codecs and pure reducer `foldkit-durable`'s `makeJournal` consumes. */
   readonly journalContract: () => JournalContract<Operation, Shared>
@@ -275,12 +276,12 @@ export const defineSync = <Message, Shared, MessageEncoded, SharedEncoded>(
   const decodeCommittedOperation = (
     input: unknown,
     key: DocumentId,
-  ): { readonly committed: Committed; readonly message: Message } => {
+  ): { readonly committed: CommittedOperation; readonly message: Message } => {
     const committed = assertDocument(decodeCommitted(input), key)
     checkIdentity(committed)
     return { committed, message: decodeDurable(committed.message) }
   }
-  const committedFrom = (input: unknown, key: DocumentId): Committed =>
+  const committedFrom = (input: unknown, key: DocumentId): CommittedOperation =>
     decodeCommittedOperation(input, key).committed
 
   const journalContract = (): JournalContract<Operation, Shared> => ({

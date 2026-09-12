@@ -12,7 +12,7 @@ import {
 } from 'foldkit-durable'
 import {
   documentId as toSyncDocumentId,
-  type Committed,
+  type CommittedOperation as Committed,
   type Operation,
   type TransportClient,
 } from 'foldkit-sync'

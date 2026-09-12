@@ -8,7 +8,7 @@ import {
   opId,
   replicaId,
   sequence as toSequence,
-  type Committed,
+  type CommittedOperation,
   type Operation,
   type Replica,
   type ReplicaState,
@@ -71,7 +71,7 @@ const storageWith = (state: ReplicaState<Shared>): Storage => ({
   close: Effect.void,
 })
 
-const committed = (serverSequence: number, id: string): Committed => ({
+const committed = (serverSequence: number, id: string): CommittedOperation => ({
   ...operation(serverSequence, id),
   serverSequence: toSequence(serverSequence),
   actorId: 'owner',

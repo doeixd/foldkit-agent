@@ -10,7 +10,7 @@ import {
   replicaId,
   sequence as toSequence,
   StorageError,
-  type Committed,
+  type CommittedOperation,
   type Exchange,
   type Operation,
   type Replica,
@@ -87,7 +87,7 @@ const committed = (
   localSequence: number,
   serverSequence: number,
   message: Message,
-): Committed => ({
+): CommittedOperation => ({
   ...operation(replica, localSequence, message),
   serverSequence: toSequence(serverSequence),
   actorId: 'owner',

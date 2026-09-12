@@ -268,8 +268,10 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Branded positions.** `Sequence` (a committed document position) and
   `LocalSequence` (a replica's own 1-based counter) are brands with `sequence`
   /`localSequence` decoders, so `baseCursor`/`serverSequence`/`cursor` cannot be
-  swapped with `localSequence`. `Operation`, `Committed`, `Checkpoint`,
+  swapped with `localSequence`. `Operation`, `CommittedOperation`, `Checkpoint`,
   `ReplicaState`, `Replica.cursor`, and `ReplicaStatus` use them.
+- **Distinct committed type.** Sync's committed operation is `CommittedOperation`,
+  so importing it beside `foldkit-durable`'s `Committed` no longer collides.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.
