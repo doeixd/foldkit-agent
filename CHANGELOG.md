@@ -74,6 +74,17 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `LiveRequirement` carry `REMOTE_PROTOCOL_VERSION` (2), `ReadRequest` gains
   `relations`, and a version mismatch fails with `RemoteProtocolError`
   (`RemoteClient.read`/`live` error types widen accordingly) (#65, section 1).
+- **Coalesced reads.** `Remote.clientLayer` (and `Remote.coalesced` for a
+  hand-written client) batch requirements issued together into one
+  `ReadBatch`, union overlapping fields, join a requirement already in flight,
+  and release it when the read fails; built on Effect's `RequestResolver`
+  with an optional `window` (#65, section 2).
+- **Cache retention.** `Remote.retain(bound, projections, toMessage, {
+  connections, grace })` is a Subscription entry whose dependencies are the
+  retention roots; it emits the new `RetentionChanged` Message after `grace`,
+  and `Remote.update` applies the pure `gc(state, roots)`, keeping what the
+  roots reach through refs and nested relations, retained connections' edges,
+  and pending optimistic layers and overlays (#65, section 3).
 - **Request policies.** `RemotePolicy.cacheFirst` / `staleWhileRevalidate({
   maxAge })` / `networkOnly` on `Remote.observe` and `Remote.prefetch` decide
   what a field the store already holds means. A refreshing policy emits

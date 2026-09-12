@@ -53,13 +53,15 @@ export const coalesceReads = (
     // joins the deferred instead of starting another read.
     const inFlight = new Map<string, Deferred.Deferred<BatchResult, ReadError>>()
 
-    const runAll = (entries: ReadonlyArray<Request.Entry<ReadRequirement>>) => {
-      // Per requirement key: the deferred this batch's entries wait on. One
-      // already in flight from an earlier batch is joined; the rest are owned
-      // here and settled by this batch's read.
-      const joins = new Map<string, Deferred.Deferred<BatchResult, ReadError>>()
-      const own = new Map<string, Deferred.Deferred<BatchResult, ReadError>>()
-      return Effect.gen(function* () {
+    // A batch runs to completion even when every requester is interrupted, so
+    // an in-flight requirement is always settled and released by its read.
+    const runAll = (entries: ReadonlyArray<Request.Entry<ReadRequirement>>) =>
+      Effect.gen(function* () {
+        // Per requirement key: the deferred this batch's entries wait on. One
+        // already in flight from an earlier batch is joined; the rest are
+        // owned here and settled by this batch's read.
+        const joins = new Map<string, Deferred.Deferred<BatchResult, ReadError>>()
+        const own = new Map<string, Deferred.Deferred<BatchResult, ReadError>>()
         for (const entry of entries) {
           const key = entry.request.key
           if (joins.has(key)) continue
@@ -92,18 +94,7 @@ export const coalesceReads = (
         for (const entry of entries) {
           yield* Request.completeEffect(entry, Deferred.await(joins.get(entry.request.key)!))
         }
-      }).pipe(
-        // An interrupted batch must not leave its requirements "in flight".
-        Effect.onInterrupt(() =>
-          Effect.forEach(own, ([key, deferred]) =>
-            Effect.gen(function* () {
-              if (inFlight.get(key) === deferred) inFlight.delete(key)
-              yield* Deferred.interrupt(deferred)
-            }),
-          ),
-        ),
-      )
-    }
+      })
 
     let resolver = RequestResolver.make<ReadRequirement>(runAll)
     if (options.window !== undefined) {

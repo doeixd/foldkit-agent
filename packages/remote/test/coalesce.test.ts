@@ -159,7 +159,7 @@ describe('coalesceReads', () => {
     expect(raw.batches).toHaveLength(2)
   })
 
-  it('interrupting one waiter does not poison the requirement', async () => {
+  it('interrupting the only waiter keeps the batch running for a later joiner', async () => {
     const raw = recording({ hold: true })
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -168,17 +168,16 @@ describe('coalesceReads', () => {
         yield* Effect.yieldNow
         yield* Effect.yieldNow
         yield* Fiber.interrupt(fiber)
-        const gate = raw.gates[0]
-        if (gate !== undefined) yield* Deferred.succeed(gate, undefined)
+        yield* Effect.yieldNow
         const later = yield* Effect.forkChild(read(batch(req('u1', ['name']))))
         yield* Effect.yieldNow
         yield* Effect.yieldNow
-        for (const pending of raw.gates) yield* Deferred.succeed(pending, undefined)
+        expect(raw.batches).toHaveLength(1)
+        yield* Deferred.succeed(raw.gates[0]!, undefined)
         const exit = yield* Fiber.await(later)
         expect(Exit.isSuccess(exit)).toBe(true)
       }),
     )
-    expect(raw.batches.length).toBeGreaterThanOrEqual(1)
   })
 
   it('an empty batch never touches the transport', async () => {

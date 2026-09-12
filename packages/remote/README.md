@@ -207,6 +207,42 @@ const store = await Effect.runPromise(
 
 `prefetch` takes the same `policy` and `now` options as `observe`.
 
+### Coalescing
+
+Reads through `Remote.clientLayer` coalesce: requirements issued together
+become one `ReadBatch` (ids batched, overlapping fields unioned), a requirement
+already in flight is joined rather than re-requested, and a failed read releases
+it. Every waiter receives the whole batch result; `Remote.update` writes it
+idempotently. `Remote.coalesced(layer, { window })` wraps a hand-written client
+the same way; `window` widens the batching delay beyond "issued concurrently".
+
+### Retention
+
+The cache keeps what the active Surfaces reach:
+
+```ts
+const subscriptions = (model: Model) => {
+  const page = ProjectPage.projection({ projectId: model.route.projectId })
+  return [
+    Remote.observe(AppRemote, ProjectPage, { projectId: model.route.projectId }, toMessage),
+    Remote.retain(AppRemote, [page], toMessage, {
+      connections: [projectsRef.identity],
+      grace: '5 seconds',
+    }),
+  ]
+}
+```
+
+`Remote.retain`'s dependencies are the roots (the listed projections'
+requirements plus the named connections); it emits `RetentionChanged` once the
+roots have been stable for `grace`, and a root change restarts the wait, so a
+route transition that comes straight back does not thrash. `Remote.update`
+applies the pure `gc(state, roots)`: a root entity, the targets its retained
+fields refer to, the targets a nested relation selects, a retained connection's
+edges, and anything a pending optimistic layer or overlay touches survive;
+everything else is dropped. Roots live outside the Model, so GC is a Message
+like every other cache change.
+
 ## Mutations
 
 ```ts
@@ -355,7 +391,8 @@ planner refetches.
 - The wire `LiveChange` union carries entity patches, deletes, and connection
   insert/remove/invalidate changes; the client adapter reconstructs a `LiveEvent`
   from it. `RemoteServer.live` serves them as a stream.
-- Request-level in-flight dedupe is not modeled. `Remote.plan` returns missing
-  fields, and the Subscription re-runs when the plan changes; there is no
-  "request already in flight" set.
+- Coalescing is per `RemoteClient` layer: two Remote domains with separate
+  layers do not share a batch. `Remote.retain` collects only what the
+  application lists; a Surface it does not list loses its data on the next
+  `RetentionChanged`.
 - `RemoteData` is a closed union.

@@ -121,6 +121,13 @@ What a field the store already holds means is a `RemotePolicy` on `observe` and
 it is not a second cache. A refreshing policy emits `RefreshStarted` before the
 read, which marks the refetched fields stale.
 
+Reads through `Remote.clientLayer` coalesce: requirements issued together are one
+batch, a requirement already in flight is joined, and every waiter gets the
+whole result. Retention is a Message too: `Remote.retain` lists the observed
+projections as roots and emits `RetentionChanged` after a grace period, and the
+reducer's pure `gc` keeps what the roots reach through the store's refs plus any
+pending optimistic change.
+
 In the view, a remote field is a `RemoteData`. `Remote.select` produces
 `Initial` until its selected fields are present, `Ready` once they are,
 `Refreshing` while a selected field is stale (an observer is refetching it),
