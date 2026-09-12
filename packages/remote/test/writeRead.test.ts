@@ -90,4 +90,22 @@ describe('Remote.writeRead', () => {
 
     expect(commentsOf(second)).toEqual(page(['Comment:c1'], false, false))
   })
+
+  it('replaces rather than merges a malformed ref page', () => {
+    const stored = writePage(emptyStore, { first: 2 }, page(['Comment:c1'], true, false))
+    const malformed = [
+      { refs: ['Comment:c2', 42], hasNext: false, hasPrevious: true },
+      { refs: ['Comment:c2'], hasNext: 'no', hasPrevious: true },
+      { refs: ['Comment:c2'], hasNext: false, hasPrevious: 'yes' },
+    ]
+
+    for (const value of malformed) {
+      const written = writePage(
+        stored,
+        { first: 2, after: 'Comment:c1' },
+        value as unknown as ReturnType<typeof page>,
+      )
+      expect(commentsOf(written)).toEqual(value)
+    }
+  })
 })

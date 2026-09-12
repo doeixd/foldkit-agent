@@ -102,6 +102,12 @@ describe('Connection.merge', () => {
     expect(hasNext(complete)).toBe(false)
   })
 
+  it('reports no gap for a single contiguous segment', () => {
+    const contiguous = merge(emptyConnection, page(['a', 'b'], terminal, terminal))
+    expect(contiguous.segments).toHaveLength(1)
+    expect(isGapped(contiguous)).toBe(false)
+  })
+
   it('uses the edge key for identity, so a repeated ref can appear twice', () => {
     const duplicateRef: Edge[] = [
       edge({ entity: 'E', id: 'a' }, 'edge-1'),

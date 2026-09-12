@@ -11,6 +11,7 @@ import {
   remove,
   tombstone,
   writeEntity,
+  type EntityStore,
 } from '../src/index.js'
 
 const key = 'User:u1'
@@ -65,6 +66,24 @@ describe('EntityStore', () => {
     store = writeEntity(store, key, { name: 'ada' })
     expect(isTombstone(store, key)).toBe(false)
     expect(readField(store, key, 'name')).toEqual(Option.some('ada'))
+  })
+
+  it('a tombstone with lingering presence is still unknown', () => {
+    // `RemotePersistence.parseEntry` validates each field, not the
+    // tombstone/presence invariant, so a restored entry can carry both.
+    const store: EntityStore = {
+      [key]: {
+        values: { name: 'ada' },
+        present: new Set(['name']),
+        stale: new Set(),
+        tombstone: true,
+        updatedAt: 0,
+        windows: {},
+      },
+    }
+
+    expect(hasField(store, key, 'name')).toBe(false)
+    expect(readField(store, key, 'name')).toEqual(Option.none())
   })
 
   it('remove forgets everything known', () => {

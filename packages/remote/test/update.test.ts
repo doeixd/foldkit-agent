@@ -16,6 +16,7 @@ import {
   terminal,
   updateRemote,
   visibleStore,
+  type LiveEvent,
   type RemoteModel,
   type RemoteMessage,
 } from '../src/index.js'
@@ -170,6 +171,45 @@ describe('Remote.update', () => {
     expect(regapped.gaps.has('s1')).toBe(false)
   })
 
+  it('records a gap for a connection event ahead of its cursor and heals in order', () => {
+    const inserted: LiveEvent = {
+      _tag: 'ConnectionInsert',
+      connection: 'c1',
+      position: 'append',
+      edge: { key: 'User:u1', ref: { entity: 'User', id: 'u1' } },
+      cursor: 1,
+    }
+    const applied = updateRemote(initialRemoteModel, {
+      _tag: 'LiveReceived',
+      stream: 's1',
+      now: 0,
+      event: inserted,
+    })
+    expect(applied.gaps.has('s1')).toBe(false)
+    expect(applied.live.s1!.cursor).toBe(1)
+    expect(applied.optimistic.overlays).toHaveLength(1)
+
+    const ahead = updateRemote(applied, {
+      _tag: 'LiveReceived',
+      stream: 's1',
+      now: 0,
+      event: { ...inserted, cursor: 3 },
+    })
+    expect(ahead.gaps.has('s1')).toBe(true)
+    expect(ahead.live.s1!.cursor).toBe(1)
+    expect(ahead.optimistic.overlays).toHaveLength(1)
+
+    const healed = updateRemote(ahead, {
+      _tag: 'LiveReceived',
+      stream: 's1',
+      now: 0,
+      event: { ...inserted, cursor: 2 },
+    })
+    expect(healed.gaps.has('s1')).toBe(false)
+    expect(healed.live.s1!.cursor).toBe(2)
+    expect(healed.optimistic.overlays).toHaveLength(2)
+  })
+
   it('inspects the cache purely', () => {
     const model = readReceived(initialRemoteModel, { name: 'ada' })
     const inspection = Remote.inspect(model)
@@ -185,6 +225,59 @@ describe('Remote.update', () => {
     ])
     expect(Remote.inspectEntity(model, 'User:u1')?.present).toEqual(['name'])
     expect(Remote.inspectEntity(model, 'Missing:1')).toBeUndefined()
+  })
+
+  it('inspects connections, live streams, gaps, and the mutation ledger', () => {
+    let model = updateRemote(initialRemoteModel, {
+      _tag: 'ConnectionMerged',
+      connection: 'c1',
+      page: {
+        edges: [{ key: 'User:u1', ref: { entity: 'User', id: 'u1' } }],
+        start: terminal,
+        end: terminal,
+      },
+    })
+    model = updateRemote(model, {
+      _tag: 'LiveReceived',
+      stream: 's1',
+      now: 0,
+      event: {
+        _tag: 'EntityPatched',
+        ref: { entity: 'User', id: 'u1' },
+        values: { name: 'ada' },
+        changed: ['name'],
+        cursor: 1,
+      },
+    })
+    model = updateRemote(model, { _tag: 'MutationStarted', requestId: 'req-1' })
+    model = updateRemote(model, {
+      _tag: 'MutationSucceeded',
+      requestId: 'req-1',
+      entities: [],
+    })
+    model = updateRemote(model, {
+      _tag: 'MutationFailed',
+      requestId: 'req-2',
+      error: { _tag: 'Boom', message: 'x' },
+    })
+    model = updateRemote(model, {
+      _tag: 'LiveReceived',
+      stream: 's1',
+      now: 0,
+      event: {
+        _tag: 'EntityPatched',
+        ref: { entity: 'User', id: 'u1' },
+        values: { name: 'grace' },
+        changed: ['name'],
+        cursor: 3,
+      },
+    })
+
+    const inspection = Remote.inspect(model)
+    expect(inspection.connections).toEqual(['c1'])
+    expect(inspection.live).toEqual(['s1'])
+    expect(inspection.gaps).toEqual(['s1'])
+    expect(inspection.mutations).toEqual({ pending: [], failed: ['req-2'], applied: 1 })
   })
 })
 
