@@ -12,6 +12,6 @@
       "foldkit-surface": ["../surface/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "tsdown.config.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "bench/**/*.ts", "tsdown.config.ts"],
   "references": [{ "path": "../remote" }, { "path": "../remote-server" }]
 }

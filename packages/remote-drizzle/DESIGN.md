@@ -266,12 +266,23 @@ or `false`, a non-null value adds `IS NULL` on the nulls-last side, and equality
 uses `IS NULL` rather than comparing to NULL. Both `query` and relations share
 the kernel.
 
-### SQL window optimization
+### SQL window optimization — measured, deferred
 
-`ROW_NUMBER() OVER (PARTITION BY fk ORDER BY …)` fetches every parent's first N
-in one query instead of N. It needs the `DrizzleStatement` contract to accept
-expression/window columns. Deferred; the per-parent fallback is correct, and the
-optimization should be benchmark-driven.
+`packages/remote-drizzle/bench/nested.bench.ts` (`pnpm vitest bench --run
+packages/remote-drizzle`) on an in-process SQLite DB, 50 parents x 20 children:
+
+| read | mean | relative |
+| --- | ---: | ---: |
+| flat, 2 fields | 0.27 ms | - |
+| batched many (one `IN (...)`) | 2.46 ms | 9x flat |
+| nested pagination, `first` 5/parent (50 queries) | 18.9 ms | 69x flat |
+
+`ROW_NUMBER() OVER (PARTITION BY fk ORDER BY ...)` in one query would collapse the
+per-parent loop to a single round trip, plausibly near the batched cost. It needs
+a filter on the window alias — an outer query over a subquery — which the minimal
+structural `DrizzleDatabaseService` does not model (`as()` plus subquery-typed
+columns, or raw SQL). Deferred: the absolute cost is small and the contract
+extension is real. Revisit if a page renders many paginated relations.
 
 ### One connection model
 
@@ -303,7 +314,9 @@ dialects in one client is a bug factory.
    filter per collection relation on `source`.
 6. **D4** — counts landed (`b7d7f39`); generalize beyond counts only if an app
    needs it.
-7. **SQL window optimization** — benchmark-driven.
+7. **SQL window optimization** - measured (`bench/nested.bench.ts`): nested
+   pagination is ~7.7x the batched read, ~19 ms for 50x5. Deferred; the
+   subquery/window contract extension is not justified by that.
 
 ## Decision summary
 
@@ -315,7 +328,7 @@ dialects in one client is a bug factory.
 | D3 relation authz | A1/A5 field gating; A2 landed (`d43c182`) | S–M | adapter (A2) | Target ids revealed unless fields are gated |
 | D4 computed | A1 defer, A2 counts later | S–M | adapter | Counts landed (`b7d7f39`); other aggregates absent |
 | Nullable ordering | NULL-aware keyset | S | cursor kernel | Resolved (`6aca3b7`) |
-| Window functions | Defer, benchmark-driven | L | database contract | N queries for N parents |
+| Window functions | Deferred, measured | L | database contract | N queries for N parents (~19 ms/50) |
 
 ## Open questions
 
