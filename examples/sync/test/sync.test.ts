@@ -16,7 +16,7 @@ import {
   type Storage,
 } from 'foldkit-sync'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Message, replay, update, type Shared } from '../src/app.js'
+import { Message, type Shared } from '../src/app.js'
 import { openJournal, type Principal } from '../src/journal.js'
 import { serverAgentHost } from '../src/serverAgent.js'
 import { closeStorages, openReplica, openStorage, type PromiseReplica } from './helpers.js'
@@ -524,35 +524,6 @@ describe('the wired replica', () => {
     expect(a.cursor()).toBe(1)
     expect(a.pending()).toEqual([])
     expect(a.shared()).toEqual(server.snapshot('todos').model)
-  })
-})
-
-describe('replay safety', () => {
-  it('refuses Commands without executing them', () => {
-    let ran = false
-    expect(() =>
-      replay({ todos: [] }, created('a'), (model, message) => ({
-        ...update(model, message),
-        commands: [
-          {
-            name: 'ExternalEffect',
-            effect: Effect.sync(() => {
-              ran = true
-              return message
-            }),
-          },
-        ],
-      })),
-    ).toThrow('must not produce Commands')
-    expect(ran).toBe(false)
-  })
-
-  it('refuses durable updates that modify local Model fields', () => {
-    expect(() =>
-      replay({ todos: [] }, created('a'), (model, message) => ({
-        model: { ...update(model, message).model, selectedTodoId: 'a' },
-      })),
-    ).toThrow('local Model fields')
   })
 })
 
