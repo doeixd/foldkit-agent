@@ -197,8 +197,11 @@ override even when a later attachment would otherwise win.
   render, so a Behavior sees the view's `input` and `h` and an input-driven
   Style is folded against the same `input`.
 - Behavior validates its `requires` against the target Slot at definition time
-  (`mixins:unknown-slot`, `mixins:capability-mismatch`,
+  (`mixins:unknown-slot`, `mixins:hidden-slot`, `mixins:capability-mismatch`,
   `mixins:unsupported-event`, `mixins:unsupported-attribute`).
+- A `hidden` slot is internal: `Style.forSlots` and `Behavior.forSlots` exclude
+  it from their spec types and reject it at runtime (`mixins:hidden-slot`), so
+  the only way to reach one is an explicit cast.
 - Behavior owns no state. Stateful widgets stay `@foldkit/ui` Submodels; a
   continuous element listener is a Mount; a network call is Message -> update ->
   Command.

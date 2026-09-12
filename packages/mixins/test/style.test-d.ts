@@ -10,6 +10,9 @@ void _ok
 // @ts-expect-error unknown slot key.
 Style.forSlots(FieldSlots)({ missing: Style.class('x') })
 
+// @ts-expect-error a hidden slot is internal, not publicly styleable.
+Style.forSlots(FieldSlots)({ internals: Style.class('x') })
+
 // @ts-expect-error inline declarations are string-valued.
 Style.inline({ width: 3 })
 

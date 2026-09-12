@@ -119,7 +119,8 @@ export const resolve = <Message>(
 
   const reserve = (tag: string, value: unknown): void => {
     if (tag === 'OnMount') return
-    if (tag.startsWith('On')) {
+    // `OnCustomEvent` is keyed by its event name, not treated as one native event.
+    if (tag.startsWith('On') && tag !== 'OnCustomEvent') {
       ownedEvents.set(eventNameOfTag(tag), tag)
       return
     }
@@ -185,7 +186,7 @@ export const resolve = <Message>(
           { tag },
         )
       default:
-        if (tag.startsWith('On')) {
+        if (tag.startsWith('On') && tag !== 'OnCustomEvent') {
           const eventName = eventNameOfTag(tag)
           if (protectedEvents.has(eventName)) {
             fail('mixins:protected-event', `slot "${slot ?? '?'}" protects event "${eventName}"`, {

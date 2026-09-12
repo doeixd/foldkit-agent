@@ -100,6 +100,16 @@ describe('Behavior', () => {
     ).toBe('mixins:unknown-slot')
   })
 
+  it('rejects a hidden slot', () => {
+    expect(
+      codeOf(() =>
+        Behavior.forSlots(FieldSlots)<FieldInput, TestMessage>({
+          internals: Behavior.slot({}),
+        } as never),
+      ),
+    ).toBe('mixins:hidden-slot')
+  })
+
   it('rejects a capability the slot does not satisfy', () => {
     expect(
       codeOf(() =>

@@ -98,6 +98,12 @@ describe('Style', () => {
     )
   })
 
+  it('forSlots rejects a hidden slot at runtime', () => {
+    expect(() => Style.forSlots(FieldSlots)({ internals: Style.class('x') } as never)).toThrow(
+      /hidden slot/,
+    )
+  })
+
   it('attach styles the view and renders into Foldkit markup', () => {
     const FieldStyle = Style.forSlots(FieldSlots)({
       root: Style.compose(Style.class('field'), Style.inline({ display: 'grid' })),

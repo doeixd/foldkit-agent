@@ -13,7 +13,7 @@ import { DiagnosticError, type DiagnosticCode } from './diagnostics.js'
 import * as MetadataToken from './metadataToken.js'
 import * as Mixin from './mixin.js'
 import type { Mixin as MixinValue } from './mixin.js'
-import type { Any as AnySlot, AttributeName, EventName, SlotCapability } from './slot.js'
+import type { Any as AnySlot, AttributeName, EventName, HiddenOf, SlotCapability } from './slot.js'
 import * as SlotView from './slotView.js'
 
 export interface SlotRequirements {
@@ -32,7 +32,10 @@ export interface BehaviorSlotOptions<Input, Message> {
 }
 
 export type BehaviorSpec<Slots, Input, Message> = {
-  readonly [K in keyof Slots]?: BehaviorSlotOptions<Input, Message>
+  readonly [K in keyof Slots as HiddenOf<Slots[K]> extends true ? never : K]?: BehaviorSlotOptions<
+    Input,
+    Message
+  >
 }
 
 export interface NamedBehavior<Slots, Input, Message> {
@@ -115,6 +118,9 @@ export const forSlots =
       const target = source[name]
       if (target === undefined) {
         fail('mixins:unknown-slot', `Behavior targets unknown slot "${name}"`, name)
+      }
+      if (target.hidden) {
+        fail('mixins:hidden-slot', `Behavior targets hidden slot "${name}"`, name)
       }
       if (slotOptions?.requires !== undefined) {
         validateRequirements(name, target, slotOptions.requires)

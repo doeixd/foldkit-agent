@@ -24,6 +24,11 @@ Behavior.forSlots(FieldSlots)<FieldInput, TestMessage>({
 })
 
 Behavior.forSlots(FieldSlots)<FieldInput, TestMessage>({
+  // @ts-expect-error a hidden slot is internal, not publicly targetable.
+  internals: Behavior.slot({}),
+})
+
+Behavior.forSlots(FieldSlots)<FieldInput, TestMessage>({
   input: Behavior.slot({
     // @ts-expect-error unknown requires field.
     requires: { cap: 'x' },

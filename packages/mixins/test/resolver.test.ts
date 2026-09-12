@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { Attribute } from 'foldkit/html'
 import { Attr, Event, Resolver, Slot, type SlotAttributes } from '../src/index.js'
 import { DiagnosticError } from '../src/diagnostics.js'
 import { fakeChild, h, mount, type TestMessage } from './resolverFixture.js'
@@ -86,6 +87,16 @@ describe('Resolver.resolve', () => {
       [{ attributes: [h.Attribute('data-b', '2')] }],
     )
     expect(tags(out)).toEqual(['Attribute', 'Attribute'])
+  })
+
+  it('keys a custom event by its name instead of one native event', () => {
+    const custom = (name: string): Attribute<TestMessage> =>
+      ({ _tag: 'OnCustomEvent', name, f: () => ({ _tag: 'Clicked' }) }) as Attribute<TestMessage>
+    const out = Resolver.resolve([custom('a')], [{ attributes: [custom('b')] }])
+    expect(tags(out)).toEqual(['OnCustomEvent', 'OnCustomEvent'])
+    expect(codeOf(() => Resolver.resolve([custom('a')], [{ attributes: [custom('a')] }]))).toBe(
+      'mixins:attribute-conflict',
+    )
   })
 
   it('rejects a redundant raw attribute key', () => {

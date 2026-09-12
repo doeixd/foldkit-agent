@@ -8,6 +8,7 @@ import type { InputContribution, SlotContribution } from './contribution.js'
 import { DiagnosticError } from './diagnostics.js'
 import * as Mixin from './mixin.js'
 import type { Mixin as MixinValue } from './mixin.js'
+import type { HiddenOf } from './slot.js'
 import * as SlotView from './slotView.js'
 import * as Rules from './styleRules.js'
 import type { StyleRule } from './styleRules.js'
@@ -28,8 +29,9 @@ export interface StyleCondition {
   readonly piece: StyleValue
 }
 
+/** A hidden slot is internal: it is neither styleable nor behavior-targetable. */
 export type StylePieces<Slots> = {
-  readonly [K in keyof Slots]?: StyleValue
+  readonly [K in keyof Slots as HiddenOf<Slots[K]> extends true ? never : K]?: StyleValue
 }
 
 export interface NamedStyle<Slots> {
@@ -215,30 +217,30 @@ const compileStyle = (style: StyleValue): CompiledStyle => {
   }
 }
 
+/** A rule's class is static while a `whenInput` condition is not, so they cannot combine. */
+const assertRulesSupported = (style: StyleValue): void => {
+  if (!hasConditionalRules(style)) return
+  throw new DiagnosticError({
+    source: 'mixins',
+    code: 'style:conditional-rules-unsupported',
+    severity: 'error',
+    message: 'Style.pseudo/media may not appear inside Style.whenInput',
+  })
+}
+
 /**
- * A static style stays static data. A style with input conditions compiles to a
- * message-free `InputContribution`, so it still attaches to any view. Rules
- * inside a condition are rejected: the class is static while the condition is
- * not.
+ * A static style stays static data; a style with input conditions compiles to a
+ * message-free `InputContribution`, so it still attaches to any view.
  */
-export const toContribution = (style: StyleValue): SlotContribution<never> => {
-  if (hasConditionalRules(style)) {
-    throw new DiagnosticError({
-      source: 'mixins',
-      code: 'style:conditional-rules-unsupported',
-      severity: 'error',
-      message: 'Style.pseudo/media may not appear inside Style.whenInput',
-    })
-  }
-  const compiled = compileStyle(style)
+const contributionFrom = (style: StyleValue, compiled: CompiledStyle): SlotContribution<never> => {
   const globalCss = compiled.globalRules?.join('')
-  const base = {
+  const attributes = {
     classes: compiled.classes,
     style: compiled.style,
     ...(compiled.css === undefined ? {} : { css: compiled.css }),
     ...(globalCss === undefined ? {} : { globalCss }),
   }
-  if ((style.conditions ?? []).length === 0) return Object.freeze(base)
+  if ((style.conditions ?? []).length === 0) return Object.freeze(attributes)
   const contribution: InputContribution<never> = context => {
     const resolved = resolveStyle({ ...style, classes: compiled.classes }, context.input)
     return Object.freeze({
@@ -270,11 +272,21 @@ export const forSlots =
           slot: key,
         })
       }
+      if ((known[key] as { readonly hidden?: boolean } | undefined)?.hidden === true) {
+        throw new DiagnosticError({
+          source: 'mixins',
+          code: 'mixins:hidden-slot',
+          severity: 'error',
+          message: `Style targets hidden slot "${key}"`,
+          slot: key,
+        })
+      }
       if (piece !== undefined) {
-        contributions[key] = toContribution(piece)
         // Rule and global CSS are static even when the contribution is deferred,
-        // so gather them from the compiled piece, not from the contribution.
+        // so compile once, then build the contribution and gather the CSS.
+        assertRulesSupported(piece)
         const compiled = compileStyle(piece)
+        contributions[key] = contributionFrom(piece, compiled)
         if (compiled.ruleClass !== undefined && compiled.css !== undefined) {
           rules.push({ className: compiled.ruleClass, css: compiled.css })
           css += compiled.css
@@ -382,7 +394,6 @@ export const Style = {
   keyframes,
   global,
   empty,
-  toContribution,
   forSlots,
   attach,
   recipe,
