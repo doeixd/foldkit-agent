@@ -21,8 +21,8 @@ const initial = { todos: [], selectedTodoId: null }
 const TodoSync = make(App, 'TodoSync', {
   documentId: documentId('todos'),
   initial,
-  model: project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo],
+  shared: project({ todos: App.model.todos }),
+  durable: [Message.CreatedTodo],
   replay: shared => shared,
 })
 
@@ -37,9 +37,9 @@ const Other = defineMessageUnion({ Ping: {} })
 make(App, 'BadMessages', {
   documentId: documentId('todos'),
   initial,
-  model: project({ todos: App.model.todos }),
+  shared: project({ todos: App.model.todos }),
   // @ts-expect-error `Ping` is not a variant of App's Message union
-  messages: [Other.Ping],
+  durable: [Other.Ping],
   replay: shared => shared,
 })
 
@@ -47,7 +47,7 @@ make(App, 'BadInitial', {
   documentId: documentId('todos'),
   // @ts-expect-error `initial` must be the full app Model, including local fields
   initial: { todos: [] },
-  model: project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo],
+  shared: project({ todos: App.model.todos }),
+  durable: [Message.CreatedTodo],
   replay: shared => shared,
 })

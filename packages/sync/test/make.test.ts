@@ -24,8 +24,8 @@ const initial: Model = { todos: [], selectedTodoId: null }
 const TodoSync = make(App, 'TodoSync', {
   documentId: documentId('todos'),
   initial,
-  model: project({ todos: App.model.todos }),
-  messages: [Message.CreatedTodo, Message.RenamedTodo],
+  shared: project({ todos: App.model.todos }),
+  durable: [Message.CreatedTodo, Message.RenamedTodo],
   replay: (shared, message) =>
     message._tag === 'CreatedTodo'
       ? { todos: [...shared.todos, { id: message.id, title: message.title }] }

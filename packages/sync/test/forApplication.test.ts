@@ -70,4 +70,25 @@ describe('Sync.forApplication', () => {
     expect(refused._tag).toBe('Failure')
     if (refused._tag === 'Failure') expect(refused.failure._tag).toBe('InvalidOutboxError')
   })
+
+  it('refuses a durable subset from another application', () => {
+    const OtherModel = Schema.Struct({ todos: Schema.Array(Schema.String) })
+    const OtherMessage = defineMessageUnion({ Ping: {} })
+    const OtherApp = Surface.application({
+      Model: OtherModel,
+      Message: OtherMessage,
+      initial: { todos: [] },
+      update: (model: typeof OtherModel.Type) => ({ model }),
+    })
+    const OtherChanges = Surface.messages(OtherApp, [OtherMessage.Ping])
+
+    expect(() =>
+      forApplication(App, {
+        documentId: documentId('todos'),
+        shared: Todos,
+        // Structurally similar, but the owner token is a different application.
+        durable: OtherChanges as never,
+      }),
+    ).toThrow(/different application/)
+  })
 })

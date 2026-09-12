@@ -74,6 +74,7 @@ export interface Checkpoint<Shared> {
 }
 
 export interface Exchange<Shared> {
+  /** Server-committed operations as they arrived; validated against `Committed` on adoption. */
   readonly operations: ReadonlyArray<unknown>
   readonly rejected: ReadonlyArray<OpId>
   /** Sends from the request that are durably committed, so the replica can drop them. */

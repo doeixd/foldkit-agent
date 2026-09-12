@@ -247,13 +247,20 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
   `Sync.forApplication(App, { documentId, shared, durable })` derives the shared
   projection, the durable subset, the initial snapshot, and replay from a
   `Surface.application`, a `Surface.pick`/`Surface.compose` projection, and a
-  `Surface.messages` subset; `Sync.make(App, name, { documentId, initial, model,
-  messages, replay })` takes an explicit projection, constructors, and a custom
+  `Surface.messages` subset; `Sync.make(App, name, { documentId, initial, shared,
+  durable, replay })` takes an explicit projection, constructors, and a custom
   `replay`. Both compile to the low-level `defineSync` and return a read-only
   `surface`; `TodoSync.journalContract()` derives the durable operation/snapshot
   codecs, empty snapshot, and reducer. Additive — `defineSync` remains the
   protocol primitive. `Sync.project` now also carries the projection's dependency
   paths.
+- **Consistent config and subset ownership.** `Sync.make`'s config uses
+  `shared`/`durable`, matching `Sync.forApplication`, and `forApplication`
+  refuses a durable subset whose owner token belongs to a different application.
+- **Replay documented at the definition.** `SyncConfig.replay` states that a
+  durable Message's Commands are dropped during replay and optimistic projection
+  (only state changes apply) and that each replay starts from the initial Model,
+  so cost tracks the Model rather than the shared slice.
 - **Foreign acknowledgements.** A response that acknowledges an operation the
   replica never sent (for example one submitted while the exchange was in flight)
   is a `ForeignAcknowledgementError` and no longer deletes that pending operation.

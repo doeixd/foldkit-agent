@@ -37,10 +37,18 @@ export interface SyncConfig<
   readonly documentId: DocumentId
   /** The Model the projection reads its initial shared value from. */
   readonly initial: AppModel
-  readonly model: WritableProjection<AppModel, Fields>
+  /** The writable projection of the shared fields. */
+  readonly shared: WritableProjection<AppModel, Fields>
   /** The Message variants the replica durably records and replays. */
-  readonly messages: Ms
-  /** A pure reducer over the shared subset; only durable Messages reach it. */
+  readonly durable: Ms
+  /**
+   * A pure reducer over the shared subset; only durable Messages reach it. It
+   * runs during replay and optimistic projection, so a Message whose `update`
+   * would produce Commands contributes only its state change here. Each replay
+   * installs the shared value into `initial` before applying the Message, so cost
+   * is proportional to the Model rather than the shared slice; project narrowly
+   * or keep the Model small if an outbox can be long.
+   */
   readonly replay: (
     shared: Schema.Struct.Type<Fields>,
     message: MsgOf<Ms>,
@@ -90,15 +98,15 @@ const compile = <
   type SharedEncoded = Schema.Struct.Encoded<Fields>
 
   const durableTags = new Set(
-    config.messages.map(messageTag).filter((tag): tag is string => tag !== undefined),
+    config.durable.map(messageTag).filter((tag): tag is string => tag !== undefined),
   )
   // `AppScope` does not constrain its schemas' services; a Foldkit Message union
   // and a Struct are pure, so the low-level contract's `never` is satisfied.
   const sync = defineSync<AppMessage, Shared, unknown, SharedEncoded>({
     documentId: config.documentId,
     message: app.Message as unknown as Schema.Codec<AppMessage, unknown>,
-    shared: config.model.schema as unknown as Schema.Codec<Shared, SharedEncoded>,
-    empty: config.model.get(config.initial),
+    shared: config.shared.schema as unknown as Schema.Codec<Shared, SharedEncoded>,
+    empty: config.shared.get(config.initial),
     durable: message => {
       const tag = (message as { readonly _tag?: string })._tag
       return tag !== undefined && durableTags.has(tag)
@@ -108,17 +116,17 @@ const compile = <
   })
 
   const readOnly: Projection<AppModel, Shared> = {
-    Model: config.model.schema,
-    dependencies: config.model.dependencies,
+    Model: config.shared.schema,
+    dependencies: config.shared.dependencies,
     requirements: [],
-    read: config.model.get,
+    read: config.shared.get,
   }
   const surface = Surface.define(app, name, {
     model: () => readOnly,
-    messages: config.messages,
+    messages: config.durable,
   })
 
-  return { ...sync, surface, projection: config.model, messages: config.messages }
+  return { ...sync, surface, projection: config.shared, messages: config.durable }
 }
 
 /**
@@ -151,6 +159,7 @@ export interface ForApplicationConfig<
   /** Name for the generated `surface`; defaults to the document id. */
   readonly name?: string
   readonly shared: WritableProjection<AppModel, Fields>
+  /** The Message subset the replica durably records and replays. */
   readonly durable: MessageSubset<AppModel, any, Subset, Ms>
 }
 
@@ -182,11 +191,15 @@ export const forApplication = <
 > => {
   const { shared } = config
   const { initial, update } = app
+  // Two applications can have structurally identical Message unions, so the
+  // types cannot separate them; the owner token can.
+  if (config.durable.owner !== app.owner)
+    throw new Error('Sync.forApplication: the durable subset belongs to a different application')
   return compile(app, config.name ?? String(config.documentId), {
     documentId: config.documentId,
     initial,
-    model: shared,
-    messages: config.durable.constructors,
+    shared,
+    durable: config.durable.constructors,
     replay: (value, message) =>
       shared.get(
         update(
