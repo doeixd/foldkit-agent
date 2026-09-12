@@ -51,6 +51,11 @@ export interface Presence<Update> {
   readonly prune: Effect.Effect<void>
   /** Notified when the peer set changes. */
   readonly subscribe: (listener: () => void) => () => void
+  /**
+   * The live peers, re-emitted whenever the set changes. The `Stream` form of
+   * `subscribe`, for a consumer that composes with Effect.
+   */
+  readonly changes: Stream.Stream<ReadonlyArray<PresencePeer<Update>>>
   /** Stops consuming the channel; the enclosing scope also does this on exit. */
   readonly close: Effect.Effect<void>
 }
@@ -68,17 +73,20 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
   const ttl = Duration.toMillis(options.ttl)
   const peers = yield* Ref.make(new Map<string, PresencePeer<Update>>())
   const closed = yield* Ref.make(false)
+  const signals = yield* PubSub.sliding<void>(1)
   const listeners = new Set<() => void>()
   /** A subscriber must never fail an update. */
-  const notify = (): void => {
-    for (const listener of [...listeners]) {
-      try {
-        listener()
-      } catch {
-        // Deliberately swallowed.
+  const notify = (): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      for (const listener of [...listeners]) {
+        try {
+          listener()
+        } catch {
+          // Deliberately swallowed.
+        }
       }
-    }
-  }
+      yield* PubSub.publish(signals, undefined)
+    })
   const expired = (peer: PresencePeer<Update>, at: number): boolean => at - peer.updatedAt > ttl
 
   const put = (id: string, value: Update, at: number): Effect.Effect<void> =>
@@ -98,7 +106,7 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
   const receive = Effect.fn('Presence.receive')(function* (update: PresenceUpdate<Update>) {
     if (update.id === options.id) return
     if (update.value === null) {
-      if (yield* remove(update.id)) notify()
+      if (yield* remove(update.id)) yield* notify()
       return
     }
     let value: Update
@@ -109,7 +117,7 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
       return
     }
     yield* put(update.id, value, yield* Clock.currentTimeMillis)
-    notify()
+    yield* notify()
   })
 
   const channel = options.channel
@@ -124,14 +132,14 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
     if (yield* Ref.get(closed)) return
     yield* put(options.id, value, yield* Clock.currentTimeMillis)
     if (channel !== undefined) yield* channel.publish({ id: options.id, value })
-    notify()
+    yield* notify()
   })
 
   const leave = Effect.fn('Presence.leave')(function* () {
     if (yield* Ref.get(closed)) return
     yield* remove(options.id)
     if (channel !== undefined) yield* channel.publish({ id: options.id, value: null })
-    notify()
+    yield* notify()
   })()
 
   const peerList = Effect.fn('Presence.peers')(function* () {
@@ -154,7 +162,7 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
       }
       return [removed, next] as const
     })
-    if (changed) notify()
+    if (changed) yield* notify()
   })()
 
   const close = Effect.fn('Presence.close')(function* () {
@@ -162,6 +170,7 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
     yield* Ref.set(closed, true)
     if (consuming !== undefined) yield* Fiber.interrupt(consuming)
     yield* Effect.sync(() => listeners.clear())
+    yield* PubSub.shutdown(signals)
   })()
 
   return {
@@ -173,6 +182,7 @@ export const createPresence = Effect.fn('Presence.create')(function* <Update>(
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
+    changes: Stream.fromPubSub(signals).pipe(Stream.mapEffect(() => peerList)),
     close,
   }
 })

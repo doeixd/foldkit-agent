@@ -1,4 +1,4 @@
-import { Clock, Effect, Layer, PubSub, Schema, type Scope } from 'effect'
+import { Clock, Effect, Fiber, Layer, PubSub, Schema, Stream, type Scope } from 'effect'
 import { TestClock } from 'effect/testing'
 import { describe, expect, it } from 'vitest'
 import {
@@ -53,6 +53,27 @@ describe('presence', () => {
 
         yield* TestClock.adjust('1 millis')
         expect(yield* presence.peers).toEqual([])
+      }),
+    ))
+
+  it('changes emits the live peers when the set changes', () =>
+    run(
+      Effect.gen(function* () {
+        const channel = yield* loopbackPresenceChannel<Cursor>()
+        const a = yield* make({ id: 'a', ttl: '100 millis', channel })
+        const b = yield* make({ id: 'b', ttl: '100 millis', channel })
+
+        const collected = yield* b.changes.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkScoped,
+        )
+        yield* settle
+        yield* a.set({ cursor: 1 })
+        yield* settle
+
+        const emissions = [...(yield* Fiber.join(collected))]
+        expect(emissions[0]).toEqual([{ id: 'a', value: { cursor: 1 }, updatedAt: 0 }])
       }),
     ))
 

@@ -130,7 +130,8 @@ const shared = Effect.runSync(replica.shared)
   so a hostile peer cannot inject a value your `Update` type does not describe.
   Presence can travel over a socket — `socketPresenceChannel` on the client and
   `servePresence` fanning through a `createPresenceHub` on the server — or
-  in-process via `loopbackPresenceChannel`.
+  in-process via `loopbackPresenceChannel`. `presence.changes` is a `Stream` of
+  the live peers, re-emitted on every change, alongside the `subscribe` callback.
 - The transport seam (`Transport`): an Effect service with a loopback layer, a
   bridge to and from the promise client the replica speaks, and a WebSocket
   client layer. The socket reconnects on an exponential, jittered backoff and
