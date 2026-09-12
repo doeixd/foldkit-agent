@@ -175,7 +175,8 @@ export interface Sync<Message, Shared> {
 /** Structural match for `foldkit-durable`'s journal options; Sync stays independent. */
 export interface JournalContract<Operation, Shared> {
   readonly operation: {
-    readonly encode: (operation: Operation) => unknown
+    /** Operations are stored in their encoded form, so this is the identity. */
+    readonly encode: (operation: Operation) => Operation
     readonly decode: (input: unknown) => Operation
   }
   readonly snapshot: {

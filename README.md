@@ -104,7 +104,7 @@ runtime.
   Behavior, and the `@foldkit/ui` adapters.
 - [`foldkit-agent` design rationale](./packages/agent/DESIGN.md).
 - [Revision plan](./REVISION_PLAN.md) — the full design and phase status.
-- [Improvements](./docs/improvements.md) — suggestions for the project and design.
+- [All guides](./docs/README.md), including the [improvement suggestions](./docs/improvements.md).
 - Each package README documents its API; [`examples/`](./examples) has runnable
   traces, and `pnpm demo` runs them.
 
