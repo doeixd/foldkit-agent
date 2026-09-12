@@ -36,10 +36,18 @@ await Effect.runPromise(run)
 
 `makeJournal` is scoped: the SQLite connection is released when the scope
 closes. `file` accepts a literal or a `Config.Config<string>`, so the path can
-come from the environment. Failures are `Schema.TaggedError`s
+come from the environment. `operation` is a `Codec<Operation, Encoded>` and
+`append` takes the encoded side, so a transforming codec is checked at the call
+site; `snapshot` is a `Codec<Snapshot>`. Failures are `Schema.TaggedError`s
 (`JournalError`, `InvalidOperationError`, `OperationRejectedError`,
 `IdentityConflictError`, `InvalidCursorError`, `InvalidCompactionError`), so
 `Effect.catchTag` narrows them.
+
+`append` returns the committed operation's `opId` and `sequence`; `read` and
+`load` speak in branded `Sequence` and `Cursor` values, so a sequence cannot be
+passed where a cursor is expected. `appendAll` commits an ordered batch in one
+transaction, and `keys`, `reset`, `unfinished`, and `clearEffect` support
+maintenance and recovery.
 
 ## The journal as a service
 
@@ -56,34 +64,50 @@ const program = Effect.gen(function* () {
 }).pipe(Effect.provide(makeJournalLayer(options)))
 ```
 
+A parameterized service tag shares one runtime key, so an application that runs
+two journals must give each a distinct key:
+`makeJournalLayer(optionsB, 'my-app/journal-b')` and
+`JournalService<OperationB, SnapshotB, PrincipalB>('my-app/journal-b')`.
+
 ## What it owns
 
 - **Atomic, idempotent append.** A repeated `opId` is answered from the log; a
-  reuse with a different payload or actor is an `IdentityConflictError`. Once
-  compaction removes the payload, the append returns `AlreadyCommitted` (the
+  reuse with a different payload or actor is an `IdentityConflictError`. Encoded
+  payloads are canonicalized (object keys sorted) before they are stored and
+  hashed, so a retransmission with a different key order is the same operation.
+  Once compaction removes the payload, the append returns `AlreadyCommitted` (the
   identity, not the content) rather than fabricating a committed operation.
-- **A snapshot and cursor per key**, written together in one transaction.
+  `appendAll` commits an ordered batch in one transaction.
+- **A snapshot and cursor per key**, written together in one transaction, read as
+  branded `Cursor`/`Sequence` values.
 - **Compaction.** Payloads below a floor are dropped without changing the state
   a replay of the compacted prefix would produce; identity rows remain.
 - **A change stream.** `journal.subscribe` is a `Stream.Stream<string>` of the
-  keys a commit changed. A subscriber never fails or slows a commit.
+  keys a commit changed. It is a sliding channel: a subscriber never fails or
+  slows a commit, and a slow one drops the oldest wake-ups rather than growing
+  memory.
 - **A durable effect ledger.** `runEffect(key, run)` reuses recorded successes
-  and shares concurrent calls within one journal instance.
+  and shares concurrent calls within one journal instance. `unfinished` lists the
+  pending and failed records for recovery, and `clearEffect` removes one.
+- **Maintenance.** `keys` lists the documents, and `reset` drops a document's
+  snapshot and operations.
 - **Migrations.** The tables are created or upgraded by a transactional
   `user_version` migration, so an existing database is upgraded in place and an
   interrupted run is safe to repeat.
 - **Metrics.** `journalMetrics` counts appends, compactions, owner effect runs,
   and coalesced effect runs.
-- **Branded identities.** `DocumentId`, `OpId`, and `ActorId` are
-  `Schema.brand`s with `documentId` / `opId` / `actorId` decoders, so they cannot
-  be swapped.
+- **Branded identities.** `DocumentId`, `OpId`, `ActorId`, `Sequence`, and
+  `Cursor` are `Schema.brand`s with `documentId` / `opId` / `actorId` / `sequence`
+  / `cursor` decoders, so they cannot be swapped.
 
 ## Guarantees
 
 - Append is atomic.
 - A repeated `opId` is idempotent, including after compaction, where the payload
   is gone and the result is `AlreadyCommitted`; reuse with a different payload or
-  actor is an identity conflict, proven by a retained payload hash.
+  actor is an identity conflict, proven by a retained payload hash. Encoded
+  payloads are canonical, so the same data in a different key order is the same
+  operation, not a conflict.
 - Committed order is stable and gap-free.
 - The snapshot and cursor are written together.
 - Compaction drops committed payloads but never changes the state a replay of
@@ -153,9 +177,11 @@ find operations committed before settlement started:
    from `load` after compaction. Re-derive old intents with their original semantics.
 
 The application owns document enumeration, the recovery cursor or snapshot
-intents, and scheduling recovery on startup. A subscription is only a wake-up
-signal; it cannot recover missed commits by itself. There is no atomic
-append-and-enqueue API or built-in recovery worker today.
+intents, and scheduling recovery on startup. `journal.unfinished()` lists every
+pending and failed record, `journal.keys()` enumerates the documents, and
+`journal.clearEffect(key)` drops a record once it is resolved. A subscription is
+only a wake-up signal; it cannot recover missed commits by itself. There is no
+atomic append-and-enqueue API or built-in recovery worker today.
 
 ### Execution ownership
 
@@ -203,6 +229,9 @@ a rotated journal silently turn an old retry into a new commit.
   needs Node 22 (`node:sqlite`). The storage contract is `SqlClient`, so a
   Postgres adapter is a driver swap.
 - The SQL module is under `unstable` in the pinned Effect release candidate.
+- `reduce`, `validate`, and `authorize` are synchronous and run inside the append
+  transaction, holding the SQLite write lock; they must be pure and fast and
+  cannot call a service. An encoded operation must be JSON-compatible.
 - The `[key, op_id]` and `[key, sequence]` uniqueness is enforced by the table
-  schema; a server-authoritative deployment is still a single writer per
-  database file.
+  schema; a server-authoritative deployment is still a single writer per database
+  file. Use one `Journal` handle per file.

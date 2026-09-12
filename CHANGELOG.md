@@ -202,6 +202,22 @@ presence APIs), `foldkit-durable` (`append`'s result), and `foldkit-remote`
 - **Reads below the floor fail closed.** `read(key, after)` fails with
   `CompactedCursorError` when `after < compact_before`, rather than returning a
   tail that silently starts late.
+- **Encoded-typed and branded surface.** `Codec<Value, Encoded>` carries the wire
+  side, and `append` takes it instead of `unknown`. `Committed` now includes the
+  journal's own `opId`, and `sequence`/`cursor` are branded `Sequence`/`Cursor`,
+  so `read` and `compact` cannot be swapped.
+- **Batch, maintenance, and recovery APIs.** `appendAll` commits an ordered batch
+  in one transaction. `keys`, `reset`, `unfinished`, and `clearEffect` give
+  recovery and maintenance an API instead of re-deriving intents from
+  application state.
+- **Canonical idempotency.** Encoded payloads are canonicalized (object keys
+  sorted) before they are stored and hashed, so a retry with a different key
+  order is the same operation rather than an `IdentityConflictError`.
+- **Bounded change stream.** `subscribe` is a sliding `PubSub`: a slow subscriber
+  drops the oldest wake-ups instead of growing memory without bound.
+- **Multiple journals.** `makeJournalLayer` and `JournalService` take an optional
+  service key, so an application with more than one journal type does not
+  collide on the default tag.
 
 ### `foldkit-sync`
 
